@@ -34,10 +34,12 @@ A [static profile survey](docs/function-profile-survey.md) measures the actual v
 
 An opt-in [pointer authentication model](docs/pointer-authentication.md) implements QARMA5 signing, authentication, and authenticated returns for a specified 39-bit address configuration. A separate [PAC-aware dispatcher](docs/pauth-stack-dispatch.md) retains keys across yields, tracks signed frame records, and validates approved returns through policy 4/schema 5. Native synthetic tests pass on MSVC and GCC. A separate static survey accepts 1,686 PAC framed candidates; game code remains unexecuted.
 
+[RCpc ordered loads](docs/ordered-loads.md) support no-offset LDAPR/B/H through a backend that serializes scalar, pair, and acquire transfers. Value/fault comparisons, raw PAC frames, and native inter-thread publication tests pass on MSVC/GCC. The supported alignment and shared-memory ownership rules are explicit; function profiles retain their existing memory permissions.
+
 The game is not playable yet. Process startup, broader instruction semantics, operating-system services, and graphics remain to be implemented.
 
 ## Development direction
 
-The next milestones are ordered/atomic memory semantics, wider memory/call support, further frame layouts and loop verification, process startup and operating-system services, and graphics. See [docs/architecture.md](docs/architecture.md).
+The next milestones are verified memory reads beyond the current frame, remaining ordered/atomic semantics, wider call support, further frame layouts and loop verification, process startup and operating-system services, and graphics. See [docs/architecture.md](docs/architecture.md).
 
 Game containers, keys, extracted files, generated game code, saves, shader caches, and compiled executables stay outside version control. Build output belongs under `build/`; future generated output belongs under `generated/`.

@@ -16,12 +16,17 @@ enum OotMemoryReason {
     OOT_MEMORY_UNMAPPED = 1,
     OOT_MEMORY_PERMISSION = 2,
     OOT_MEMORY_ADDRESS_WRAP = 3,
-    OOT_MEMORY_CONFIGURATION = 4
+    OOT_MEMORY_CONFIGURATION = 4,
+    OOT_MEMORY_ALIGNMENT = 5
 };
 
 /* Caller-owned, sorted, disjoint guest regions backed by live native buffers.
  * The table and buffers must outlive the memory object. Table metadata is immutable.
- * Permissions apply to data access only; instruction dispatch is separate. */
+ * Permissions apply to data access only; instruction dispatch is separate.
+ * A view/fault record has one owner thread. Concurrent views may share backing
+ * only through APIs in the SAME linked backend instance. Region tables and
+ * buffer lifetimes must be immutable while in use; no concurrent raw byte access.
+ * Backend transfers are serialized, including scalar/pair loads and stores. */
 typedef struct OotGuestRegion {
     uint64_t base;
     uint64_t size;
@@ -51,6 +56,14 @@ OOT_MEMORY_API void oot_memory_clear_fault(OotGuestMemory *memory);
  * This deterministic fault policy is not a model of partial hardware stores. */
 OOT_MEMORY_API int oot_memory_load(OotGuestMemory *memory, uint64_t address, unsigned size, uint64_t *value);
 OOT_MEMORY_API int oot_memory_store(OotGuestMemory *memory, uint64_t address, unsigned size, uint64_t value);
+/* No-offset LDAPR/B/H subset: aligned Normal-memory accesses, no tagging/MMIO.
+ * Whole access plus ordering is serialized with ALL other backend transfers.
+ * This conservative total order is stronger than RCpc; it does not model every
+ * allowed weak-memory outcome. Natural alignment is a supported-domain rule;
+ * SP bases additionally require 16-byte alignment. Rejection preserves output.
+ * No guest SCTLR/alignment-control registers or guest scheduling ABI are implied. */
+OOT_MEMORY_API int oot_memory_load_rcpc(OotGuestMemory *memory, uint64_t address, unsigned size,
+                                      unsigned sp_base, uint64_t *value);
 /* Paired 4/8-byte elements use whole-pair preflight; outputs must be distinct.
  * No element, register output, or writeback is committed on a rejected pair. */
 OOT_MEMORY_API int oot_memory_load_pair(OotGuestMemory *memory, uint64_t address, unsigned element_size,

@@ -17,8 +17,8 @@ FORMS = ("move_wide", "addsub_immediate", "addsub_shifted", "logical_shifted",
          "pc_relative", "branch_immediate", "branch_condition", "compare_branch",
          "test_branch", "branch_register", "nop", "loadstore_unsigned", "loadstore_immediate",
          "loadstore_register", "load_literal", "loadstore_pair", "logical_immediate", "bitfield",
-         "conditional_select", "addsub_extended", "variable_shift", "multiply_add", "divide", "addsub_carry")
-MEMORY_FORMS = frozenset(("loadstore_unsigned", "loadstore_immediate", "loadstore_register", "load_literal", "loadstore_pair"))
+         "conditional_select", "addsub_extended", "variable_shift", "multiply_add", "divide", "addsub_carry", "load_acquire_rcpc")
+MEMORY_FORMS = frozenset(("loadstore_unsigned", "loadstore_immediate", "loadstore_register", "load_literal", "loadstore_pair", "load_acquire_rcpc"))
 
 
 def signed(value, bits):
@@ -89,6 +89,10 @@ def decode_instruction(word, pc):
 
     if word == 0xD503201F:
         return ins("nop")
+    if word & 0x3FFFFC00 == 0x38BFC000:
+        size = word >> 30
+        return ins("load_acquire_rcpc", rd=rd, rn=rn, access_size=1 << size,
+                   load=True, width=64 if size == 3 else 32)
     if word & 0x1F800000 in (0x12000000, 0x13000000):
         logical = word & 0x1F800000 == 0x12000000
         n, immr, imms, opc = (word >> 22) & 1, (word >> 16) & 63, (word >> 10) & 63, (word >> 29) & 3
@@ -223,6 +227,11 @@ def constant(value):
 
 def memory_body(ins):
     lines = []
+    if ins.form == "load_acquire_rcpc":
+        return [f"uint64_t address = oot_arm64_read(s, {ins.rn}, 64, 1);", "uint64_t value = 0;",
+                f"if (!oot_memory_load_rcpc(memory, address, {ins.access_size}, {int(ins.rn == 31)}, &value))",
+                "    { *executed = count; return OOT_LIFT_MEMORY_FAULT; }",
+                f"oot_arm64_write(s, {ins.rd}, {ins.width}, 0, value);"]
     if ins.form == "load_literal":
         lines.append(f"uint64_t address = {constant(ins.target)};")
     else:

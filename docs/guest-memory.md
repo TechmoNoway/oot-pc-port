@@ -1,6 +1,6 @@
 # Checked guest memory
 
-`src/guest_memory.c` provides little-endian data access through explicit guest regions. It never casts a guest address to a host pointer. Scalar ARM64 translations call this interface; offline game images are not yet connected to it.
+`src/guest_memory.c` provides little-endian data access through explicit guest regions. It never casts a guest address to a host pointer. Scalar ARM64 translations call this interface; the native image bridge supplies verified linked backing without executing game code.
 
 ## Region contract
 
@@ -14,7 +14,7 @@ Read and write permissions are independent. A region with zero permissions is a 
 
 ## Fault and retirement contract
 
-The last transfer fault records its starting address, first rejected byte, byte width, access kind, and reason: unmapped, permission, address wrap, or invalid configuration. Successful transfers clear the previous fault. The generated entry point also clears stale fault state before checking its instruction budget.
+The last transfer fault records its starting address, first rejected byte, byte width, access kind, and reason: unmapped, permission, address wrap, invalid configuration, or the ordered-load subset's alignment restriction. Successful transfers clear the previous fault. The generated entry point also clears stale fault state before checking its instruction budget.
 
 Effective address arithmetic uses modulo-64-bit addition, as required for the implemented address forms. The resulting transfer may not cross from `UINT64_MAX` to address zero. Range validation uses subtraction and checks the full byte range before indexing a native buffer.
 
@@ -24,9 +24,11 @@ Whole-transfer preflight is an explicit project policy. It does not reproduce po
 
 ## Supported execution model
 
-This is a single-threaded, little-endian normal-memory model with unaligned data access enabled. MMU translation, address tagging/TBI, SP alignment traps, device memory/MMIO, watchpoints, ordering, atomic/exclusive behavior, and concurrent guest execution are outside this milestone. Instruction-fetch permissions and self-modifying code are not modeled by this data interface; generated instruction dispatch is separate. A dispatcher exit is not a memory fault or a verified guest function return.
+This is a little-endian Normal-memory model. Ordinary scalar/pair transfers support unaligned addresses. A separate [RCpc ordered-load subset](ordered-loads.md) requires natural alignment and aligned SP bases. All backend transfers are serialized through one Windows SRW lock per linked backend instance, including ordinary stores. Concurrent views may share backing only under that document's ownership rules; each view/fault record has one owner thread. This conservative total order does not reproduce every Arm weak-memory outcome. Existing dispatcher/runtime-image APIs remain single-threaded.
 
-Scalar translation covers byte/halfword/word/doubleword LDR/STR and signed byte/halfword/word loads, with unsigned scaled immediates, signed unscaled immediates, pre/post-index writeback, and UXTW/LSL/SXTW/SXTX register offsets. LDR/LDRSW literal forms use the same checked interface. Paired translation covers LDP/STP W/X and LDPSW with signed offsets and pre/post-index modes. Register 31 means SP for address bases and ZR for transferred values/index registers. Constrained-unpredictable base/transfer-register overlap with writeback and identical pair-load destinations are rejected. SIMD, non-temporal/tagged pairs, unprivileged, prefetch, pointer-authenticated, ordered, and exclusive memory forms remain unsupported.
+MMU translation, address tagging/TBI, architectural alignment-control registers, device memory/MMIO, watchpoints, atomic read-modify-write/exclusives, and guest scheduling remain outside the model. Instruction-fetch permissions and self-modifying code are not modeled by this data interface; generated instruction dispatch is separate. A dispatcher exit is not a memory fault or a verified guest function return.
+
+Scalar translation covers byte/halfword/word/doubleword LDR/STR and signed byte/halfword/word loads, with unsigned scaled immediates, signed unscaled immediates, pre/post-index writeback, and UXTW/LSL/SXTW/SXTX register offsets. LDR/LDRSW literal forms use the same checked interface. Paired translation covers LDP/STP W/X and LDPSW with signed offsets and pre/post-index modes. No-offset LDAPR/B/H uses the distinct ordered helper. Register 31 means SP for address bases and ZR for transferred values/index registers. Constrained-unpredictable base/transfer-register overlap with writeback and identical pair-load destinations are rejected. SIMD, non-temporal/tagged pairs, unprivileged, prefetch, pointer-authenticated memory, other ordered forms, and exclusive memory forms remain unsupported.
 
 The [native image bridge](runtime-images.md) can now own these regions and their backing buffers after a verified offline link. Mapping linked images does not execute them or establish a process startup ABI.
 

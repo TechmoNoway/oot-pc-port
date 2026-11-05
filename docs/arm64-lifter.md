@@ -25,10 +25,13 @@ This milestone translates bounded raw ARM64 instruction ranges to C17. Synthetic
 | Memory addressing | Unsigned scaled immediate; signed unscaled (LDUR/STUR variants); pre/post-index; UXTW/LSL/SXTW/SXTX register offset |
 | Literal memory | PC-relative LDR W/X and LDRSW |
 | Paired memory | LDP/STP W/X and LDPSW X, with signed offset and pre/post-index modes |
+| RCpc acquire memory | Exact no-offset LDAPRB, LDAPRH, LDAPR W/X; aligned Normal-memory subset through a serialized backend |
 
 Aliases such as CMP, CMN, TST, and register MOV inherit their underlying encoding semantics. W-register writes zero the upper X bits. Flag-setting arithmetic computes N/Z/C/V with unsigned operations; logical flag writes clear C/V. Shifts avoid signed C overflow, implementation-defined signed right shifts, and shifts by the operand width. Reserved encodings and unsupported forms fail before source emission.
 
-Conditional compare, EXTR, bit-reversal/counting forms, long/high multiply, non-temporal/tagged pairs, unprivileged transfers, prefetch, system registers, SVC, pointer authentication, atomics/exclusives, SIMD/FP, and setjmp/longjmp services are not implemented. Constrained-unpredictable base/transfer overlap with writeback and identical pair-load destinations are rejected. Repeated pair-store sources are allowed. Recognizing a BR/BLR encoding does not discover its possible destinations or supply a callable native target.
+Conditional compare, EXTR, bit-reversal/counting forms, long/high multiply, non-temporal/tagged pairs, unprivileged transfers, prefetch, other ordered memory forms, system registers, SVC, pointer authentication, atomics/exclusives, SIMD/FP, and setjmp/longjmp services are not implemented. Constrained-unpredictable base/transfer overlap with writeback and identical pair-load destinations are rejected. Repeated pair-store sources are allowed. Recognizing a BR/BLR encoding does not discover its possible destinations or supply a callable native target.
+
+The [RCpc ordered-load model](ordered-loads.md) specifies alignment, shared-backing ownership, the conservative ordering contract, and separate value/fault/concurrency validation. It does not broaden existing function-verifier memory policies.
 
 These limits describe the ordinary lifter/registry ABI. A separate opt-in [pointer authentication model](pointer-authentication.md) implements six exact PAC/AUT/authenticated-return encodings with an extra context argument and a restricted address configuration. It cannot be registered as an ordinary lifted callback; existing profile acceptance and coverage counts are unchanged.
 

@@ -88,7 +88,13 @@ Default profile acceptance remains 40,038 register-only leaf candidates and zero
 
 PAC discovery exposes 39,893 first unsupported ordered/atomic frontiers, including 34,202 LDAPRB frontiers. This larger count reflects traversal beyond earlier PAC blockers. Six first unsupported PAC-family encodings remain outside the implemented subset. Other first unsupported families include load/store (17,981), integer (14,174), SIMD/FP (5,731), other control flow (1,219), system (1,218), and supervisor calls (64). First-failure counts are neither total instruction frequencies nor whole-game coverage.
 
-Both surveys are static: no generated C, native callback registration, or game execution. Private reports remain under ignored `build/function-profiles/`. Ordered loads and their memory/threading contract are the next priority.
+Both surveys are static: no generated C, native callback registration, or game execution. Private reports remain under ignored `build/function-profiles/`.
+
+## After the RCpc load milestone
+
+The [aligned RCpc load model](ordered-loads.md) now implements no-offset LDAPR/B/H with a conservative serialized backend. Fresh surveys retain all source and linked-text hashes and the 284,396 metadata-entry denominator. Default discovery reaches 58,663 bounded regions. PAC discovery reaches **127,551**, compared with 115,164 before RCpc; 156,845 candidates remain discovery-blocked. No LDAPR/B/H first-unsupported frontier remains. The remaining PAC first unsupported categories are load/store (18,058), integer (16,020), SIMD/FP (5,759), ordered/atomic (5,144), system (1,248), other control flow (1,224), supervisor calls (64), and pointer authentication (6).
+
+Acceptance remains 40,038 leaf candidates and 1,686 PAC framed candidates. Existing verifier profiles still reject the new memory form: raw semantic support does not broaden their permitted address effects. Discovery success also does not prove runtime alignment or valid pointer values. The next integration step is a separately specified verified-read policy for addresses beyond current frame-local storage. No game callbacks were generated or run.
 
 ## Verification
 

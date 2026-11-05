@@ -4,7 +4,7 @@ from ctypes import POINTER, byref, c_int, c_size_t, c_uint8, c_uint64, cast
 import json
 import random
 
-from arm64_lifter import U64
+from arm64_lifter import U64, decode_block
 from input_formats import InputError, require
 from lifter_validation_types import BASE, Memory, MemoryTrial, Program, Region, RegionSpec, State
 
@@ -216,8 +216,12 @@ def validate_memory_program(library, program):
     pcs = set(range(program.base, program.base + len(program.data), 4))
     code_start = program.base & ~4095
     code_size = ((program.base + len(program.data) - code_start + 4095) // 4096) * 4096
+    rcpc = any(i.form == "load_acquire_rcpc" for i in decode_block(program.data,program.base))
     for case_index, trial in enumerate(program.trials):
         machine = Uc(UC_ARCH_ARM64, UC_MODE_ARM)
+        if rcpc:
+            machine.ctl_set_cpu_model(registers.UC_CPU_ARM64_MAX)
+            require((machine.cpr_read(3,0,0,6,1) >> 20) & 15 >= 1, "reference CPU lacks FEAT_LRCPC")
         machine.mem_map(code_start, code_size)
         machine.mem_write(program.base, program.data)
         for spec in trial.regions:
@@ -274,6 +278,8 @@ def validate_memory_program(library, program):
         memory_matches = all(bytes(b) == bytes(machine.mem_read(s.base, len(s.data)))
                              for s, b in zip(trial.regions, buffers))
         actual_fault = memory.fault.values() if memory.fault.reason else None
+        if trial.expected_x is not None:
+            require(all(state.x[r]==v for r,v in trial.expected_x.items()), "independent ordered-load value mismatch")
         if (state.values() != expected or count.value != expected_count or status != expected_status or
                 not memory_matches or actual_fault != trial.expected_fault):
             raise AssertionError(json.dumps({"program": program.name, "case": case_index,
