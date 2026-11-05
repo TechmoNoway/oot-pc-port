@@ -33,7 +33,9 @@ The [hash-bound registry](bound-dispatch.md) now pins compiled symbols to the in
 
 A separate [local-stack dispatcher](stack-dispatch.md) supports fixed 16-256-byte frames, checked local scalar/pair memory effects, and direct framed-to-framed calls in bounded acyclic graphs. It uses explicit activations, one instruction budget, staged store commits, and checks all owned ancestor/current frame bytes and active code on resume. Synthetic three-level calls, individual instruction prefixes, and a full 16-frame stack boundary match independent reference execution.
 
-The next implementation milestones are framed-function control flow, broader saved-register layouts, and wider memory/call support. Process startup still needs a guest ABI, TLS, module initialization, scheduling, and service dispatch. Remaining integer/system forms, SIMD/FP, atomics/exclusives, nonlocal returns, and indirect-target discovery remain separate requirements. Game code must remain unexecuted until complete function coverage and required runtime boundaries are established.
+A separate [framed CFG policy](stack-cfg.md) now adds acyclic conditional control flow and explicit scalar/pair X19-X28 saves with matching restores. The dispatcher validates CFG edges, per-phase writable masks, save-slot isolation, and weighted longest paths through nested calls. Schema 3 selects this policy; earlier profiles retain their rules.
+
+The next implementation milestones are broader frame/prologue layouts, loop verification, and wider memory/call support. Process startup still needs a guest ABI, TLS, module initialization, scheduling, and service dispatch. Remaining integer/system forms, SIMD/FP, atomics/exclusives, nonlocal returns, and indirect-target discovery remain separate requirements. Game code must remain unexecuted until complete function coverage and required runtime boundaries are established.
 
 ## Repository boundaries
 

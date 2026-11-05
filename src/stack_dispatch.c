@@ -5,6 +5,8 @@
 typedef struct OwnedFunction {
     OotStackFunction info;
     OotStackStep steps[OOT_STACK_MAX_WORDS];
+    OotStackCfgStep flow[OOT_STACK_MAX_WORDS];
+    uint32_t saved_mask, locals_begin;
 } OwnedFunction;
 typedef struct Activation {
     size_t function;
@@ -68,10 +70,72 @@ static int transfer_size(unsigned size)
     return size == 1 || size == 2 || size == 4 || size == 8 || size == 16;
 }
 
-OotStackDispatcher *oot_stack_create(OotRuntimeImage *image,
+static int validate_cfg_layout(OwnedFunction *owned)
+{
+    const OotStackFunction *f = &owned->info;
+    size_t saves = 0, i, body, epilogue, head = 0, tail = 1;
+    uint16_t pending[OOT_STACK_MAX_WORDS] = {0};
+    uint8_t visited[OOT_STACK_MAX_WORDS] = {1};
+    uint32_t mask = 0, offset = 16, restored = 0;
+    while (2 + saves < f->instruction_count - 2 && f->steps[2 + saves].kind == OOT_STACK_SAVE) {
+        const OotStackStep *s = &f->steps[2 + saves];
+        const OotStackCfgStep *flow = &owned->flow[2 + saves];
+        uint32_t bits;
+        if (flow->saved_a < 19 || flow->saved_a > 28 || s->offset != offset || (s->size != 8 && s->size != 16)) return 0;
+        bits = UINT32_C(1) << flow->saved_a;
+        if (s->size == 16) {
+            if (flow->saved_b < 19 || flow->saved_b > 28 || flow->saved_a == flow->saved_b) return 0;
+            bits |= UINT32_C(1) << flow->saved_b;
+        } else if (flow->saved_b != UINT16_MAX) return 0;
+        if (mask & bits) return 0;
+        mask |= bits; offset += s->size; ++saves;
+    }
+    body = 2 + saves; epilogue = f->instruction_count - 2 - saves;
+    if (body > epilogue || offset > f->frame_size || owned->locals_begin != offset || owned->saved_mask != mask) return 0;
+    for (i = 0; i < f->instruction_count; ++i) {
+        const OotStackStep *s = &f->steps[i];
+        const OotStackCfgStep *flow = &owned->flow[i];
+        uint32_t writable = 0;
+        if (i >= body && i < epilogue) {
+            if (s->kind == OOT_STACK_SAVE || s->kind == OOT_STACK_RESTORE) return 0;
+            writable = mask;
+        } else if (i >= epilogue && i < f->instruction_count - 2) {
+            size_t source = 2 + f->instruction_count - 3 - i;
+            const OotStackStep *save = &f->steps[source];
+            const OotStackCfgStep *save_flow = &owned->flow[source];
+            if (s->kind != OOT_STACK_RESTORE || s->offset != save->offset || s->size != save->size ||
+                flow->saved_a != save_flow->saved_a || flow->saved_b != save_flow->saved_b) return 0;
+            restored |= UINT32_C(1) << flow->saved_a;
+            if (flow->saved_b != UINT16_MAX) restored |= UINT32_C(1) << flow->saved_b;
+            writable = mask & ~restored;
+        }
+        if (s->kind != OOT_STACK_SAVE && s->kind != OOT_STACK_RESTORE &&
+            (flow->saved_a != UINT16_MAX || flow->saved_b != UINT16_MAX)) return 0;
+        if (flow->writable_mask != writable || flow->max_steps == 0 || flow->max_steps > OOT_STACK_MAX_STEPS) return 0;
+        if (s->kind == OOT_STACK_RETURN) {
+            if (flow->next_a != UINT16_MAX || flow->next_b != UINT16_MAX) return 0;
+        } else if (flow->next_a >= f->instruction_count || flow->next_b >= f->instruction_count) return 0;
+        else if (s->kind == OOT_STACK_BRANCH) {
+            if (i < body || i >= epilogue || flow->next_a < body || flow->next_a > epilogue ||
+                flow->next_b < body || flow->next_b > epilogue) return 0;
+        } else if (flow->next_a != i + 1 || flow->next_b != i + 1) return 0;
+    }
+    while (head < tail) {
+        const OotStackCfgStep *flow = &owned->flow[pending[head++]];
+        unsigned targets[2] = {flow->next_a, flow->next_b}, which;
+        for (which = 0; which < 2; ++which) {
+            unsigned target = targets[which];
+            if (target != UINT16_MAX && !visited[target]) { visited[target] = 1; pending[tail++] = (uint16_t)target; }
+        }
+    }
+    return tail == f->instruction_count;
+}
+
+static OotStackDispatcher *create_registry(OotRuntimeImage *image,
     const OotStackFunction *functions, size_t count, uint64_t root,
     const OotLeafFunction *leaves, size_t leaf_count, const OotCodeHash *hashes,
-    const uint8_t body_hash[32], const uint64_t *returns, size_t return_count, uint32_t *error)
+    const uint8_t body_hash[32], const uint64_t *returns, size_t return_count, uint32_t *error,
+    const OotStackCfgFunction *cfg)
 {
     OotStackDispatcher *d;
     uint64_t sites[256 + OOT_STACK_MAX_FUNCTIONS * OOT_STACK_MAX_WORDS];
@@ -90,24 +154,35 @@ OotStackDispatcher *oot_stack_create(OotRuntimeImage *image,
         const OotStackFunction *f = &functions[i];
         if (f->entry % 4 || f->instruction_count < 4 || f->instruction_count > OOT_STACK_MAX_WORDS ||
             f->entry > UINT64_MAX - (uint64_t)f->instruction_count * 4 || f->run == NULL || f->steps == NULL ||
-            f->abi_version != OOT_LIFT_ABI_VERSION || f->policy_version != OOT_STACK_POLICY_VERSION ||
+            f->abi_version != OOT_LIFT_ABI_VERSION || f->policy_version != (cfg != NULL ? OOT_STACK_CFG_POLICY_VERSION : OOT_STACK_POLICY_VERSION) ||
             f->frame_size < 16 || f->frame_size > OOT_STACK_MAX_FRAME || f->frame_size % 16 ||
             (i && f->entry < functions[i - 1].entry + (uint64_t)functions[i - 1].instruction_count * 4)) goto failure;
         d->functions[i].info = *f;
         memcpy(d->functions[i].steps, f->steps, f->instruction_count * sizeof(*f->steps));
         d->functions[i].info.steps = d->functions[i].steps;
+        d->functions[i].locals_begin = 16;
+        if (cfg != NULL) {
+            if (cfg[i].flow == NULL) goto failure;
+            memcpy(d->functions[i].flow, cfg[i].flow, f->instruction_count * sizeof(*cfg[i].flow));
+            d->functions[i].saved_mask = cfg[i].saved_mask;
+            d->functions[i].locals_begin = cfg[i].locals_begin;
+            if (!validate_cfg_layout(&d->functions[i])) goto failure;
+        }
         for (j = 0; j < f->instruction_count; ++j) {
             const OotStackStep *s = &f->steps[j];
             unsigned expected = j == 0 ? OOT_STACK_OPEN : j == 1 ? OOT_STACK_FP :
                 j == f->instruction_count - 2 ? OOT_STACK_CLOSE : j == f->instruction_count - 1 ? OOT_STACK_RETURN : s->kind;
             if (s->reserved || s->kind != expected) goto failure;
             if (j == 0) { if (s->offset || s->size != 16 || s->callee) goto failure; }
-            else if (s->kind == OOT_STACK_LOAD || s->kind == OOT_STACK_STORE) {
-                if (!transfer_size(s->size) || s->offset < 16 || s->offset > f->frame_size ||
+            else if (s->kind == OOT_STACK_LOAD || s->kind == OOT_STACK_STORE ||
+                (cfg != NULL && (s->kind == OOT_STACK_SAVE || s->kind == OOT_STACK_RESTORE))) {
+                unsigned minimum = s->kind == OOT_STACK_SAVE || s->kind == OOT_STACK_RESTORE ? 16 : d->functions[i].locals_begin;
+                if (!transfer_size(s->size) || s->offset < minimum || s->offset > f->frame_size ||
                     s->size > f->frame_size - s->offset || s->callee) goto failure;
             } else {
                 if (s->offset || s->size || (s->kind != OOT_STACK_CALL && s->callee)) goto failure;
-                if (j > 1 && j < f->instruction_count - 2 && s->kind != OOT_STACK_NORMAL && s->kind != OOT_STACK_CALL) goto failure;
+                if (j > 1 && j < f->instruction_count - 2 && s->kind != OOT_STACK_NORMAL && s->kind != OOT_STACK_CALL &&
+                    !(cfg != NULL && s->kind == OOT_STACK_BRANCH)) goto failure;
             }
             if (s->kind == OOT_STACK_CALL) sites[nsites++] = f->entry + (j + 1) * 4;
         }
@@ -151,6 +226,26 @@ OotStackDispatcher *oot_stack_create(OotRuntimeImage *image,
             }
         }
         if (ready) {
+            if (cfg != NULL) {
+                for (j = 0; j < functions[i].instruction_count; ++j) {
+                    const OotStackCfgStep *flow = &d->functions[i].flow[j];
+                    const OotStackStep *step = &functions[i].steps[j];
+                    uint64_t weight = 1, longest = 0;
+                    if (step->kind == OOT_STACK_CALL) {
+                        k = find_function(d, step->callee);
+                        if (k != count) weight += bounds[k];
+                        else {
+                            for (k = 0; k < leaf_count && leaves[k].entry != step->callee; ++k) { }
+                            weight += leaves[k].max_steps;
+                        }
+                    }
+                    if (flow->next_a != UINT16_MAX) longest = d->functions[i].flow[flow->next_a].max_steps;
+                    if (flow->next_b != UINT16_MAX && longest < d->functions[i].flow[flow->next_b].max_steps)
+                        longest = d->functions[i].flow[flow->next_b].max_steps;
+                    if (weight + longest != flow->max_steps) goto failure;
+                }
+                bound = d->functions[i].flow[0].max_steps;
+            }
             if (bound > OOT_STACK_MAX_STEPS || depth > OOT_STACK_MAX_DEPTH ||
                 bound != functions[i].max_steps || depth != functions[i].max_depth) goto failure;
             bounds[i] = (uint32_t)bound; depths[i] = depth;
@@ -178,6 +273,27 @@ OotStackDispatcher *oot_stack_create(OotRuntimeImage *image,
 failure:
     (void)oot_stack_destroy(d);
     return NULL;
+}
+
+OotStackDispatcher *oot_stack_create(OotRuntimeImage *image,
+    const OotStackFunction *functions, size_t count, uint64_t root,
+    const OotLeafFunction *leaves, size_t leaf_count, const OotCodeHash *hashes,
+    const uint8_t body_hash[32], const uint64_t *returns, size_t return_count, uint32_t *error)
+{
+    return create_registry(image, functions, count, root, leaves, leaf_count, hashes, body_hash, returns, return_count, error, NULL);
+}
+
+OotStackDispatcher *oot_stack_create_cfg(OotRuntimeImage *image,
+    const OotStackCfgFunction *functions, size_t count, uint64_t root,
+    const OotLeafFunction *leaves, size_t leaf_count, const OotCodeHash *hashes,
+    const uint8_t body_hash[32], const uint64_t *returns, size_t return_count, uint32_t *error)
+{
+    OotStackFunction common[OOT_STACK_MAX_FUNCTIONS];
+    size_t i;
+    if (error != NULL) *error = OOT_LEAF_BAD_ARGUMENT;
+    if (functions == NULL || count == 0 || count > OOT_STACK_MAX_FUNCTIONS) return NULL;
+    for (i = 0; i < count; ++i) common[i] = functions[i].info;
+    return create_registry(image, common, count, root, leaves, leaf_count, hashes, body_hash, returns, return_count, error, functions);
 }
 
 static int same_state(const OotArm64State *a, const OotArm64State *b)
@@ -279,6 +395,8 @@ int oot_stack_run(OotStackDispatcher *d, OotArm64State *s, uint64_t budget, OotL
         OotArm64State working = d->checkpoint;
         uint8_t shadow[OOT_STACK_MAX_FRAME], before[OOT_STACK_MAX_FRAME];
         unsigned kind = OOT_STACK_NORMAL, offset = 0, size = 0, i;
+        uint32_t writable = 0;
+        const OotStackCfgStep *flow = NULL;
         int child_status = 0;
         size_t target = d->count;
         uint64_t next = d->checkpoint.pc + 4;
@@ -294,6 +412,7 @@ int oot_stack_run(OotStackDispatcher *d, OotArm64State *s, uint64_t budget, OotL
             if (child_status == OOT_LEAF_REJECTED) return result(d, s, out, OOT_LEAF_REJECTED, child_report.error, retired);
             if ((child_status != OOT_LEAF_YIELDED && child_status != OOT_LEAF_RETURNED) || child_report.retired_this_call != 1)
                 reason = child_report.error ? child_report.error : OOT_LEAF_BAD_COUNT;
+            writable = d->functions[a->function].saved_mask;
         } else {
             size_t index = (size_t)((working.pc - f->entry) / 4);
             const OotStackStep *step = &f->steps[index];
@@ -302,7 +421,11 @@ int oot_stack_run(OotStackDispatcher *d, OotArm64State *s, uint64_t budget, OotL
             uint64_t executed = UINT64_MAX;
             int status;
             kind = step->kind;
-            if (kind == OOT_STACK_OPEN || kind == OOT_STACK_STORE) { offset = step->offset; size = step->size; }
+            if (f->policy_version == OOT_STACK_CFG_POLICY_VERSION) {
+                flow = &d->functions[a->function].flow[index];
+                writable = flow->writable_mask;
+            }
+            if (kind == OOT_STACK_OPEN || kind == OOT_STACK_STORE || kind == OOT_STACK_SAVE) { offset = step->offset; size = step->size; }
             if (kind == OOT_STACK_RETURN) next = a->expected_return;
             if (kind == OOT_STACK_CALL) {
                 next = step->callee; target = find_function(d, next);
@@ -318,10 +441,12 @@ int oot_stack_run(OotStackDispatcher *d, OotArm64State *s, uint64_t budget, OotL
             d->executing = 0;
             if (status != (kind == OOT_STACK_CALL || kind == OOT_STACK_RETURN ? OOT_LIFT_DISPATCH : OOT_LIFT_BUDGET)) reason = OOT_LEAF_BAD_LIFT_STATUS;
             else if (executed != 1) reason = OOT_LEAF_BAD_COUNT;
-            else if (working.pc != next) reason = OOT_LEAF_BAD_EDGE;
+            else if (kind == OOT_STACK_BRANCH ? (working.pc != f->entry + (uint64_t)flow->next_a * 4 &&
+                working.pc != f->entry + (uint64_t)flow->next_b * 4) : working.pc != next) reason = OOT_LEAF_BAD_EDGE;
             else if (window.fault.reason != OOT_MEMORY_OK) reason = OOT_STACK_BAD_MEMORY;
         }
-        if (!reason && memcmp(working.x + 18, a->initial.x + 18, 11 * sizeof(uint64_t))) reason = OOT_LEAF_PROTECTED_REGISTER;
+        for (i = 18; !reason && i <= 28; ++i)
+            if (!(writable & (UINT32_C(1) << i)) && working.x[i] != a->initial.x[i]) reason = OOT_LEAF_PROTECTED_REGISTER;
         if (!reason && (working.nzcv & UINT32_C(0x0fffffff))) reason = OOT_LEAF_BAD_NZCV;
         if (!reason) {
             uint64_t sp = kind == OOT_STACK_CLOSE || kind == OOT_STACK_RETURN ? a->initial.sp : a->base;
@@ -333,6 +458,8 @@ int oot_stack_run(OotStackDispatcher *d, OotArm64State *s, uint64_t budget, OotL
             if ((i < offset || i >= offset + size) && shadow[i] != before[i]) reason = OOT_STACK_CHANGED;
         if (!reason && kind == OOT_STACK_OPEN &&
             (read_le(shadow, 8) != a->initial.x[29] || read_le(shadow + 8, 8) != a->initial.x[30])) reason = OOT_STACK_CHANGED;
+        if (!reason && kind == OOT_STACK_SAVE && (read_le(shadow + offset, 8) != a->initial.x[flow->saved_a] ||
+            (size == 16 && read_le(shadow + offset + 8, 8) != a->initial.x[flow->saved_b]))) reason = OOT_STACK_CHANGED;
         if (!reason && !d->leaf_active && kind == OOT_STACK_CALL && target == d->count) {
             OotLeafReport child_report;
             if (oot_leaf_begin(d->leaf, &working, working.pc, d->checkpoint.pc + 4, &child_report) != OOT_LEAF_READY)
