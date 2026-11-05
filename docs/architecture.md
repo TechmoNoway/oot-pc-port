@@ -35,7 +35,9 @@ A separate [local-stack dispatcher](stack-dispatch.md) supports fixed 16-256-byt
 
 A separate [framed CFG policy](stack-cfg.md) now adds acyclic conditional control flow and explicit scalar/pair X19-X28 saves with matching restores. The dispatcher validates CFG edges, per-phase writable masks, save-slot isolation, and weighted longest paths through nested calls. Schema 3 selects this policy; earlier profiles retain their rules.
 
-The next implementation milestones are broader frame/prologue layouts, loop verification, and wider memory/call support. Process startup still needs a guest ABI, TLS, module initialization, scheduling, and service dispatch. Remaining integer/system forms, SIMD/FP, atomics/exclusives, nonlocal returns, and indirect-target discovery remain separate requirements. Game code must remain unexecuted until complete function coverage and required runtime boundaries are established.
+A separate [fixed-layout policy](stack-layouts.md) now supports SUB/ADD allocation, offset FP/LR records, sparse save slots, delayed FP setup, and normalized negative FP-relative accesses. Per-instruction SP/FP/LR/ownership metadata protects allocated frames until actual deallocation, including yields after restoring the frame record. Mixed-layout nested calls and a 16-frame/full-stack boundary match the reference. Schema 4 opts into this policy.
+
+The next implementation milestones are a static function/layout coverage survey, further frame layouts, loop verification, and wider memory/call support. Process startup still needs a guest ABI, TLS, module initialization, scheduling, and service dispatch. Remaining integer/system forms, SIMD/FP, atomics/exclusives, nonlocal returns, and indirect-target discovery remain separate requirements. Game code must remain unexecuted until complete function coverage and required runtime boundaries are established.
 
 ## Repository boundaries
 

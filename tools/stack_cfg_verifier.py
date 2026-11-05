@@ -106,6 +106,11 @@ def verify_cfg_stack_functions(frames, leaves, root):
             "saved_mask": saved_mask, "saved_registers": [r for r in range(19, 29) if saved_mask & (1 << r)],
             "steps": steps, "control_flow": flows, "calls": calls, "source_sha256": hashlib.sha256(data).hexdigest(),
             "guest_code_executed": False, "proof_scope": "structural CFG/register policy, not original identity or universal semantics"}
+    return verify_cfg_graphs(proofs, leaf_proofs, root)
+
+
+def verify_cfg_graphs(proofs, leaf_proofs, root):
+    """Shared bounded CFG/call-rank proof after profile-specific effect checks."""
     visiting, visited = set(), set()
 
     def visit_function(entry):

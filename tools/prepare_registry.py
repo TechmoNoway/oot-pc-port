@@ -18,6 +18,7 @@ from module_linker import Linker
 from prepare_runtime import STACK_BASE, STACK_SIZE, make_package
 from stack_verifier import emit_stack_descriptor, verify_stack_functions
 from stack_cfg_verifier import emit_cfg_stack_descriptor, verify_cfg_stack_functions
+from stack_layout_verifier import emit_layout_stack_descriptor, verify_layout_stack_functions
 
 
 def emit_factory(names, body_hash, returns, root_name=None):
@@ -45,7 +46,7 @@ def emit_factory(names, body_hash, returns, root_name=None):
     return "\n".join(lines + ["}", ""])
 
 
-def emit_stack_factory(frame_names, leaf_names, root, body_hash, returns, cfg=False):
+def emit_stack_factory(frame_names, leaf_names, root, body_hash, returns, cfg=False, layout=False):
     names = frame_names + leaf_names
     require(frame_names and len(frame_names) <= 32 and len(leaf_names) <= 256 and len(names) == len(set(names)) and
             all(re.fullmatch(r"[a-z][a-z0-9_]{0,63}", n) for n in names), "invalid stack registry names")
@@ -54,18 +55,21 @@ def emit_stack_factory(frame_names, leaf_names, root, body_hash, returns, cfg=Fa
             all(type(pc) is int and 0 <= pc < 1 << 64 and pc % 4 == 0 for pc in returns), "invalid return sites")
     digest = bytes.fromhex(body_hash)
     require(len(digest) == 32, "invalid image SHA-256")
+    descriptor = "OotStackLayoutFunction" if layout else "OotStackCfgFunction" if cfg else "OotStackFunction"
+    prefix = "layout_" if layout else "cfg_" if cfg else ""
+    constructor = "_layout" if layout else "_cfg" if cfg else ""
     lines = ['#include "stack_dispatch.h"',
         'OOT_LIFT_EXPORT OotStackDispatcher *oot_create_bound_registry(OotRuntimeImage *image, uint32_t *error)',
         '{', '    static const uint8_t body_hash[32] = {' + ', '.join(f'0x{b:02x}' for b in digest) + '};',
         '    static const uint64_t returns[] = {' + ', '.join(f'UINT64_C(0x{pc:x})' for pc in returns) + '};',
-        f'    {"OotStackCfgFunction" if cfg else "OotStackFunction"} frames[{len(frame_names)}];']
+        f'    {descriptor} frames[{len(frame_names)}];']
     if leaf_names:
         lines += [f'    OotLeafFunction leaves[{len(leaf_names)}];', f'    OotCodeHash hashes[{len(leaf_names)}];']
     for i, name in enumerate(frame_names):
-        lines += [f'    frames[{i}] = *oot_stack_{"cfg_" if cfg else ""}descriptor_{name}();']
+        lines += [f'    frames[{i}] = *oot_stack_{prefix}descriptor_{name}();']
     for i, name in enumerate(leaf_names):
         lines += [f'    leaves[{i}] = *oot_leaf_descriptor_{name}();', f'    hashes[{i}] = *oot_leaf_code_hash_{name}();']
-    lines += [f'    return oot_stack_create{"_cfg" if cfg else ""}(image, frames, {len(frame_names)}, UINT64_C(0x{root:x}),',
+    lines += [f'    return oot_stack_create{constructor}(image, frames, {len(frame_names)}, UINT64_C(0x{root:x}),',
         f'        {"leaves" if leaf_names else "NULL"}, {len(leaf_names)}, {"hashes" if leaf_names else "NULL"},',
         f'        body_hash, returns, {len(returns)}, error);', '}', '']
     return '\n'.join(lines)
@@ -73,9 +77,10 @@ def emit_stack_factory(frame_names, leaf_names, root, body_hash, returns, cfg=Fa
 
 def build_bundle(linker, config):
     require(isinstance(config, dict) and type(config.get("schema_version")) is int and
-            config["schema_version"] in (1, 2, 3), "unsupported registry config")
-    stack_profile = config["schema_version"] in (2, 3)
-    cfg_profile = config["schema_version"] == 3
+            config["schema_version"] in (1, 2, 3, 4), "unsupported registry config")
+    stack_profile = config["schema_version"] in (2, 3, 4)
+    cfg_profile = config["schema_version"] in (3, 4)
+    layout_profile = config["schema_version"] == 4
     records = config.get("leaves")
     require(isinstance(records, list) and (0 if stack_profile else 1) <= len(records) <= 256,
             "invalid explicit leaf selection count")
@@ -119,15 +124,17 @@ def build_bundle(linker, config):
         function = "oot_lift_" + leaf["name"]
         chunks += [emit_c(leaf["data"], leaf["entry"], function)[0], emit_leaf_descriptor(leaf["data"], leaf["entry"], function)]
     if stack_profile:
-        proofs = (verify_cfg_stack_functions if cfg_profile else verify_stack_functions)({f["entry"]: f["data"] for f in frames},
+        verifier = verify_layout_stack_functions if layout_profile else verify_cfg_stack_functions if cfg_profile else verify_stack_functions
+        emitter = emit_layout_stack_descriptor if layout_profile else emit_cfg_stack_descriptor if cfg_profile else emit_stack_descriptor
+        proofs = verifier({f["entry"]: f["data"] for f in frames},
                                        {f["entry"]: f["data"] for f in leaves}, root["entry"])
         for frame in frames:
             frame["verification"] = proofs[frame["entry"]]
             function = "oot_lift_" + frame["name"]
             chunks += [emit_c(frame["data"], frame["entry"], function)[0],
-                       (emit_cfg_stack_descriptor if cfg_profile else emit_stack_descriptor)(frame["verification"], function)]
+                       emitter(frame["verification"], function)]
         chunks += [emit_stack_factory([f["name"] for f in frames], [f["name"] for f in leaves],
-            root["entry"], image_report["body_sha256"], returns, cfg=cfg_profile)]
+            root["entry"], image_report["body_sha256"], returns, cfg=cfg_profile, layout=layout_profile)]
     elif root:
         callees = {leaf["entry"]: leaf["data"] for leaf in leaves}
         root["verification"] = verify_frame(root["data"], root["entry"], callees)
@@ -137,7 +144,7 @@ def build_bundle(linker, config):
         chunks += [emit_factory([r["name"] for r in leaves], image_report["body_sha256"], returns, root["name"] if root else None)]
     source = "\n".join(chunks)
     manifest = {"schema_version": config["schema_version"], "format": "bound-native-registry", "guest_code_executed": False,
-                "factory": "oot_create_bound_registry", "profile": "cfg-stack-dag" if cfg_profile else "stack-dag" if stack_profile else "frame" if root else "leaf",
+                "factory": "oot_create_bound_registry", "profile": "layout-stack-dag" if layout_profile else "cfg-stack-dag" if cfg_profile else "stack-dag" if stack_profile else "frame" if root else "leaf",
                 "registry_source_sha256": hashlib.sha256(source.encode()).hexdigest(), "return_sites": returns,
                 "image": image_report,
                 "leaves": [{k: v for k, v in r.items() if k != "data"} for r in leaves],
