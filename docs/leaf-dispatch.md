@@ -10,7 +10,7 @@ Run `tools/lift_arm64.py --verify-leaf` to generate a lifted function and its `o
 
 Return sites are sorted, unique, aligned guest PC tokens outside every registered leaf range. They are approved continuations or synthetic exit tokens supplied by the host controller. Registration does not prove that arbitrary return tokens are executable memory. A guest address is only a lookup key and is never cast to a native function pointer.
 
-The compiled code module must stay loaded until its dispatchers are destroyed. Callbacks are trusted generated/reviewed native code. CFG checks do not prove arithmetic semantics or preempt arbitrary native code, and the API is not a sandbox for hostile C callbacks. Registry provenance is not yet checked against mapped image hashes; that remains an explicit next boundary.
+The compiled code module must stay loaded until its dispatchers are destroyed. Callbacks are trusted generated/reviewed native code. CFG checks do not prove arithmetic semantics or preempt arbitrary native code, and the API is not a sandbox for hostile C callbacks. The unbound constructor is an explicit development API. The [bound constructor and generated registry factory](bound-dispatch.md) additionally pin the initial package identity and current selected text hashes and retain the mapped image.
 
 ## Begin, yield, return, abort
 
@@ -27,7 +27,7 @@ Begin performs no guest instruction. An active or failed frame cannot be replace
 
 After each valid step the dispatcher checkpoints every integer register, SP, PC, and NZCV. A resume must match that exact architectural checkpoint, including scratch registers; changing state between slices is rejected without running a callback. The caller may restore the checkpoint and retry, or abort. State struct padding is not compared.
 
-Stack bounds are a host-supplied state contract, not an allocation or a proof of stack backing. Integration tests obtain them from the native image bridge. Leaves receive a null guest-memory argument and cannot use memory instructions under this profile. Broader functions, nested guest calls, and process/thread startup are outside this implementation.
+Stack bounds in the unbound API are a host-supplied state contract, not an allocation or a proof of stack backing. Bound contexts obtain them from the retained native image. Leaves receive a null guest-memory argument and cannot use memory instructions under this profile. A [separate framed profile](bound-dispatch.md) supports a canonical caller with direct calls to these leaves; it does not relax the leaf rules. General nested guest calls and process/thread startup remain outside this implementation.
 
 ## Per-instruction commit
 
@@ -52,6 +52,6 @@ Reports remain under `build/dispatcher-validation/`. Generated code, compiler lo
 
 `leaf_dispatch_self_test` additionally uses native test stubs that intentionally return wrong counts/status/edges, change protected state, select the wrong allowed return, and attempt reentrant operations. It verifies fault isolation, failure latching, metadata ownership, malformed registries, and explicit recovery. Native image tests also dispatch a synthetic compiled leaf over a matching synthetic mapped image and guarded stack. No captured game instructions run in these tests.
 
-The next work is binding compiled registry/range provenance to verified image hashes, then introducing separately verified profiles for functions with stack frames and calls. Pointer authentication, service dispatch, vectors, startup, and game execution remain unimplemented boundaries.
+Image/range hash binding and a separate canonical FP/LR caller profile are described in [bound dispatch](bound-dispatch.md). General frames/calls, pointer authentication, service dispatch, vectors, startup, and game execution remain unimplemented boundaries.
 
 Reference: [Arm AAPCS64](https://github.com/ARM-software/abi-aa/blob/main/aapcs64/aapcs64.rst). This project profile preserves X18-X30/SP and imposes its own entry rules; it is not a complete implementation of AAPCS64 or the game's process ABI.

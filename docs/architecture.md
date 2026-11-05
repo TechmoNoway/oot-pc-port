@@ -29,7 +29,9 @@ The [controlled leaf dispatcher](leaf-dispatch.md) copies and validates generate
 
 Each boundary needs a verifiable milestone before work advances to gameplay. A successful compilation is not evidence of correct game execution.
 
-The next implementation milestones are binding compiled callback registries to verified image/range hashes and extending controlled dispatch beyond register-only leaves. Process startup still needs a guest ABI, TLS, module initialization, scheduling, and service dispatch. Remaining integer/system forms, SIMD/FP, atomics/exclusives, nonlocal returns, and indirect-target discovery remain separate requirements. Game code must remain unexecuted until complete function coverage and required runtime boundaries are established.
+The [hash-bound registry](bound-dispatch.md) now pins compiled symbols to the initial runtime snapshot and exact current text ranges. A separate verified linear FP/LR caller supports direct calls to register-only leaves, stages its stack save before commit, and preserves state/stack ownership across yields. Only synthetic functions have been registered and executed.
+
+The next implementation milestones are broader stack frames, checked memory effects, and framed-to-framed call support. Process startup still needs a guest ABI, TLS, module initialization, scheduling, and service dispatch. Remaining integer/system forms, SIMD/FP, atomics/exclusives, nonlocal returns, and indirect-target discovery remain separate requirements. Game code must remain unexecuted until complete function coverage and required runtime boundaries are established.
 
 ## Repository boundaries
 

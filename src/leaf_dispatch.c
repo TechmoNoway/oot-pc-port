@@ -5,6 +5,7 @@
 typedef struct OwnedLeaf {
     OotLeafFunction info;
     OotLeafStep steps[OOT_LEAF_MAX_WORDS];
+    OotCodeHash hash;
 } OwnedLeaf;
 
 struct OotLeafDispatcher {
@@ -15,6 +16,8 @@ struct OotLeafDispatcher {
     OotArm64State initial, checkpoint;
     unsigned phase, executing; /* 0 idle, 1 active, 2 returned, 3 failed. */
     uint32_t fault;
+    OotRuntimeImage *image;
+    uint8_t body_sha256[32];
 };
 
 static int report_result(const OotLeafDispatcher *d, const OotArm64State *s, OotLeafReport *out,
@@ -80,8 +83,49 @@ int oot_leaf_dispatcher_destroy(OotLeafDispatcher *d)
         return 0;
     free(d->functions);
     free(d->return_sites);
+    oot_runtime_close(d->image);
     free(d);
     return 1;
+}
+
+static unsigned check_code(const OotLeafDispatcher *d, size_t index)
+{
+    int match;
+    const OwnedLeaf *leaf = &d->functions[index];
+    if (d->image == NULL) return OOT_LEAF_OK; /* Explicit unbound development API. */
+    match = oot_runtime_check_code(d->image, d->body_sha256, leaf->info.entry,
+                                  leaf->info.instruction_count * 4, leaf->hash.bytes);
+    return match == OOT_CODE_MATCH ? OOT_LEAF_OK : match == OOT_CODE_BAD_IMAGE ? OOT_LEAF_BAD_IMAGE : OOT_LEAF_BAD_CODE;
+}
+
+OotLeafDispatcher *oot_leaf_dispatcher_create_bound(OotRuntimeImage *image,
+    const OotLeafFunction *functions, size_t count, const OotCodeHash *code_hashes, const uint8_t body_sha256[32],
+    const uint64_t *return_sites, size_t return_count, uint32_t *error)
+{
+    OotLeafDispatcher *d;
+    size_t index;
+    if (error != NULL) *error = OOT_LEAF_BAD_ARGUMENT;
+    if (image == NULL || code_hashes == NULL || body_sha256 == NULL) return NULL;
+    d = oot_leaf_dispatcher_create(functions, count, return_sites, return_count,
+        oot_runtime_stack_base(image), oot_runtime_stack_pointer(image), error);
+    if (d == NULL) return NULL;
+    if (!oot_runtime_retain(image)) {
+        if (error != NULL) *error = OOT_LEAF_BAD_IMAGE;
+        (void)oot_leaf_dispatcher_destroy(d); return NULL;
+    }
+    d->image = image;
+    memcpy(d->body_sha256, body_sha256, 32);
+    for (index = 0; index < count; ++index) {
+        unsigned reason;
+        d->functions[index].hash = code_hashes[index];
+        reason = check_code(d, index);
+        if (reason != OOT_LEAF_OK) {
+            if (error != NULL) *error = reason;
+            (void)oot_leaf_dispatcher_destroy(d);
+            return NULL;
+        }
+    }
+    return d;
 }
 
 OotLeafDispatcher *oot_leaf_dispatcher_create(const OotLeafFunction *functions, size_t count,
@@ -167,9 +211,10 @@ int oot_leaf_begin(OotLeafDispatcher *d, const OotArm64State *s, uint64_t entry,
     index = find_entry(d, entry);
     if (index == d->count || d->functions[index].info.entry != entry || s->pc != entry)
         error = OOT_LEAF_BAD_ENTRY;
-    else if (s->x[30] != expected_return || !allowed_return(d, expected_return)) error = OOT_LEAF_BAD_RETURN;
-    else if (s->sp % 16 != 0 || s->sp < d->stack_low || s->sp > d->stack_high) error = OOT_LEAF_BAD_STACK;
-    else if (s->nzcv & UINT32_C(0x0fffffff)) error = OOT_LEAF_BAD_NZCV;
+    else error = check_code(d, index);
+    if (!error && (s->x[30] != expected_return || !allowed_return(d, expected_return))) error = OOT_LEAF_BAD_RETURN;
+    if (!error && (s->sp % 16 != 0 || s->sp < d->stack_low || s->sp > d->stack_high)) error = OOT_LEAF_BAD_STACK;
+    if (!error && (s->nzcv & UINT32_C(0x0fffffff))) error = OOT_LEAF_BAD_NZCV;
     if (error) return report_result(d, s, out, OOT_LEAF_REJECTED, error, 0);
     d->current = index; d->expected_return = expected_return; d->total_retired = 0;
     d->initial = *s; d->checkpoint = *s; d->phase = 1; d->fault = OOT_LEAF_OK;
@@ -193,6 +238,10 @@ int oot_leaf_run(OotLeafDispatcher *d, OotArm64State *s, uint64_t budget, OotLea
     if (d->phase == 0) return report_result(d, s, out, OOT_LEAF_REJECTED, OOT_LEAF_NO_ACTIVE_CALL, 0);
     if (d->phase == 3) return report_result(d, s, out, OOT_LEAF_CONTRACT_FAULT, d->fault, 0);
     if (!same_state(s, &d->checkpoint)) return report_result(d, s, out, OOT_LEAF_REJECTED, OOT_LEAF_BAD_STATE, 0);
+    {
+        unsigned reason = check_code(d, d->current);
+        if (reason != OOT_LEAF_OK) return report_result(d, s, out, OOT_LEAF_REJECTED, reason, 0);
+    }
     if (d->phase == 2) return report_result(d, s, out, OOT_LEAF_RETURNED, OOT_LEAF_OK, 0);
     f = &d->functions[d->current].info;
     while (retired < budget) {

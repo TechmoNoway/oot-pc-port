@@ -1,6 +1,6 @@
 """Verified synthetic linked images, native map permissions, and package rejection."""
 
-from ctypes import POINTER, byref, c_char_p, c_int, c_size_t, c_uint32, c_uint64, c_void_p, create_string_buffer, string_at
+from ctypes import POINTER, byref, c_char_p, c_int, c_size_t, c_uint8, c_uint32, c_uint64, c_void_p, create_string_buffer, string_at
 import hashlib
 import json
 import os
@@ -21,7 +21,7 @@ from pair_validation import pair
 from prepare_exefs import prepare
 from prepare_runtime import HEADER, REGION, STACK_BASE, STACK_SIZE, make_package, write_package
 from test_module_linker import change_memory, fixture, symbol
-from dispatcher_validation import LeafFunction, Report, bindings
+from dispatcher_validation import CodeHash, LeafFunction, Report, bindings
 
 HOST = Path(os.environ.get("OOT_NATIVE_HOST", str(ROOT / "build/cmake/Release/oot-pc-port.exe")))
 
@@ -128,6 +128,8 @@ class NativeRuntimeTests(unittest.TestCase):
         lib.oot_runtime_stack_pointer.restype = c_uint64
         lib.oot_runtime_backing_bytes.argtypes = [c_void_p]
         lib.oot_runtime_backing_bytes.restype = c_uint64
+        lib.oot_runtime_check_code.argtypes = [c_void_p, POINTER(c_uint8), c_uint64, c_uint32, POINTER(c_uint8)]
+        lib.oot_runtime_check_code.restype = c_int
         lib.oot_memory_load.argtypes = [POINTER(Memory), c_uint64, c_int, POINTER(c_uint64)]
         lib.oot_memory_store.argtypes = [POINTER(Memory), c_uint64, c_int, c_uint64]
         lib.oot_lift_bridge_stack.argtypes = [POINTER(State), POINTER(Memory), c_uint64, POINTER(c_uint64)]
@@ -206,17 +208,50 @@ class NativeRuntimeTests(unittest.TestCase):
         finally:
             self.library.oot_runtime_close(handle)
 
+    def test_identity_pin_current_text_hash_and_exact_read_only_range(self):
+        data, manifest = make_package(linked_fixture())
+        handle, error = self.open_blob(data)
+        self.assertTrue(handle, error)
+        try:
+            body = (c_uint8 * 32).from_buffer_copy(bytes.fromhex(manifest["body_sha256"]))
+            code = (c_uint8 * 32).from_buffer_copy(hashlib.sha256(struct.pack("<II", 0x91001C20, 0xD65F03C0)).digest())
+            check = self.library.oot_runtime_check_code
+            memory = self.library.oot_runtime_memory(handle)
+            self.assertEqual(check(handle, body, self.leaf_base, 8, code), 0)
+            self.assertEqual(self.library.oot_memory_store(memory, self.leaf_base - 0x40 + 0x2008, 8, 0xABCD), 1)
+            self.assertEqual(check(handle, body, self.leaf_base, 8, code), 0)  # Writable state may evolve.
+            body[0] ^= 1
+            self.assertEqual(check(handle, body, self.leaf_base, 8, code), 1)
+            body[0] ^= 1
+            for address, count in ((self.leaf_base - 0x40 + 0xFC, 8), (self.leaf_base, 0),
+                    (self.leaf_base, 65537), (self.leaf_base - 0x40 + 0x1000, 8),
+                    (self.leaf_base - 0x40 + 0x2000, 8), (STACK_BASE, 8), ((1 << 64) - 4, 8)):
+                with self.subTest(address=address, count=count):
+                    self.assertEqual(check(handle, body, address, count, code), 2)
+            pointer = memory.contents.regions[0].data
+            pointer[0x40] ^= 1
+            self.assertEqual(check(handle, body, self.leaf_base, 8, code), 3)
+            pointer[0x40] ^= 1
+            self.assertEqual(check(handle, body, self.leaf_base, 8, code), 0)
+        finally:
+            self.library.oot_runtime_close(handle)
+
     def test_verified_dispatch_on_a_mapped_synthetic_image_and_stack(self):
-        handle, error = self.open_blob(make_package(linked_fixture())[0])
+        data, manifest = make_package(linked_fixture())
+        handle, error = self.open_blob(data)
         self.assertTrue(handle, error)
         context = None
         try:
             getter = self.library.oot_leaf_descriptor_runtime_leaf
             getter.argtypes, getter.restype = [], POINTER(LeafFunction)
             functions = (LeafFunction * 1)(LeafFunction.from_buffer_copy(getter().contents))
+            hash_getter = self.library.oot_leaf_code_hash_runtime_leaf
+            hash_getter.argtypes, hash_getter.restype = [], POINTER(CodeHash)
+            hashes = (CodeHash * 1)(hash_getter().contents)
+            body = (c_uint8 * 32).from_buffer_copy(bytes.fromhex(manifest["body_sha256"]))
             returns, create_error = (c_uint64 * 1)(0x20000000), c_uint32(0)
-            context = self.library.oot_leaf_dispatcher_create(functions, 1, returns, 1,
-                STACK_BASE, STACK_BASE + STACK_SIZE, byref(create_error))
+            context = self.library.oot_leaf_dispatcher_create_bound(handle, functions, 1, hashes, body,
+                returns, 1, byref(create_error))
             self.assertTrue(context, create_error.value)
             state, report = State(), Report()
             state.pc, state.sp, state.x[1], state.x[30] = self.leaf_base, self.library.oot_runtime_stack_pointer(handle), 5, returns[0]

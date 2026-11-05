@@ -22,10 +22,12 @@ A bounded [ARM64 C lifter](docs/arm64-lifter.md) translates selected integer ope
 
 [Controlled leaf dispatch](docs/leaf-dispatch.md) checks registered entries, caller-approved returns, stack/NZCV state, suspended checkpoints, and each instruction's control-flow/register contract. Synthetic caller/callee chains and native image/stack integration pass validation; no game callbacks are registered.
 
+[Hash-bound dispatch](docs/bound-dispatch.md) pins compiled function registries to the mapped snapshot and exact read-only text hashes. A separate linear caller profile supports a canonical FP/LR stack frame and direct calls to verified leaves, with staged stack writes and resumable budgets. Synthetic cases pass on MSVC and GCC.
+
 The game is not playable yet. Process startup, broader instruction semantics, operating-system services, and graphics remain to be implemented.
 
 ## Development direction
 
-The next milestones are binding compiled registries to image hashes, broader function/call support, remaining instruction semantics, process startup and operating-system services, and graphics. See [docs/architecture.md](docs/architecture.md).
+The next milestones are broader stack frames, memory effects and function/call support, remaining instruction semantics, process startup and operating-system services, and graphics. See [docs/architecture.md](docs/architecture.md).
 
 Game containers, keys, extracted files, generated game code, saves, shader caches, and compiled executables stay outside version control. Build output belongs under `build/`; future generated output belongs under `generated/`.

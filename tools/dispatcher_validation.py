@@ -1,7 +1,7 @@
 """Validate controlled dispatch using compiled synthetic leaves and ARM64 callers."""
 
 import argparse
-from ctypes import (POINTER, Structure, byref, c_int, c_size_t, c_uint16, c_uint32,
+from ctypes import (POINTER, Structure, byref, c_int, c_size_t, c_uint8, c_uint16, c_uint32,
                     c_uint64, c_void_p)
 from dataclasses import replace
 from importlib.metadata import version
@@ -34,6 +34,10 @@ class LeafFunction(Structure):
                 ("run", c_void_p), ("steps", POINTER(LeafStep))]
 
 
+class CodeHash(Structure):
+    _fields_ = [("bytes", c_uint8 * 32)]
+
+
 class Report(Structure):
     _fields_ = [("status", c_uint32), ("error", c_uint32), ("entry", c_uint64), ("pc", c_uint64),
                 ("expected_return", c_uint64), ("retired_this_call", c_uint64), ("total_retired", c_uint64)]
@@ -43,6 +47,9 @@ def bindings(library):
     library.oot_leaf_dispatcher_create.argtypes = [POINTER(LeafFunction), c_size_t, POINTER(c_uint64), c_size_t,
                                                   c_uint64, c_uint64, POINTER(c_uint32)]
     library.oot_leaf_dispatcher_create.restype = c_void_p
+    library.oot_leaf_dispatcher_create_bound.argtypes = [c_void_p, POINTER(LeafFunction), c_size_t, POINTER(CodeHash),
+        POINTER(c_uint8), POINTER(c_uint64), c_size_t, POINTER(c_uint32)]
+    library.oot_leaf_dispatcher_create_bound.restype = c_void_p
     library.oot_leaf_dispatcher_destroy.argtypes = [c_void_p]
     library.oot_leaf_dispatcher_destroy.restype = c_int
     library.oot_leaf_begin.argtypes = [c_void_p, POINTER(State), c_uint64, c_uint64, POINTER(Report)]

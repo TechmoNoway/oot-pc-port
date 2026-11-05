@@ -28,7 +28,7 @@ Only exact NSO segment/BSS ranges are mapped. Padding and inter-module gaps rema
 
 The stack defaults to guest base `0x7000000000`, size `0x200000`, and SP at the aligned upper end. At least one 4096-byte unmapped guard separates its lower edge from earlier regions; the upper guard is also unmapped. `--stack-base` and `--stack-size` allow a different aligned range within the 39-bit guest address limit. The stack is a test resource, not a recovered process/thread startup ABI.
 
-`oot_runtime_open` returns an opaque owning object. `oot_runtime_memory` borrows its checked-memory view; region metadata must remain immutable. Backing and the borrowed view remain valid until `oot_runtime_close`. All allocated buffers are released on failure or close. Do not retain a borrowed view after close. The C library is single-threaded at this stage.
+`oot_runtime_open` returns an opaque object with one owning reference. `oot_runtime_retain` adds a reference and `oot_runtime_close` releases one. Bound dispatch contexts retain the image. `oot_runtime_memory` borrows its checked-memory view; region metadata must remain immutable. Backing and the borrowed view remain valid until the final reference is released. All allocated buffers are released on failure or final close. Do not retain a borrowed view beyond that lifetime. The C library is single-threaded at this stage.
 
 ## Package format v1
 
@@ -55,6 +55,6 @@ Synthetic integration checks compare every native region byte with its linked im
 
 There is no native guest startup, TLS allocation, heap, scheduler, service dispatch, constructor execution, or game-function dispatcher yet. More instruction semantics and verified function boundaries are required before executing game functions.
 
-The [controlled leaf dispatcher](leaf-dispatch.md) is now tested with a compiled synthetic leaf whose bytes match a synthetic mapped image and whose SP is supplied by this bridge. That integration preserves the mapped stack and performs no game execution. The current trusted registry is not yet bound automatically to package/module/range hashes; host code supplies the compatible compiled descriptors explicitly.
+The [bound dispatcher and registry factory](bound-dispatch.md) check the initial package body identity and current selected code hashes inside exact read-only text ranges. Bound contexts retain the image and obtain stack bounds from it. Synthetic integration dispatches matching leaves and a canonical framed caller; game callbacks remain unregistered. Writable runtime data can change without altering the initial snapshot identity tag.
 
 Reference: [Windows BCryptHash API](https://learn.microsoft.com/en-us/windows/win32/api/bcrypt/nf-bcrypt-bcrypthash).

@@ -62,6 +62,7 @@ class Program:
     base: int = BASE
     memory: bool = False
     leaf: bool = False
+    frame_leaves: dict | None = None
 
     @property
     def data(self):

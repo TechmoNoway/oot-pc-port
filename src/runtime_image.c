@@ -18,6 +18,8 @@ struct OotRuntimeImage {
     OotGuestRegion regions[REGION_LIMIT];
     uint64_t stack_pointer;
     uint64_t backing_bytes;
+    uint32_t kinds[REGION_LIMIT], region_count, references;
+    uint8_t body_sha256[32];
 };
 
 static uint32_t read32(const uint8_t *data)
@@ -53,10 +55,47 @@ void oot_runtime_close(OotRuntimeImage *image)
     unsigned index;
     if (image == NULL)
         return;
+    if (--image->references != 0)
+        return;
     for (index = 0; index < REGION_LIMIT; ++index)
         if (image->regions[index].data != NULL)
             (void)host_memory_release(image->regions[index].data);
     free(image);
+}
+
+int oot_runtime_retain(OotRuntimeImage *image)
+{
+    if (image == NULL || image->references == UINT32_MAX) return 0;
+    ++image->references;
+    return 1;
+}
+
+uint64_t oot_runtime_stack_base(const OotRuntimeImage *image)
+{
+    return image != NULL && image->region_count != 0 ? image->regions[image->region_count - 1].base : 0;
+}
+
+int oot_runtime_check_code(const OotRuntimeImage *image, const uint8_t body_sha256[32],
+    uint64_t entry, uint32_t byte_count, const uint8_t code_sha256[32])
+{
+    uint32_t index;
+    uint8_t digest[32];
+    if (image == NULL || body_sha256 == NULL || memcmp(image->body_sha256, body_sha256, 32) != 0)
+        return OOT_CODE_BAD_IMAGE;
+    if (code_sha256 == NULL || byte_count == 0 || byte_count > 65536 || !image->memory.valid ||
+        image->memory.regions != image->regions || image->memory.count != image->region_count)
+        return OOT_CODE_BAD_RANGE;
+    for (index = 0; index < image->region_count; ++index) {
+        const OotGuestRegion *r = &image->regions[index];
+        if (image->kinds[index] == 1 && r->permissions == OOT_MEMORY_READ && entry >= r->base &&
+            entry - r->base <= r->size && byte_count <= r->size - (entry - r->base)) {
+            if (BCryptHash(BCRYPT_SHA256_ALG_HANDLE, NULL, 0, r->data + (size_t)(entry - r->base), byte_count,
+                           digest, sizeof(digest)) < 0 || memcmp(digest, code_sha256, 32) != 0)
+                return OOT_CODE_BAD_HASH;
+            return OOT_CODE_MATCH;
+        }
+    }
+    return OOT_CODE_BAD_RANGE;
 }
 
 OotGuestMemory *oot_runtime_memory(OotRuntimeImage *image)
@@ -119,6 +158,8 @@ OotRuntimeImage *oot_runtime_open(const char *path, char *error, size_t error_si
         message = "could not allocate runtime image";
         goto failure;
     }
+    image->references = 1;
+    memcpy(image->body_sha256, blob + 64, 32);
     cursor = read64(blob + 40);
     stack_pointer = read64(blob + 16);
     for (index = 0; index < count; ++index) {
@@ -141,6 +182,7 @@ OotRuntimeImage *oot_runtime_open(const char *path, char *error, size_t error_si
             ++stacks;
         }
         image->regions[index] = (OotGuestRegion){base, size, NULL, permissions};
+        image->kinds[index] = kind;
         image->regions[index].data = host_memory_allocate((size_t)size);
         if (image->regions[index].data == NULL) {
             message = "could not allocate native region backing";
@@ -156,6 +198,7 @@ OotRuntimeImage *oot_runtime_open(const char *path, char *error, size_t error_si
         !oot_memory_init(&image->memory, image->regions, count))
         goto failure;
     image->stack_pointer = stack_pointer;
+    image->region_count = count;
     image->backing_bytes = total;
     free(blob);
     return image;

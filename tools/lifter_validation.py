@@ -20,6 +20,7 @@ from pair_validation import pair_programs, validate_pair_policy
 from integer_validation import integer_programs
 from leaf_validation import leaf_programs
 from leaf_verifier import emit_leaf_descriptor, verify_leaf
+from frame_verifier import emit_frame_descriptor, verify_frame
 
 ROOT = Path(__file__).resolve().parent.parent
 SEED = 0x0CA41234
@@ -157,7 +158,7 @@ def find_cmake():
     return str(path)
 
 
-def compile_library(programs, mode="cmake"):
+def compile_library(programs, mode="cmake", extra_source=""):
     parent = ROOT / "build/lifter-validation"
     parent.mkdir(parents=True, exist_ok=True)
     directory = Path(tempfile.mkdtemp(prefix=f"{mode}-", dir=parent))
@@ -168,9 +169,12 @@ def compile_library(programs, mode="cmake"):
         if program.leaf:
             report["leaf_verification"] = verify_leaf(program.data, program.base)
             code += "\n" + emit_leaf_descriptor(program.data, program.base, f"oot_lift_{program.name}")
+        if program.frame_leaves is not None:
+            report["frame_verification"] = verify_frame(program.data, program.base, program.frame_leaves)
+            code += "\n" + emit_frame_descriptor(program.data, program.base, program.frame_leaves, f"oot_lift_{program.name}")
         chunks.append(code)
         reports.append(report)
-    source.write_text("\n".join(chunks), encoding="utf-8")
+    source.write_text("\n".join(chunks) + "\n" + extra_source, encoding="utf-8")
 
     def run(command):
         result = subprocess.run(command, capture_output=True, text=True, timeout=180)
@@ -186,6 +190,7 @@ def compile_library(programs, mode="cmake"):
              "-DOOT_MEMORY_SHARED_EXPORTS", "-D_CRT_SECURE_NO_WARNINGS", "-D_WIN32_WINNT=0x0A00",
              "-I", str(ROOT / "src"), str(source), str(ROOT / "src/guest_memory.c"),
              str(ROOT / "src/runtime_image.c"), str(ROOT / "src/host_win32.c"), str(ROOT / "src/leaf_dispatch.c"),
+             str(ROOT / "src/frame_dispatch.c"),
              "-lbcrypt", "-o", str(library)])
         compiler_info = subprocess.run([compiler, "--version"], capture_output=True, text=True, check=True).stdout.splitlines()[0]
     else:
@@ -194,7 +199,7 @@ def compile_library(programs, mode="cmake"):
             'cmake_minimum_required(VERSION 3.20)\nproject(lift_validation LANGUAGES C)\n'
             f'add_library(lifted SHARED lifted.c "{(ROOT / "src/guest_memory.c").as_posix()}" '
             f'"{(ROOT / "src/runtime_image.c").as_posix()}" "{(ROOT / "src/host_win32.c").as_posix()}" '
-            f'"{(ROOT / "src/leaf_dispatch.c").as_posix()}")\n'
+            f'"{(ROOT / "src/leaf_dispatch.c").as_posix()}" "{(ROOT / "src/frame_dispatch.c").as_posix()}")\n'
             'target_link_libraries(lifted PRIVATE bcrypt)\n'
             'target_compile_definitions(lifted PRIVATE OOT_MEMORY_SHARED_EXPORTS _CRT_SECURE_NO_WARNINGS _WIN32_WINNT=0x0A00)\n'
             'target_compile_features(lifted PRIVATE c_std_17)\n'

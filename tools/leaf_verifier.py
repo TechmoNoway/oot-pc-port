@@ -89,5 +89,9 @@ def emit_leaf_descriptor(data, base, function_name):
                   f"    UINT64_C(0x{base:x}), {proof['instruction_count']}, {proof['max_retired_instructions']},",
                   f"    OOT_LIFT_ABI_VERSION, OOT_LEAF_POLICY_VERSION, {function_name}, {steps}", "};",
                   f"OOT_LIFT_EXPORT const OotLeafFunction *oot_leaf_descriptor_{suffix}(void)",
-                  "{", f"    return &{descriptor};", "}", ""])
+                  "{", f"    return &{descriptor};", "}",
+                  f"static const OotCodeHash oot_leaf_hash_{suffix} = {{{{",
+                  "    " + ", ".join(f"0x{byte:02x}" for byte in bytes.fromhex(proof["source_sha256"])), "}};",
+                  f"OOT_LIFT_EXPORT const OotCodeHash *oot_leaf_code_hash_{suffix}(void)",
+                  "{", f"    return &oot_leaf_hash_{suffix};", "}", ""])
     return "\n".join(lines)

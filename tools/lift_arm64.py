@@ -48,6 +48,7 @@ def main():
             report["leaf_verification"] = proof
             code += "\n" + emit_leaf_descriptor(data, args.base, args.name)
             report["leaf_descriptor_getter"] = "oot_leaf_descriptor_" + args.name[len("oot_lift_"):]
+            report["leaf_code_hash_getter"] = "oot_leaf_code_hash_" + args.name[len("oot_lift_"):]
         report.update({"source_sha256": hashlib.sha256(data).hexdigest(), "file_offset": args.offset,
                        "guest_code_executed": False, "translation_does_not_prove_function_completeness": True})
         # Unsupported or malformed instructions cannot leave partially translated source.
