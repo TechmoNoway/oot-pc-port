@@ -30,10 +30,12 @@ A bounded [ARM64 C lifter](docs/arm64-lifter.md) translates selected integer ope
 
 [Fixed frame layouts](docs/stack-layouts.md) add separate SUB/ADD stack allocation, offset FP/LR records, sparse save slots, delayed FP setup, and negative FP-relative locals. Synthetic mixed-layout calls and a full 16-frame stack boundary match ARM64 reference execution.
 
+A [static profile survey](docs/function-profile-survey.md) measures the actual verifiers against metadata-rooted private game regions without translation or execution. The local 1.1.1 survey accepts 40,038 leaf candidates; framed candidates remain blocked, with pointer authentication the dominant first unsupported category.
+
 The game is not playable yet. Process startup, broader instruction semantics, operating-system services, and graphics remain to be implemented.
 
 ## Development direction
 
-The next milestones are a static function/layout coverage survey, further frame layouts and loop verification, wider memory/call support, remaining instruction semantics, process startup and operating-system services, and graphics. See [docs/architecture.md](docs/architecture.md).
+The next milestones are a verified PAC/authenticated-return model, ordered/atomic memory semantics, further frame layouts and loop verification, wider memory/call support, process startup and operating-system services, and graphics. See [docs/architecture.md](docs/architecture.md).
 
 Game containers, keys, extracted files, generated game code, saves, shader caches, and compiled executables stay outside version control. Build output belongs under `build/`; future generated output belongs under `generated/`.
