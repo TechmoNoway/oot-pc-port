@@ -24,10 +24,12 @@ A bounded [ARM64 C lifter](docs/arm64-lifter.md) translates selected integer ope
 
 [Hash-bound dispatch](docs/bound-dispatch.md) pins compiled function registries to the mapped snapshot and exact read-only text hashes. A separate linear caller profile supports a canonical FP/LR stack frame and direct calls to verified leaves, with staged stack writes and resumable budgets. Synthetic cases pass on MSVC and GCC.
 
+[Local-stack dispatch](docs/stack-dispatch.md) adds fixed 16-256-byte frames, checked scalar/pair local storage, and direct calls between framed functions in a verified acyclic graph. An explicit bounded activation stack protects current and ancestor frame bytes across yields. Synthetic three-level and maximum-depth cases match ARM64 reference execution.
+
 The game is not playable yet. Process startup, broader instruction semantics, operating-system services, and graphics remain to be implemented.
 
 ## Development direction
 
-The next milestones are broader stack frames, memory effects and function/call support, remaining instruction semantics, process startup and operating-system services, and graphics. See [docs/architecture.md](docs/architecture.md).
+The next milestones are framed-function control flow and broader saved-register layouts, wider memory/call support, remaining instruction semantics, process startup and operating-system services, and graphics. See [docs/architecture.md](docs/architecture.md).
 
 Game containers, keys, extracted files, generated game code, saves, shader caches, and compiled executables stay outside version control. Build output belongs under `build/`; future generated output belongs under `generated/`.

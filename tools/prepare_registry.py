@@ -16,6 +16,7 @@ from leaf_verifier import emit_leaf_descriptor, verify_leaf
 from link_exefs import BUILD_ROOT, build_destination, load_prepared
 from module_linker import Linker
 from prepare_runtime import STACK_BASE, STACK_SIZE, make_package
+from stack_verifier import emit_stack_descriptor, verify_stack_functions
 
 
 def emit_factory(names, body_hash, returns, root_name=None):
@@ -43,11 +44,39 @@ def emit_factory(names, body_hash, returns, root_name=None):
     return "\n".join(lines + ["}", ""])
 
 
+def emit_stack_factory(frame_names, leaf_names, root, body_hash, returns):
+    names = frame_names + leaf_names
+    require(frame_names and len(frame_names) <= 32 and len(leaf_names) <= 256 and len(names) == len(set(names)) and
+            all(re.fullmatch(r"[a-z][a-z0-9_]{0,63}", n) for n in names), "invalid stack registry names")
+    require(type(root) is int and 0 <= root < 1 << 64 and root % 4 == 0, "invalid stack root")
+    require(0 < len(returns) <= 256 and returns == sorted(set(returns)) and
+            all(type(pc) is int and 0 <= pc < 1 << 64 and pc % 4 == 0 for pc in returns), "invalid return sites")
+    digest = bytes.fromhex(body_hash)
+    require(len(digest) == 32, "invalid image SHA-256")
+    lines = ['#include "stack_dispatch.h"',
+        'OOT_LIFT_EXPORT OotStackDispatcher *oot_create_bound_registry(OotRuntimeImage *image, uint32_t *error)',
+        '{', '    static const uint8_t body_hash[32] = {' + ', '.join(f'0x{b:02x}' for b in digest) + '};',
+        '    static const uint64_t returns[] = {' + ', '.join(f'UINT64_C(0x{pc:x})' for pc in returns) + '};',
+        f'    OotStackFunction frames[{len(frame_names)}];']
+    if leaf_names:
+        lines += [f'    OotLeafFunction leaves[{len(leaf_names)}];', f'    OotCodeHash hashes[{len(leaf_names)}];']
+    for i, name in enumerate(frame_names):
+        lines += [f'    frames[{i}] = *oot_stack_descriptor_{name}();']
+    for i, name in enumerate(leaf_names):
+        lines += [f'    leaves[{i}] = *oot_leaf_descriptor_{name}();', f'    hashes[{i}] = *oot_leaf_code_hash_{name}();']
+    lines += [f'    return oot_stack_create(image, frames, {len(frame_names)}, UINT64_C(0x{root:x}),',
+        f'        {"leaves" if leaf_names else "NULL"}, {len(leaf_names)}, {"hashes" if leaf_names else "NULL"},',
+        f'        body_hash, returns, {len(returns)}, error);', '}', '']
+    return '\n'.join(lines)
+
+
 def build_bundle(linker, config):
     require(isinstance(config, dict) and type(config.get("schema_version")) is int and
-            config["schema_version"] == 1, "unsupported registry config")
+            config["schema_version"] in (1, 2), "unsupported registry config")
+    stack_profile = config["schema_version"] == 2
     records = config.get("leaves")
-    require(isinstance(records, list) and 0 < len(records) <= 256, "registry requires 1-256 explicit leaves")
+    require(isinstance(records, list) and (0 if stack_profile else 1) <= len(records) <= 256,
+            "invalid explicit leaf selection count")
     modules, names = {m.name: m for m in linker.modules}, set()
 
     def selected(record):
@@ -64,8 +93,16 @@ def build_bundle(linker, config):
                 "entry": module.base + offset, "data": bytes(module.image[offset:offset + size])}
 
     leaves = sorted([selected(record) for record in records], key=lambda x: x["entry"])
-    root = selected(config["root"]) if config.get("root") is not None else None
-    ranges = sorted((r["entry"], r["entry"] + r["size"]) for r in leaves + ([root] if root else []))
+    frames = []
+    if stack_profile:
+        require(isinstance(config.get("frames"), list) and 0 < len(config["frames"]) <= 32, "invalid frame selections")
+        frames = sorted([selected(record) for record in config["frames"]], key=lambda x: x["entry"])
+        require(isinstance(config.get("root"), str), "stack root must name a selected frame")
+        root = next((f for f in frames if f["name"] == config["root"]), None)
+        require(root is not None, "stack root must name a selected frame")
+    else:
+        root = selected(config["root"]) if config.get("root") is not None else None
+    ranges = sorted((r["entry"], r["entry"] + r["size"]) for r in leaves + (frames if stack_profile else [root] if root else []))
     require(all(a[1] <= b[0] for a, b in zip(ranges, ranges[1:])), "registered code ranges overlap")
     returns = config.get("return_sites")
     require(isinstance(returns, list) and returns and len(returns) <= 256 and all(type(x) is int for x in returns), "invalid return sites")
@@ -79,19 +116,31 @@ def build_bundle(linker, config):
         leaf["verification"] = verify_leaf(leaf["data"], leaf["entry"])
         function = "oot_lift_" + leaf["name"]
         chunks += [emit_c(leaf["data"], leaf["entry"], function)[0], emit_leaf_descriptor(leaf["data"], leaf["entry"], function)]
-    if root:
+    if stack_profile:
+        proofs = verify_stack_functions({f["entry"]: f["data"] for f in frames},
+                                       {f["entry"]: f["data"] for f in leaves}, root["entry"])
+        for frame in frames:
+            frame["verification"] = proofs[frame["entry"]]
+            function = "oot_lift_" + frame["name"]
+            chunks += [emit_c(frame["data"], frame["entry"], function)[0], emit_stack_descriptor(frame["verification"], function)]
+        chunks += [emit_stack_factory([f["name"] for f in frames], [f["name"] for f in leaves],
+            root["entry"], image_report["body_sha256"], returns)]
+    elif root:
         callees = {leaf["entry"]: leaf["data"] for leaf in leaves}
         root["verification"] = verify_frame(root["data"], root["entry"], callees)
         function = "oot_lift_" + root["name"]
         chunks += [emit_c(root["data"], root["entry"], function)[0], emit_frame_descriptor(root["data"], root["entry"], callees, function)]
-    chunks += [emit_factory([r["name"] for r in leaves], image_report["body_sha256"], returns, root["name"] if root else None)]
+    if not stack_profile:
+        chunks += [emit_factory([r["name"] for r in leaves], image_report["body_sha256"], returns, root["name"] if root else None)]
     source = "\n".join(chunks)
-    manifest = {"schema_version": 1, "format": "bound-native-registry", "guest_code_executed": False,
-                "factory": "oot_create_bound_registry", "profile": "frame" if root else "leaf",
+    manifest = {"schema_version": config["schema_version"], "format": "bound-native-registry", "guest_code_executed": False,
+                "factory": "oot_create_bound_registry", "profile": "stack-dag" if stack_profile else "frame" if root else "leaf",
                 "registry_source_sha256": hashlib.sha256(source.encode()).hexdigest(), "return_sites": returns,
                 "image": image_report,
                 "leaves": [{k: v for k, v in r.items() if k != "data"} for r in leaves],
                 "root": {k: v for k, v in root.items() if k != "data"} if root else None}
+    if stack_profile:
+        manifest["frames"] = [{k: v for k, v in f.items() if k != "data"} for f in frames]
     return package, source, manifest
 
 
