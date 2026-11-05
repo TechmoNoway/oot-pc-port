@@ -14,10 +14,12 @@ An offline [input inspector](docs/input-inspection.md) reads NUP, NSO, and NPDM 
 
 [ARM64 analysis](docs/arm64-analysis.md) surveys decoded instruction families, metadata-based entry candidates, direct control flow, unresolved indirect branches, and recognized `setjmp`/`longjmp` PLT calls. Syntax decoding is separate from C-lifter support.
 
-The game is not playable yet. Native guest-memory mapping, ARM64 translation, operating-system services, and graphics are planned.
+A bounded [ARM64 C lifter](docs/arm64-lifter.md) translates selected integer operations and control flow. Generated synthetic C runs natively on Windows and is compared with an independent ARM64 reference for register, PC, and flag behavior. Unsupported encodings are rejected.
+
+The game is not playable yet. Guest memory access, broader instruction semantics, operating-system services, and graphics remain to be implemented.
 
 ## Development direction
 
-The next milestones are a tested integer/control-flow lifter, indirect-target recovery, native guest-memory mapping, operating-system services, and graphics. See [docs/architecture.md](docs/architecture.md).
+The next milestones are checked guest-memory access with load/store translation, broader integer coverage, indirect-target recovery, operating-system services, and graphics. See [docs/architecture.md](docs/architecture.md).
 
 Game containers, keys, extracted files, generated game code, saves, shader caches, and compiled executables stay outside version control. Build output belongs under `build/`; future generated output belongs under `generated/`.

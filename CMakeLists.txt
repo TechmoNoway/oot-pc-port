@@ -47,10 +47,10 @@ endif()
 
 find_package(Python3 3.10 COMPONENTS Interpreter QUIET)
 if(Python3_FOUND)
-    add_test(NAME input_inspection_tests
+    add_test(NAME python_tests
         COMMAND "${Python3_EXECUTABLE}" -B -m unittest discover -s "${CMAKE_CURRENT_SOURCE_DIR}/tests" -v)
     if(TARGET oot-zbic-decode)
-        set_tests_properties(input_inspection_tests PROPERTIES
+        set_tests_properties(python_tests PROPERTIES
             ENVIRONMENT "OOT_ZBIC_DECODER=$<TARGET_FILE:oot-zbic-decode>")
     endif()
 endif()

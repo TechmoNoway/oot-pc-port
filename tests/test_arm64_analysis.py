@@ -139,7 +139,12 @@ class DiscoveryTests(unittest.TestCase):
         self.assertEqual(result["function_entry_candidate_count"], 3)
         self.assertEqual(result["control_flow"]["direct_call"], 1)
         self.assertFalse(result["all_code_discovered"])
-        self.assertEqual(result["lifter_implemented_instruction_count"], 0)
+        self.assertFalse(result["lifter_coverage_measured"])
+        self.assertIsNone(result["lifter_supported_encoding_words"])
+        coverage = analyze_module(module, self.decoder, lifter_coverage=True)
+        self.assertEqual(coverage["lifter_supported_encoding_words"], 8)
+        self.assertEqual(coverage["lifter_unsupported_encoding_words"], 1)
+        self.assertEqual(sum(coverage["lifter_form_counts"].values()), 8)
 
     def test_undecoded_frontier_is_not_silently_skipped(self):
         module = Module("main", synthetic_module({0: branch(0, 0x40), 0x40: 0xFFFFFFFF, 0x44: RET}))
@@ -221,7 +226,8 @@ class DiscoveryTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             data = json.loads(report.read_text())
             self.assertFalse(data["guest_code_executed"])
-            self.assertFalse(data["lifter_implemented"])
+            self.assertFalse(data["translation_performed"])
+            self.assertFalse(data["lifter"]["coverage_measured"])
             self.assertEqual(len(data["modules"]), 1)
 
 

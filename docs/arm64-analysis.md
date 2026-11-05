@@ -43,7 +43,7 @@ This does not implement nonlocal returns or find arbitrary indirect calls to tho
 - `function_entry_candidate_count` and `candidate_source_counts` preserve the nature of the entry evidence; source counts overlap.
 - Mnemonic and encoding-family histograms describe discovered syntax. SIMD memory operations can remain in the load/store family; ordered/atomic and authentication groups are mnemonic refinements, not an exhaustive architectural feature model.
 - Unresolved indirect calls and branches are counted and sampled. Jump tables and arbitrary register values are not resolved yet. In-module direct edges are followed; external direct targets are reported rather than guessed.
-- `lifter_implemented_instruction_count` is zero and `decoded_code_semantics_not_implemented` covers the discovered syntax. No successful decoder result implies working C translation.
+- Schema version 2 separates syntax from semantic coverage. With `--lifter-coverage`, `lifter_supported_encoding_words`, `lifter_unsupported_encoding_words`, and `lifter_form_counts` classify discovered syntax using the [C lifter's](arm64-lifter.md) exact encoding decoder. Without this option the counts are null. Supported encodings do not imply complete functions, resolved indirect calls, or successful game execution. This census does not generate or execute translated code.
 - `all_code_discovered`, `coverage_is_complete`, `nonlocal_runtime_implemented`, and `guest_code_executed` remain false. Zero undecoded frontiers does not remove unresolved indirect targets or unclassified words.
 
 `--samples N` bounds general diagnostic samples from zero to 4096. Nonlocal direct-call records are retained in full. The tool does not write a complete CFG or translated functions in this milestone.
@@ -52,6 +52,6 @@ This does not implement nonlocal returns or find arbitrary indirect calls to tho
 
 Synthetic tests cover branch displacements, literal widths, indirect boundaries, metadata entries, PLT/GOT matching, nonlocal continuations, undecoded frontiers, ambiguous literals, report accounting, and deterministic output. Run the full suite using the project environment. Decoder integration tests skip when the optional analysis dependency is missing; CI installs it so those tests run.
 
-The next implementation step is a small integer/control-flow lifter with explicit register, flag, and memory state plus differential verification. Indirect-target recovery, pointer authentication, atomic/exclusive behavior, SIMD/FP, and nonlocal returns require separate semantic work.
+The integer/control-flow subset now has [native differential verification](arm64-lifter.md). Checked guest-memory access and load/store translation are next. Indirect-target recovery, pointer authentication, atomic/exclusive behavior, SIMD/FP, and nonlocal returns require separate semantic work.
 
 References: [Capstone Python API](https://www.capstone-engine.org/lang_python.html), [Arm A64 instruction set](https://developer.arm.com/documentation/ddi0602/latest), and [ELF function symbol metadata](https://gabi.xinuos.com/elf/05-symtab.html).

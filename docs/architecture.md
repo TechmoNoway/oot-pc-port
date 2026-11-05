@@ -10,7 +10,9 @@ The offline Python [input inspector](input-inspection.md) reads NUP, NSO, NPDM, 
 
 The [offline linker](offline-linking.md) reads MOD0, dynamic tables, and symbols, establishes guest addresses for private module images, zero-initializes BSS, and applies supported AArch64 relocations. Images can be exported only after a complete link. This does not yet map native host memory or execute guest code.
 
-[ARM64 analysis](arm64-analysis.md) uses a separate disassembly backend and project control-flow logic to survey prepared code. It reports evidence-based entry candidates and follows direct edges; indirect targets and nonlocal-return semantics remain explicit gaps. There is no implemented C lifter yet.
+[ARM64 analysis](arm64-analysis.md) uses a separate disassembly backend and project control-flow logic to survey prepared code. It reports evidence-based entry candidates and follows direct edges; indirect targets and nonlocal-return semantics remain explicit gaps. Optional semantic coverage classifies exact encodings using the lifter's decoder without executing game code.
+
+The [integer/control-flow lifter](arm64-lifter.md) emits C17 for a bounded raw code range. It maintains explicit X registers, SP, PC, and NZCV, returns to a dispatcher when PC leaves the translated range, and enforces an instruction budget. Its generated synthetic programs compile to native Windows code and are compared with Unicorn ARM64. This is a subset implementation: memory instructions, native module dispatch, and host services are not connected to the game.
 
 ## Planned boundaries
 
@@ -22,6 +24,8 @@ The [offline linker](offline-linking.md) reads MOD0, dynamic tables, and symbols
 6. Graphics: establish the graphics API boundary, translate required shaders, and connect it to a native renderer.
 
 Each boundary needs a verifiable milestone before work advances to gameplay. A successful compilation is not evidence of correct game execution.
+
+The next implementation milestone is a checked guest-memory interface plus scalar load/store semantics, including width, sign extension, addressing, and faults. Extend the same synthetic differential validation to memory contents before attempting translated game functions. Additional integer forms, SIMD/FP, atomics/exclusives, nonlocal returns, and indirect-target discovery remain separate requirements.
 
 ## Repository boundaries
 

@@ -7,6 +7,7 @@ import struct
 from arm64_decode import (CALL, CONDITIONAL, FAMILIES, INDIRECT_CALL, INDIRECT_JUMP, JUMP, NORMAL, RETURN,
                           TRAP, direct_target, literal_reference, signed)
 from input_formats import InputError, require
+from arm64_lifter import UnsupportedInstruction, decode_instruction
 from module_linker import MAX_RELOCATIONS, MAX_SYMBOLS
 
 SOURCES = {"module_entry": 1, "unwind_table": 2, "function_symbol": 4, "initializer": 8,
@@ -95,7 +96,7 @@ def relocated_code_seeds(modules):
     return found
 
 
-def analyze_module(module, decoder, pointer_seeds=(), progress=None, sample_limit=32):
+def analyze_module(module, decoder, pointer_seeds=(), progress=None, sample_limit=32, lifter_coverage=False):
     require(0 <= sample_limit <= 4096, "Analysis sample limit must be between 0 and 4096")
     ids, flows, families, mnemonics, linear = decoder.scan(module, progress)
     words = len(ids)
@@ -133,6 +134,7 @@ def analyze_module(module, decoder, pointer_seeds=(), progress=None, sample_limi
         seed(pc, "plt_stub")
     plt_returns = {pc + 12: item for pc, item in stubs.items()}
     histogram, groups, control, svc = Counter(), Counter(), Counter(), Counter()
+    supported_forms = Counter()
     unknown, branch_samples, indirect_samples, nonlocal_calls = [], [], [], []
     outside, unknown_count, unresolved_jumps, unresolved_calls = 0, 0, 0, 0
 
@@ -159,6 +161,13 @@ def analyze_module(module, decoder, pointer_seeds=(), progress=None, sample_limi
             mnemonic, flow = mnemonics[identifier], flows[index]
             histogram[mnemonic] += 1
             groups[FAMILIES[families[index]]] += 1
+            if lifter_coverage:
+                try:
+                    implemented = decode_instruction(word, module.base + pc)
+                except UnsupportedInstruction:
+                    pass
+                else:
+                    supported_forms[implemented.form] += 1
             literal = literal_reference(word, pc)
             if literal:
                 begin, width = literal
@@ -230,5 +239,9 @@ def analyze_module(module, decoder, pointer_seeds=(), progress=None, sample_limi
         "nonlocal_plt_stubs": [{"offset": pc, **item} for pc, item in stubs.items() if item["symbol"] in NONLOCAL],
         "nonlocal_direct_calls": nonlocal_calls, "nonlocal_runtime_implemented": False,
         "sample_limit": sample_limit, "all_code_discovered": False,
-        "lifter_implemented_instruction_count": 0, "decoded_code_semantics_not_implemented": decoded_code,
+        "lifter_coverage_measured": lifter_coverage,
+        "lifter_supported_encoding_words": sum(supported_forms.values()) if lifter_coverage else None,
+        "lifter_unsupported_encoding_words": decoded_code - sum(supported_forms.values()) if lifter_coverage else None,
+        "lifter_form_counts": dict(sorted(supported_forms.items())) if lifter_coverage else None,
+        "translated_code_executed": False,
     }

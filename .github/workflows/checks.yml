@@ -17,13 +17,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.14'
-      - name: Install analysis dependency
-        run: python -m pip install --only-binary=:all: -r tools/requirements-analysis.txt
+      - name: Install analysis and differential-test dependencies
+        run: python -m pip install --only-binary=:all: -r tools/requirements-lifter.txt
       - name: Prepare pinned ZBIC dependency
         run: python -B tools/build_zbic.py --fetch --fetch-only
       - name: Configure Windows host and ZBIC helper
         run: cmake -S . -B build -A x64 -DOOT_ZBIC_SOURCE="${{ github.workspace }}/toolchain/zbic-src"
       - name: Build Windows host
         run: cmake --build build --config Release
-      - name: Test host and input inspector
+      - name: Test host, offline tools, and native lifted C
         run: ctest --test-dir build -C Release --output-on-failure
