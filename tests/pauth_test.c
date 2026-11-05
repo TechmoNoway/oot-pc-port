@@ -17,6 +17,9 @@ int main(void)
     OotArm64State s = {0}, before;
     unsigned i;
     CHECK(context && oot_pauth_model(context) == OOT_PAUTH_QARMA5_VA39);
+    CHECK(!oot_pauth_retain(NULL));
+    CHECK(oot_pauth_retain(context));
+    oot_pauth_destroy(context); /* The retained reference must remain usable. */
     memset(&keys, 0, sizeof(keys)); /* Context owns a copy. */
     s.sp = UINT64_C(0x7000001000); s.nzcv = 0xf0000000;
     for (i = 0; i < 2; ++i) {

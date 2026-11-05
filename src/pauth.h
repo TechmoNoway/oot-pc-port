@@ -26,6 +26,8 @@ enum OotPauthResult {
  * Do not serialize it, log keys, use a destroyed pointer, or destroy during a call. */
 OOT_MEMORY_API OotPauth *oot_pauth_create(uint32_t model, const OotPauthKeys *keys);
 OOT_MEMORY_API void oot_pauth_destroy(OotPauth *context);
+/* Single-threaded shared ownership; destroy releases one reference. */
+OOT_MEMORY_API int oot_pauth_retain(OotPauth *context);
 OOT_MEMORY_API uint32_t oot_pauth_model(const OotPauth *context);
 
 /* Only PACIASP/PACIBSP/AUTIASP/AUTIBSP/RETAA/RETAB. Keys always enabled,

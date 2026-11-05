@@ -7,6 +7,7 @@
 
 struct OotPauth {
     uint32_t model;
+    uint32_t references;
     OotPauthKeys keys;
 };
 
@@ -138,15 +139,25 @@ OotPauth *oot_pauth_create(uint32_t model, const OotPauthKeys *keys)
         return NULL;
     }
     context->model = model;
+    context->references = 1;
     return context;
 }
 
 void oot_pauth_destroy(OotPauth *context)
 {
     if (context) {
+        if (context->references > 1) { --context->references; return; }
         SecureZeroMemory(context, sizeof(*context));
         free(context);
     }
+}
+
+int oot_pauth_retain(OotPauth *context)
+{
+    if (!context || context->model != OOT_PAUTH_QARMA5_VA39 || !context->references ||
+        context->references == UINT32_MAX) return 0;
+    ++context->references;
+    return 1;
 }
 
 uint32_t oot_pauth_model(const OotPauth *context)

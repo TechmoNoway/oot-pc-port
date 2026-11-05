@@ -33,6 +33,7 @@ def main():
     parser.add_argument("--report", type=Path, required=True)
     parser.add_argument("--samples", type=int, default=16)
     parser.add_argument("--max-words", type=int, default=256)
+    parser.add_argument("--pauth", action="store_true", help="separate PAC policy/discovery survey; preserve default profiles")
     args = parser.parse_args()
     try:
         path = build_destination(args.report)
@@ -44,7 +45,7 @@ def main():
         print("Verified prepared inputs and complete link; surveying metadata candidates.", file=sys.stderr, flush=True)
         def progress(module, stage, done, total):
             print(f"{module}: {stage} {done}/{total}", file=sys.stderr, flush=True)
-        report = survey_modules(linker.modules, args.samples, args.max_words, progress)
+        report = survey_modules(linker.modules, args.samples, args.max_words, progress, pauth=args.pauth)
         report["offline_link"] = linked
         write_report(report, path)
         print(json.dumps({"report": str(path), "metadata_entry_candidates": report["totals"]["metadata_entry_candidates"],

@@ -65,7 +65,30 @@ Discovery blockers were 190,368 unsupported-encoding frontiers, 31,286 window bo
 
 Diagnostic prefix observations found 74,101 FP/LR pre-index stores, 57,766 SUB-SP allocations, 3,992 other pre-index stack-pair stores, and 148,537 other starts, including observations following leading hints. These observations do not increase accepted-profile counts. They help choose future layouts after the earlier semantic frontiers are addressed.
 
-The separate [PAC/authenticated-return model](pointer-authentication.md) now passes synthetic native/reference tests. The immediate priority is integrating it into an explicit function policy/dispatcher, followed by a new survey and ordered/atomic memory semantics. PAC must not be removed or treated as an unverified no-op to inflate coverage. Loop/layout, indirect-target, general memory, startup, service, and renderer requirements remain separate. These counts measure policy acceptance of candidate regions, not gameplay progress or permission to execute game code.
+The [PAC/authenticated-return model](pointer-authentication.md) is now integrated through a separate [PAC-aware policy/dispatcher](pauth-stack-dispatch.md). PAC is never removed or treated as an unverified no-op to inflate coverage. Loop/layout, indirect-target, general memory, startup, service, and renderer requirements remain separate. These counts measure policy acceptance of candidate regions, not gameplay progress or permission to execute game code.
+
+## Separate PAC policy survey
+
+`--pauth` opts into the six implemented PAC/AUT/authenticated-return encodings during discovery and evaluates only `pauth-layout-stack-dag-v4`. Default discovery and its five existing profiles remain unchanged. Both paths verify original linked bytes and actual callee closures.
+
+```powershell
+.venv\Scripts\python.exe -B tools/survey_function_profiles.py build/prepared/oot111 `
+  --pauth --report build/function-profiles/oot111-pauth-v4.json
+```
+
+Fresh default and PAC surveys of local 1.1.1 inputs have identical module source and linked-text hashes. Their aggregate results are:
+
+| Measurement | Default discovery | PAC discovery |
+| --- | ---: | ---: |
+| Metadata entry candidates | 284,396 | 284,396 |
+| Bounded semantic regions | 58,638 | 115,164 |
+| Discovery blocked | 225,758 | 169,232 |
+
+Default profile acceptance remains 40,038 register-only leaf candidates and zero framed candidates under policies 1-3. The separate PAC policy accepts **1,686 framed candidate regions**, containing 13,494 declared instruction words: 1,685 candidates in main and one in sdk. It rejects the remaining 113,478 discovered regions, including unsigned entries, unsupported layouts/memory effects, size limits, and unavailable callees. These are metadata/window candidates rather than proven original functions.
+
+PAC discovery exposes 39,893 first unsupported ordered/atomic frontiers, including 34,202 LDAPRB frontiers. This larger count reflects traversal beyond earlier PAC blockers. Six first unsupported PAC-family encodings remain outside the implemented subset. Other first unsupported families include load/store (17,981), integer (14,174), SIMD/FP (5,731), other control flow (1,219), system (1,218), and supervisor calls (64). First-failure counts are neither total instruction frequencies nor whole-game coverage.
+
+Both surveys are static: no generated C, native callback registration, or game execution. Private reports remain under ignored `build/function-profiles/`. Ordered loads and their memory/threading contract are the next priority.
 
 ## Verification
 

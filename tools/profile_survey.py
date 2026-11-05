@@ -13,6 +13,8 @@ from input_formats import require
 from leaf_verifier import verify_leaf
 from stack_cfg_verifier import verify_cfg_stack_functions
 from stack_layout_verifier import verify_layout_stack_functions
+from stack_layout_verifier import verify_pauth_stack_functions
+from pauth_lifter import decode_pauth_instruction, MODEL
 from stack_verifier import verify_stack_functions
 
 PROFILES = ("register_leaf", "leaf_caller", "linear_stack", "cfg_stack", "fixed_layout")
@@ -69,7 +71,7 @@ def metadata_windows(module, max_words):
         yield offset, end, sorted(entries[offset]), sorted(k for k, v in limits.items() if v == end)
 
 
-def discover(module, offset, end, sources, syntax):
+def discover(module, offset, end, sources, syntax, pauth=False):
     base, stop = module.base + offset, module.base + end
     pending, seen, calls, returns = [base], set(), [], 0
     while pending:
@@ -79,11 +81,13 @@ def discover(module, offset, end, sources, syntax):
             return None, {"reason": "window_boundary", "offset": pc - module.base}
         seen.add(pc)
         word = struct.unpack_from("<I", module.image, pc - module.base)[0]
-        try: i = decode_instruction(word, pc)
+        try: i = (decode_pauth_instruction if pauth else decode_instruction)(word, pc)
         except UnsupportedInstruction:
             mnemonic, category = syntax.describe(word)
             return None, {"reason": "unsupported_encoding", "offset": pc - module.base, "mnemonic": mnemonic, "category": category}
-        if i.form == "branch_register":
+        if pauth and i.form in ("retaa", "retab"):
+            returns += 1
+        elif i.form == "branch_register":
             if word != 0xD65F03C0:
                 reason = "nonstandard_return" if word & 0xFFFFFC1F == 0xD65F0000 else "indirect_call" if i.operation else "indirect_jump"
                 return None, {"reason": reason, "offset": pc - module.base}
@@ -151,7 +155,8 @@ def check_profile(profile, region, regions, leaf_codes):
     if profile == "register_leaf": return verify_leaf(region.data, region.entry), 1, 0
     leaves = {pc: leaf_codes[pc] for pc in region.calls if pc in leaf_codes}
     if profile == "leaf_caller": return verify_frame(region.data, region.entry, leaves), 1, len(leaves)
-    verifier = {"linear_stack": verify_stack_functions, "cfg_stack": verify_cfg_stack_functions, "fixed_layout": verify_layout_stack_functions}[profile]
+    verifier = {"linear_stack": verify_stack_functions, "cfg_stack": verify_cfg_stack_functions,
+                "fixed_layout": verify_layout_stack_functions, "pauth_stack": verify_pauth_stack_functions}[profile]
     # Most roots fail their own policy. Run the real root-only verifier first,
     # with actual verified leaf bytes; no fabricated callee bodies are supplied.
     try: return verifier({region.entry: region.data}, leaves, region.entry)[region.entry], 1, len(leaves)
@@ -173,9 +178,11 @@ def check_profile(profile, region, regions, leaf_codes):
     return proof, len(frames), len(leaves)
 
 
-def survey_modules(modules, sample_limit=16, max_words=256, progress=None):
+def survey_modules(modules, sample_limit=16, max_words=256, progress=None, pauth=False):
     require(type(sample_limit) is int and 0 <= sample_limit <= 4096, "survey sample limit must be 0-4096")
     require(type(max_words) is int and 1 <= max_words <= 256, "survey word limit must be 1-256")
+    require(type(pauth) is bool, "PAC survey opt-in must be boolean")
+    profiles = ("pauth_stack",) if pauth else PROFILES
     syntax, regions, reports, module_reports = Syntax(), {}, [], {}
     for module in modules:
         windows = list(metadata_windows(module, max_words))
@@ -187,7 +194,7 @@ def survey_modules(modules, sample_limit=16, max_words=256, progress=None):
             prefix = observe_prefix(module, offset, end, syntax)
             shapes[prefix["shape"]] += 1; hints.update(prefix["leading_hints"])
             if prefix["allocation_bytes"] is not None: frame_sizes[str(prefix["allocation_bytes"])] += 1
-            region, failure = discover(module, offset, end, sources, syntax)
+            region, failure = discover(module, offset, end, sources, syntax, pauth)
             if failure:
                 counts[failure["reason"]] += 1
                 if "mnemonic" in failure: mnemonics[failure["mnemonic"]] += 1; categories[failure["category"]] += 1
@@ -204,14 +211,14 @@ def survey_modules(modules, sample_limit=16, max_words=256, progress=None):
                 "diagnostic_only": True, "hints_removed_for_verification": False}, "profiles": {}}
         reports.append(result); module_reports[module.name] = result
     leaf_codes = {}
-    outcomes = {name: {} for name in PROFILES}
+    outcomes = {"register_leaf": {}}
     for entry, region in regions.items():
         try: proof = verify_leaf(region.data, entry)
         except ValueError as error: outcomes["register_leaf"][entry] = (None, *rejection(error))
         else:
             leaf_codes[entry] = region.data
             outcomes["register_leaf"][entry] = (proof_summary(proof), None, None)
-    for name in PROFILES:
+    for name in profiles:
         by_module = {m.name: {"accepted_regions": 0, "accepted_instruction_words": 0, "rejected": Counter(), "details": Counter(),
             "accepted_samples": [], "rejected_samples": []} for m in modules}
         for index, (entry, region) in enumerate(regions.items()):
@@ -243,7 +250,7 @@ def survey_modules(modules, sample_limit=16, max_words=256, progress=None):
             result["profiles"][name] = row
     totals = {"metadata_entry_candidates": sum(m["metadata_entry_candidates"] for m in reports),
         "complete_regions": len(regions), "discovery_blocked": sum(sum(m["discovery"]["blocked"].values()) for m in reports), "profiles": {}}
-    for name in PROFILES:
+    for name in profiles:
         rows = [m["profiles"][name] for m in reports]
         rejected = Counter()
         for row in rows: rejected.update(row["rejected"])
@@ -265,10 +272,12 @@ def survey_modules(modules, sample_limit=16, max_words=256, progress=None):
     totals["prefix_observations"]["allocations_outside_16_256_aligned_range"] = sum(sizes.values()) - totals["prefix_observations"]["allocations_in_16_256_aligned_range"]
     return {"schema_version": 1, "format": "arm64-function-profile-survey", "guest_code_executed": False,
         "translation_performed": False, "native_callbacks_registered": False, "function_identity_proven": False,
-        "coverage_is_complete": False, "decoder": syntax.metadata, "policies": dict(zip(PROFILES, POLICIES)),
+        "coverage_is_complete": False, "decoder": syntax.metadata,
+        "policies": {"pauth_stack": "pauth-layout-stack-dag-v4"} if pauth else dict(zip(PROFILES, POLICIES)),
+        "pauth_model": MODEL if pauth else None,
         "method": {"seeds": ["module_entry", "unwind_table", "defined_function_symbol"], "max_words": max_words,
             "region_boundary": "minimum of next metadata entry, symbol size, exact text end, word limit",
-            "traversal": "supported-encoding CFG, fallthrough-first; calls use continuation only; standard RET X30 exits",
+            "traversal": "supported-encoding CFG, fallthrough-first; calls use continuation only; standard RET X30 exits" + ("; RETAA/RETAB exits enabled" if pauth else ""),
             "profile_checks": "unaltered source bytes and actual production verifiers; actual verified callee closures only",
             "prefix_observations": "diagnostic only; never strip hints/PAC, relax policy, emit C, or execute candidates",
             "denominator": "metadata entry candidates, not all original game functions or gameplay coverage"},

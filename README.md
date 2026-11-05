@@ -30,14 +30,14 @@ A bounded [ARM64 C lifter](docs/arm64-lifter.md) translates selected integer ope
 
 [Fixed frame layouts](docs/stack-layouts.md) add separate SUB/ADD stack allocation, offset FP/LR records, sparse save slots, delayed FP setup, and negative FP-relative locals. Synthetic mixed-layout calls and a full 16-frame stack boundary match ARM64 reference execution.
 
-A [static profile survey](docs/function-profile-survey.md) measures the actual verifiers against metadata-rooted private game regions without translation or execution. The local 1.1.1 survey accepts 40,038 leaf candidates; framed candidates remain blocked, with pointer authentication the dominant first unsupported category.
+A [static profile survey](docs/function-profile-survey.md) measures the actual verifiers against metadata-rooted private game regions without translation or execution. The default local 1.1.1 survey accepts 40,038 leaf candidates; its older framed policies remain blocked.
 
-An opt-in [pointer authentication model](docs/pointer-authentication.md) implements QARMA5 signing, authentication, and authenticated returns for a specified 39-bit address configuration. Native synthetic comparisons cover signed pointers, failed authentication, nested stack frames, and resumable budgets on MSVC and GCC. Integration into verified function dispatch remains pending.
+An opt-in [pointer authentication model](docs/pointer-authentication.md) implements QARMA5 signing, authentication, and authenticated returns for a specified 39-bit address configuration. A separate [PAC-aware dispatcher](docs/pauth-stack-dispatch.md) retains keys across yields, tracks signed frame records, and validates approved returns through policy 4/schema 5. Native synthetic tests pass on MSVC and GCC. A separate static survey accepts 1,686 PAC framed candidates; game code remains unexecuted.
 
 The game is not playable yet. Process startup, broader instruction semantics, operating-system services, and graphics remain to be implemented.
 
 ## Development direction
 
-The next milestones are PAC-aware verified function dispatch and a repeated static survey, ordered/atomic memory semantics, further frame layouts and loop verification, wider memory/call support, process startup and operating-system services, and graphics. See [docs/architecture.md](docs/architecture.md).
+The next milestones are ordered/atomic memory semantics, wider memory/call support, further frame layouts and loop verification, process startup and operating-system services, and graphics. See [docs/architecture.md](docs/architecture.md).
 
 Game containers, keys, extracted files, generated game code, saves, shader caches, and compiled executables stay outside version control. Build output belongs under `build/`; future generated output belongs under `generated/`.

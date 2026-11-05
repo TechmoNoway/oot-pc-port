@@ -9,8 +9,10 @@ from input_formats import require
 from leaf_verifier import VALUE_FORMS, leaf_edges, verify_leaf
 from stack_cfg_verifier import BRANCH, SAVE, RESTORE, NONE, verify_cfg_graphs
 from stack_verifier import MAX_FUNCTIONS, MAX_WORDS, MAX_FRAME, OPEN, FP, NORMAL, CALL, CLOSE, RETURN, LOAD, STORE
+from pauth_lifter import decode_pauth_block, MODEL
 
 ALLOC, RECORD_SAVE, RECORD_RESTORE, DEALLOC = 11, 12, 13, 14
+SIGN, AUTH = 15, 16
 
 
 def sp_change(i, subtract):
@@ -33,6 +35,14 @@ def access(i, record, fp_ready):
 
 
 def verify_layout_stack_functions(frames, leaves, root):
+    return _verify_layout(frames, leaves, root, False)
+
+
+def verify_pauth_stack_functions(frames, leaves, root):
+    return _verify_layout(frames, leaves, root, True)
+
+
+def _verify_layout(frames, leaves, root, pauth):
     require(0 < len(frames) <= MAX_FUNCTIONS and len(leaves) <= 256 and root in frames, "invalid layout registry/root")
     ranges = sorted((entry, entry + len(code)) for entry, code in [*frames.items(), *leaves.items()])
     require(all(a[1] <= b[0] for a, b in zip(ranges, ranges[1:])), "layout registry code overlaps")
@@ -40,23 +50,37 @@ def verify_layout_stack_functions(frames, leaves, root):
     proofs = {}
     for entry, data in frames.items():
         require(16 <= len(data) <= MAX_WORDS * 4, "layout function size exceeds policy")
-        ins = decode_block(data, entry)
-        split = sp_change(ins[0], True)
-        size = ins[0].immediate if split else -ins[0].immediate
-        require(16 <= size <= MAX_FRAME and size % 16 == 0 and ins[-1].word == 0xD65F03C0, "invalid fixed frame/return")
-        if split:
-            require(len(ins) >= 6 and record_access(ins[1], False) and not ins[1].writeback and not ins[1].post_index,
-                    "split allocation requires offset FP/LR save")
-            record = ins[1].immediate
-            require(record >= 0 and record % 8 == 0 and record + 16 <= size, "invalid frame-record offset")
-            require(record_access(ins[-3], True) and not ins[-3].writeback and ins[-3].immediate == record and
-                    sp_change(ins[-2], False) and ins[-2].immediate == size, "mismatched split frame restore/deallocation")
-            start, tail = 2, 3
+        ins = (decode_pauth_block if pauth else decode_block)(data, entry)
+        head, auth_tail, signed = int(pauth), 0, 3 if pauth else 1
+        if pauth:
+            require(ins[0].form in ("paciasp", "pacibsp"), "PAC frame requires entry signing")
+            key_b = ins[0].form == "pacibsp"
+            if ins[-1].form in ("retaa", "retab"):
+                require(ins[-1].form == ("retab" if key_b else "retaa"), "PAC return key mismatch")
+                auth_word = ins[-1].word
+            else:
+                require(ins[-1].word == 0xD65F03C0 and ins[-2].form == ("autibsp" if key_b else "autiasp"),
+                        "PAC frame requires matching authentication/return")
+                auth_tail, auth_word = 1, ins[-2].word
         else:
-            require(record_access(ins[0], False) and ins[0].writeback and not ins[0].post_index and
-                    record_access(ins[-2], True) and ins[-2].post_index and ins[-2].immediate == size,
+            require(ins[-1].word == 0xD65F03C0, "invalid fixed frame/return")
+        split = sp_change(ins[head], True)
+        size = ins[head].immediate if split else -ins[head].immediate
+        require(16 <= size <= MAX_FRAME and size % 16 == 0, "invalid fixed frame/return")
+        close_index = len(ins) - 2 - auth_tail
+        if split:
+            require(len(ins) >= 6 + head + auth_tail and record_access(ins[head + 1], False) and not ins[head + 1].writeback and not ins[head + 1].post_index,
+                    "split allocation requires offset FP/LR save")
+            record = ins[head + 1].immediate
+            require(record >= 0 and record % 8 == 0 and record + 16 <= size, "invalid frame-record offset")
+            require(record_access(ins[close_index - 1], True) and not ins[close_index - 1].writeback and ins[close_index - 1].immediate == record and
+                    sp_change(ins[close_index], False) and ins[close_index].immediate == size, "mismatched split frame restore/deallocation")
+            start, tail = head + 2, 3 + auth_tail
+        else:
+            require(record_access(ins[head], False) and ins[head].writeback and not ins[head].post_index and
+                    record_access(ins[close_index], True) and ins[close_index].post_index and ins[close_index].immediate == size,
                     "unsupported combined frame layout")
-            record, start, tail = 0, 1, 2
+            record, start, tail = 0, head + 1, 2 + auth_tail
         reserved, saves, roles, fp_ready, mask = [(record, record + 16)], [], {}, False, 0
         index = start
         while index < len(ins) - tail:
@@ -89,9 +113,11 @@ def verify_layout_stack_functions(frames, leaves, root):
             s = {"kind": NORMAL, "offset": 0, "size": 0, "callee": 0}
             f = {"next": [index + 1], "saved_a": NONE, "saved_b": NONE, "writable_mask": 0}
             state = {"sp": 0, "fp": int(fp_ready), "lr": 0, "owner": 0}
-            if index == 0:
+            if pauth and index == 0:
+                s["kind"] = SIGN; state.update(sp=1, fp=0, lr=3)
+            elif index == head:
                 s.update(kind=ALLOC if split else OPEN, offset=0, size=0 if split else 16); state["owner"] = 1
-            elif split and index == 1:
+            elif split and index == head + 1:
                 s.update(kind=RECORD_SAVE, offset=record, size=16)
             elif index < body:
                 kind, offset, width, regs = roles[index]
@@ -122,12 +148,14 @@ def verify_layout_stack_functions(frames, leaves, root):
                 s.update(kind=RESTORE, offset=offset, size=width)
                 restored |= sum(1 << r for r in regs)
                 f.update(saved_a=regs[0], saved_b=regs[1] if len(regs) == 2 else NONE, writable_mask=mask & ~restored)
-            elif split and index == len(ins) - 3:
-                s.update(kind=RECORD_RESTORE, offset=record, size=16); state.update(fp=0, lr=1)
-            elif index == len(ins) - 2:
-                s["kind"] = DEALLOC if split else CLOSE; state.update(sp=1, fp=0, lr=1, owner=2)
+            elif split and index == close_index - 1:
+                s.update(kind=RECORD_RESTORE, offset=record, size=16); state.update(fp=0, lr=signed)
+            elif index == close_index:
+                s["kind"] = DEALLOC if split else CLOSE; state.update(sp=1, fp=0, lr=signed, owner=2)
+            elif pauth and auth_tail and index == len(ins) - 2:
+                s["kind"] = AUTH; state.update(sp=1, fp=0, lr=1)
             else:
-                s["kind"] = RETURN; f["next"] = []; state.update(sp=1, fp=0, lr=1)
+                s["kind"] = RETURN; f["next"] = []; state.update(sp=1, fp=0, lr=signed if pauth and not auth_tail else 1)
             steps.append(s); flows.append(f); states.append(state)
         proofs[entry] = {"schema_version": 1, "policy": "fixed-layout-stack-dag-v3", "base": entry,
             "instruction_count": len(ins), "byte_count": len(data), "frame_size": size, "record_offset": record,
@@ -136,12 +164,24 @@ def verify_layout_stack_functions(frames, leaves, root):
             "steps": steps, "control_flow": flows, "states": states, "calls": calls,
             "source_sha256": hashlib.sha256(data).hexdigest(), "guest_code_executed": False,
             "proof_scope": "structural layout/CFG policy, not original identity or universal semantics"}
+        if pauth:
+            proofs[entry].update(policy="pauth-layout-stack-dag-v4", pauth_model=MODEL,
+                                 sign_word=ins[0].word, auth_word=auth_word)
     return verify_cfg_graphs(proofs, leaf_proofs, root)
 
 
 def emit_layout_stack_descriptor(p, name):
-    require(re.fullmatch(r"oot_lift_[A-Za-z0-9_]+", name) is not None, "invalid layout identifier")
-    suffix = name[len("oot_lift_"):]
+    return _emit_descriptor(p, name, False)
+
+
+def emit_pauth_stack_descriptor(p, name):
+    return _emit_descriptor(p, name, True)
+
+
+def _emit_descriptor(p, name, pauth):
+    prefix = "oot_pauth_lift_" if pauth else "oot_lift_"
+    require(re.fullmatch(prefix + r"[A-Za-z0-9_]+", name) is not None, "invalid layout identifier")
+    suffix = name[len(prefix):]
     lines = ['#include "stack_dispatch.h"', '#if OOT_STACK_LAYOUT_POLICY_VERSION != 3 || OOT_LIFT_ABI_VERSION != 2',
              '#error Regenerate layout descriptor', '#endif', f'static const OotStackStep oot_layout_steps_{suffix}[] = {{']
     lines += [f"    {{{s['kind']}, {s['offset']}, {s['size']}, 0, UINT64_C(0x{s['callee']:x})}}," for s in p['steps']]
@@ -151,12 +191,19 @@ def emit_layout_stack_descriptor(p, name):
         lines += [f"    {{{a}, {b}, {f['saved_a']}, {f['saved_b']}, {f['max_steps']}, UINT32_C(0x{f['writable_mask']:x})}},"]
     lines += ['};', f'static const OotStackLayoutStep oot_layout_states_{suffix}[] = {{']
     lines += [f"    {{{s['sp']}, {s['fp']}, {s['lr']}, {s['owner']}}}," for s in p['states']]
-    lines += ['};', f'static const OotStackLayoutFunction oot_layout_info_{suffix} = {{', '    {', '        {',
-        f"            UINT64_C(0x{p['base']:x}), {p['instruction_count']}, {p['max_retired_instructions']}, 2, 3,",
-        f"            {p['frame_size']}, {p['max_depth']}, {name}, oot_layout_steps_{suffix}, {{{{",
+    descriptor = "OotStackPauthFunction" if pauth else "OotStackLayoutFunction"
+    lines += ['};']
+    if pauth: lines += ['#if OOT_STACK_PAUTH_POLICY_VERSION != 4 || OOT_PAUTH_ABI_VERSION != 1', '#error Regenerate PAC descriptor', '#endif']
+    lines += [f'static const {descriptor} oot_layout_info_{suffix} = {{']
+    if pauth: lines += ['    {']
+    lines += ['    {', '        {',
+        f"            UINT64_C(0x{p['base']:x}), {p['instruction_count']}, {p['max_retired_instructions']}, 2, {4 if pauth else 3},",
+        f"            {p['frame_size']}, {p['max_depth']}, {'NULL' if pauth else name}, oot_layout_steps_{suffix}, {{{{",
         '                ' + ', '.join(f'0x{b:02x}' for b in bytes.fromhex(p['source_sha256'])), '            }}', '        },',
         f"        oot_layout_flow_{suffix}, UINT32_C(0x{p['saved_mask']:x}), 0", '    },',
-        f"    oot_layout_states_{suffix}, {p['record_offset']}, 0", '};',
-        f'OOT_LIFT_EXPORT const OotStackLayoutFunction *oot_stack_layout_descriptor_{suffix}(void)',
+        f"    oot_layout_states_{suffix}, {p['record_offset']}, 0"]
+    if pauth: lines += ['    },', f"    {name}, UINT32_C(0x{p['sign_word']:08x}), UINT32_C(0x{p['auth_word']:08x})"]
+    lines += ['};',
+        f'OOT_LIFT_EXPORT const {descriptor} *oot_stack_{"pauth" if pauth else "layout"}_descriptor_{suffix}(void)',
         '{', f'    return &oot_layout_info_{suffix};', '}', '']
     return '\n'.join(lines)

@@ -13,13 +13,18 @@ WORDS = {0xD503233F: "paciasp", 0xD503237F: "pacibsp", 0xD50323BF: "autiasp",
          0xD50323FF: "autibsp", 0xD65F0BFF: "retaa", 0xD65F0FFF: "retab"}
 
 
+def decode_pauth_instruction(word, pc):
+    if word not in WORDS: return decode_instruction(word, pc)
+    require(isinstance(pc, int) and 0 <= pc <= U64 and pc % 4 == 0, "PAC PC must be aligned uint64")
+    return Instruction(pc, word, WORDS[word])
+
+
 def decode_pauth_block(data, base):
     require(data and len(data) % 4 == 0, "input must contain whole ARM64 words")
     require(len(data) <= MAX_WORDS * 4, "PAC block exceeds translation limit")
     require(isinstance(base, int) and base % 4 == 0 and 0 <= base <= U64 - len(data),
             "PAC block base/range must be aligned and nonwrapping")
-    return [Instruction(base + i * 4, word, WORDS[word]) if word in WORDS else
-            decode_instruction(word, base + i * 4)
+    return [decode_pauth_instruction(word, base + i * 4)
             for i, (word,) in enumerate(struct.iter_unpack("<I", data))]
 
 

@@ -9,17 +9,20 @@ typedef struct OwnedFunction {
     OotStackLayoutStep states[OOT_STACK_MAX_WORDS];
     uint8_t reserved_bytes[OOT_STACK_MAX_FRAME];
     uint32_t saved_mask, locals_begin, record_offset;
+    OotPauthRun pauth_run;
+    uint32_t sign_word, auth_word;
 } OwnedFunction;
 typedef struct Activation {
     size_t function;
     OotArm64State initial;
-    uint64_t base, expected_return;
+    uint64_t base, expected_return, signed_lr;
     uint8_t bytes[OOT_STACK_MAX_FRAME];
     unsigned owns;
 } Activation;
 struct OotStackDispatcher {
     OotRuntimeImage *image;
     OotLeafDispatcher *leaf;
+    OotPauth *pauth;
     OwnedFunction functions[OOT_STACK_MAX_FUNCTIONS];
     Activation frames[OOT_STACK_MAX_DEPTH];
     OotArm64State checkpoint;
@@ -57,6 +60,7 @@ int oot_stack_destroy(OotStackDispatcher *d)
     if (d->executing) return 0;
     (void)oot_leaf_dispatcher_destroy(d->leaf);
     oot_runtime_close(d->image);
+    oot_pauth_destroy(d->pauth);
     free(d);
     return 1;
 }
@@ -65,6 +69,11 @@ static int compare_pc(const void *a, const void *b)
 {
     uint64_t x = *(const uint64_t *)a, y = *(const uint64_t *)b;
     return x < y ? -1 : x > y;
+}
+
+static int canonical_pointer(uint64_t pointer)
+{
+    return (pointer >> 39) == 0 || (pointer >> 39) == (UINT64_MAX >> 39);
 }
 
 static int transfer_size(unsigned size)
@@ -155,15 +164,24 @@ static int validate_offset_layout(OwnedFunction *o)
     uint16_t pending[OOT_STACK_MAX_WORDS] = {0};
     uint8_t visited[OOT_STACK_MAX_WORDS] = {1};
     uint32_t mask = 0, restored = 0;
-    unsigned fp_ready = 0, split = f->steps[0].kind == OOT_STACK_ALLOC;
-    if (o->locals_begin != 0 || (!split && f->steps[0].kind != OOT_STACK_OPEN) ||
+    unsigned pac = f->policy_version == OOT_STACK_PAUTH_POLICY_VERSION;
+    unsigned prefix = pac ? 1 : 0, explicit_auth = pac && (o->auth_word == 0xd50323bf || o->auth_word == 0xd50323ff);
+    unsigned signed_lr = pac ? 3 : 1, fp_ready = 0, split = f->steps[prefix].kind == OOT_STACK_ALLOC;
+    size_t close_index = f->instruction_count - 2 - explicit_auth;
+    if (pac && (f->steps[0].kind != OOT_STACK_SIGN || !layout_state(o, 0, 1, 0, 3, 0) ||
+        (o->sign_word != 0xd503233f && o->sign_word != 0xd503237f) ||
+        (o->sign_word == 0xd503233f ? (o->auth_word != 0xd50323bf && o->auth_word != 0xd65f0bff) :
+         (o->auth_word != 0xd50323ff && o->auth_word != 0xd65f0fff)))) return 0;
+    if (o->locals_begin != 0 || (!split && f->steps[prefix].kind != OOT_STACK_OPEN) ||
         (!split && o->record_offset != 0) || !reserve_slot(o, o->record_offset, 16)) return 0;
-    start = split ? 2 : 1; tail = split ? 3 : 2;
+    start = prefix + (split ? 2 : 1); tail = (split ? 3 : 2) + explicit_auth;
     if (f->instruction_count < start + tail + 1 ||
-        !layout_state(o, 0, 0, 0, 0, 1) || f->steps[f->instruction_count - 1].kind != OOT_STACK_RETURN ||
-        f->steps[f->instruction_count - 2].kind != (uint32_t)(split ? OOT_STACK_DEALLOC : OOT_STACK_CLOSE)) return 0;
-    if (split && (f->steps[1].kind != OOT_STACK_RECORD_SAVE || !layout_state(o, 1, 0, 0, 0, 0) ||
-        f->steps[f->instruction_count - 3].kind != OOT_STACK_RECORD_RESTORE)) return 0;
+        !layout_state(o, prefix, 0, 0, 0, 1) || f->steps[f->instruction_count - 1].kind != OOT_STACK_RETURN ||
+        f->steps[close_index].kind != (uint32_t)(split ? OOT_STACK_DEALLOC : OOT_STACK_CLOSE)) return 0;
+    if (explicit_auth && (f->steps[f->instruction_count - 2].kind != OOT_STACK_AUTH ||
+        !layout_state(o, f->instruction_count - 2, 1, 0, 1, 0))) return 0;
+    if (split && (f->steps[prefix + 1].kind != OOT_STACK_RECORD_SAVE || !layout_state(o, prefix + 1, 0, 0, 0, 0) ||
+        f->steps[close_index - 1].kind != OOT_STACK_RECORD_RESTORE)) return 0;
     for (body = start; body < f->instruction_count - tail; ++body) {
         const OotStackStep *s = &f->steps[body];
         const OotStackCfgStep *flow = &o->flow[body];
@@ -212,9 +230,9 @@ static int validate_offset_layout(OwnedFunction *o)
             restored |= UINT32_C(1) << flow->saved_a;
             if (flow->saved_b != UINT16_MAX) restored |= UINT32_C(1) << flow->saved_b;
             writable = mask & ~restored;
-        } else if (i == f->instruction_count - 1) { if (!layout_state(o, i, 1, 0, 1, 0)) return 0; }
-        else if (i == f->instruction_count - 2) { if (!layout_state(o, i, 1, 0, 1, 2)) return 0; }
-        else if (split && i == f->instruction_count - 3) { if (!layout_state(o, i, 0, 0, 1, 0)) return 0; }
+        } else if (i == f->instruction_count - 1) { if (!layout_state(o, i, 1, 0, pac && !explicit_auth ? 3 : 1, 0)) return 0; }
+        else if (i == close_index) { if (!layout_state(o, i, 1, 0, signed_lr, 2)) return 0; }
+        else if (split && i == close_index - 1) { if (!layout_state(o, i, 0, 0, signed_lr, 0)) return 0; }
         if (flow->writable_mask != writable || flow->max_steps == 0 || flow->max_steps > OOT_STACK_MAX_STEPS ||
             ((s->kind != OOT_STACK_SAVE && s->kind != OOT_STACK_RESTORE) && (flow->saved_a != UINT16_MAX || flow->saved_b != UINT16_MAX))) return 0;
         if (s->kind == OOT_STACK_RETURN) {
@@ -239,7 +257,8 @@ static OotStackDispatcher *create_registry(OotRuntimeImage *image,
     const OotStackFunction *functions, size_t count, uint64_t root,
     const OotLeafFunction *leaves, size_t leaf_count, const OotCodeHash *hashes,
     const uint8_t body_hash[32], const uint64_t *returns, size_t return_count, uint32_t *error,
-    const OotStackCfgFunction *cfg, const OotStackLayoutFunction *layout)
+    const OotStackCfgFunction *cfg, const OotStackLayoutFunction *layout,
+    const OotStackPauthFunction *pac, OotPauth *pauth)
 {
     OotStackDispatcher *d;
     uint64_t sites[256 + OOT_STACK_MAX_FUNCTIONS * OOT_STACK_MAX_WORDS];
@@ -249,7 +268,8 @@ static OotStackDispatcher *create_registry(OotRuntimeImage *image,
     if (error != NULL) *error = OOT_LEAF_BAD_ARGUMENT;
     if (image == NULL || functions == NULL || count == 0 || count > OOT_STACK_MAX_FUNCTIONS ||
         leaf_count > OOT_LEAF_MAX_FUNCTIONS || (leaf_count && (leaves == NULL || hashes == NULL)) ||
-        body_hash == NULL || returns == NULL || return_count == 0 || return_count > 256) return NULL;
+        body_hash == NULL || returns == NULL || return_count == 0 || return_count > 256 ||
+        (pac && oot_pauth_model(pauth) != OOT_PAUTH_QARMA5_VA39)) return NULL;
     d = calloc(1, sizeof(*d));
     if (d == NULL) { if (error != NULL) *error = OOT_LEAF_ALLOCATION_FAILED; return NULL; }
     if (error != NULL) *error = OOT_STACK_BAD_REGISTRY;
@@ -257,12 +277,19 @@ static OotStackDispatcher *create_registry(OotRuntimeImage *image,
     for (i = 0; i < count; ++i) {
         const OotStackFunction *f = &functions[i];
         if (f->entry % 4 || f->instruction_count < 4 || f->instruction_count > OOT_STACK_MAX_WORDS ||
-            f->entry > UINT64_MAX - (uint64_t)f->instruction_count * 4 || f->run == NULL || f->steps == NULL ||
-            f->abi_version != OOT_LIFT_ABI_VERSION || f->policy_version != (layout != NULL ? OOT_STACK_LAYOUT_POLICY_VERSION :
+            f->entry > UINT64_MAX - (uint64_t)f->instruction_count * 4 ||
+            (pac ? (f->run != NULL || pac[i].run == NULL) : f->run == NULL) || f->steps == NULL ||
+            (pac && (!canonical_pointer(f->entry) || !canonical_pointer(f->entry + (uint64_t)f->instruction_count * 4 - 1))) ||
+            f->abi_version != OOT_LIFT_ABI_VERSION || f->policy_version != (pac ? OOT_STACK_PAUTH_POLICY_VERSION : layout != NULL ? OOT_STACK_LAYOUT_POLICY_VERSION :
                 cfg != NULL ? OOT_STACK_CFG_POLICY_VERSION : OOT_STACK_POLICY_VERSION) ||
             f->frame_size < 16 || f->frame_size > OOT_STACK_MAX_FRAME || f->frame_size % 16 ||
             (i && f->entry < functions[i - 1].entry + (uint64_t)functions[i - 1].instruction_count * 4)) goto failure;
         d->functions[i].info = *f;
+        if (pac) {
+            d->functions[i].pauth_run = pac[i].run;
+            d->functions[i].sign_word = pac[i].sign_word;
+            d->functions[i].auth_word = pac[i].auth_word;
+        }
         memcpy(d->functions[i].steps, f->steps, f->instruction_count * sizeof(*f->steps));
         d->functions[i].info.steps = d->functions[i].steps;
         d->functions[i].locals_begin = 16;
@@ -304,7 +331,7 @@ static OotStackDispatcher *create_registry(OotRuntimeImage *image,
     d->root = find_function(d, root);
     if (d->root == count) goto failure;
     for (i = 0; i < return_count; ++i) {
-        if (returns[i] % 4 || (i && returns[i] <= returns[i - 1])) goto failure;
+        if (returns[i] % 4 || (pac && !canonical_pointer(returns[i])) || (i && returns[i] <= returns[i - 1])) goto failure;
         for (j = 0; j < count; ++j)
             if (returns[i] >= functions[j].entry && returns[i] < functions[j].entry + (uint64_t)functions[j].instruction_count * 4) goto failure;
         d->returns[i] = sites[i] = returns[i];
@@ -377,6 +404,10 @@ static OotStackDispatcher *create_registry(OotRuntimeImage *image,
     if (tail != count) goto failure;
     if (!oot_runtime_retain(image)) { if (error != NULL) *error = OOT_LEAF_BAD_IMAGE; goto failure; }
     d->image = image;
+    if (pac) {
+        if (!oot_pauth_retain(pauth)) goto failure;
+        d->pauth = pauth;
+    }
     memcpy(d->body_hash, body_hash, 32);
     for (i = 0; i < count; ++i) {
         unsigned reason = code_match(d, i);
@@ -394,7 +425,7 @@ OotStackDispatcher *oot_stack_create(OotRuntimeImage *image,
     const OotLeafFunction *leaves, size_t leaf_count, const OotCodeHash *hashes,
     const uint8_t body_hash[32], const uint64_t *returns, size_t return_count, uint32_t *error)
 {
-    return create_registry(image, functions, count, root, leaves, leaf_count, hashes, body_hash, returns, return_count, error, NULL, NULL);
+    return create_registry(image, functions, count, root, leaves, leaf_count, hashes, body_hash, returns, return_count, error, NULL, NULL, NULL, NULL);
 }
 
 OotStackDispatcher *oot_stack_create_cfg(OotRuntimeImage *image,
@@ -407,7 +438,7 @@ OotStackDispatcher *oot_stack_create_cfg(OotRuntimeImage *image,
     if (error != NULL) *error = OOT_LEAF_BAD_ARGUMENT;
     if (functions == NULL || count == 0 || count > OOT_STACK_MAX_FUNCTIONS) return NULL;
     for (i = 0; i < count; ++i) common[i] = functions[i].info;
-    return create_registry(image, common, count, root, leaves, leaf_count, hashes, body_hash, returns, return_count, error, functions, NULL);
+    return create_registry(image, common, count, root, leaves, leaf_count, hashes, body_hash, returns, return_count, error, functions, NULL, NULL, NULL);
 }
 
 OotStackDispatcher *oot_stack_create_layout(OotRuntimeImage *image,
@@ -421,7 +452,23 @@ OotStackDispatcher *oot_stack_create_layout(OotRuntimeImage *image,
     if (error != NULL) *error = OOT_LEAF_BAD_ARGUMENT;
     if (functions == NULL || count == 0 || count > OOT_STACK_MAX_FUNCTIONS) return NULL;
     for (i = 0; i < count; ++i) { cfg[i] = functions[i].cfg; common[i] = cfg[i].info; }
-    return create_registry(image, common, count, root, leaves, leaf_count, hashes, body_hash, returns, return_count, error, cfg, functions);
+    return create_registry(image, common, count, root, leaves, leaf_count, hashes, body_hash, returns, return_count, error, cfg, functions, NULL, NULL);
+}
+
+OotStackDispatcher *oot_stack_create_pauth(OotRuntimeImage *image,
+    const OotStackPauthFunction *functions, size_t count, uint64_t root,
+    const OotLeafFunction *leaves, size_t leaf_count, const OotCodeHash *hashes,
+    const uint8_t body_hash[32], const uint64_t *returns, size_t return_count, OotPauth *pauth, uint32_t *error)
+{
+    OotStackFunction common[OOT_STACK_MAX_FUNCTIONS];
+    OotStackCfgFunction cfg[OOT_STACK_MAX_FUNCTIONS];
+    OotStackLayoutFunction layout[OOT_STACK_MAX_FUNCTIONS];
+    size_t i;
+    if (error) *error = OOT_LEAF_BAD_ARGUMENT;
+    if (!functions || !count || count > OOT_STACK_MAX_FUNCTIONS) return NULL;
+    for (i = 0; i < count; ++i) { layout[i] = functions[i].layout; cfg[i] = layout[i].cfg; common[i] = cfg[i].info; }
+    return create_registry(image, common, count, root, leaves, leaf_count, hashes, body_hash, returns, return_count,
+                           error, cfg, layout, functions, pauth);
 }
 
 static int same_state(const OotArm64State *a, const OotArm64State *b)
@@ -440,6 +487,7 @@ static void activate(OotStackDispatcher *d, size_t function, const OotArm64State
     Activation *a = &d->frames[d->depth++];
     a->function = function; a->initial = *s; a->base = s->sp - d->functions[function].info.frame_size;
     a->expected_return = expected_return; a->owns = 0;
+    a->signed_lr = 0;
 }
 
 int oot_stack_begin(OotStackDispatcher *d, const OotArm64State *s, uint64_t expected_return, OotLeafReport *out)
@@ -529,6 +577,7 @@ int oot_stack_run(OotStackDispatcher *d, OotArm64State *s, uint64_t budget, OotL
         int child_status = 0;
         size_t target = d->count;
         uint64_t next = d->checkpoint.pc + 4;
+        uint64_t signed_lr = a->signed_lr;
         reason = check_owners(d, 0);
         if (reason) return result(d, s, out, OOT_LEAF_REJECTED, reason, retired);
         if (!read_frame(d, a, shadow)) return result(d, s, out, OOT_LEAF_REJECTED, OOT_STACK_BAD_MEMORY, retired);
@@ -554,7 +603,7 @@ int oot_stack_run(OotStackDispatcher *d, OotArm64State *s, uint64_t budget, OotL
                 flow = &d->functions[a->function].flow[index];
                 writable = flow->writable_mask;
             }
-            if (f->policy_version == OOT_STACK_LAYOUT_POLICY_VERSION) post = d->functions[a->function].states[index];
+            if (f->policy_version >= OOT_STACK_LAYOUT_POLICY_VERSION) post = d->functions[a->function].states[index];
             if (kind == OOT_STACK_OPEN || kind == OOT_STACK_STORE || kind == OOT_STACK_SAVE || kind == OOT_STACK_RECORD_SAVE) { offset = step->offset; size = step->size; }
             if (kind == OOT_STACK_RETURN) next = a->expected_return;
             if (kind == OOT_STACK_CALL) {
@@ -566,8 +615,24 @@ int oot_stack_run(OotStackDispatcher *d, OotArm64State *s, uint64_t budget, OotL
                 }
             }
             (void)oot_memory_init(&window, &region, 1);
+            if (kind == OOT_STACK_SIGN || kind == OOT_STACK_AUTH ||
+                (d->pauth && kind == OOT_STACK_RETURN && d->functions[a->function].auth_word >= UINT32_C(0xd65f0000))) {
+                OotArm64State expected = d->checkpoint;
+                uint32_t word = kind == OOT_STACK_SIGN ? d->functions[a->function].sign_word : d->functions[a->function].auth_word;
+                int pac_result = oot_pauth_step(d->pauth, &expected, word);
+                if (kind == OOT_STACK_SIGN) {
+                    if (pac_result != OOT_PAUTH_SIGNED || d->checkpoint.x[30] != a->initial.x[30] ||
+                        d->checkpoint.sp != a->initial.sp) reason = OOT_LEAF_BAD_RETURN;
+                    signed_lr = expected.x[30];
+                } else if (pac_result != OOT_PAUTH_AUTHENTICATED ||
+                    (kind == OOT_STACK_AUTH ? expected.x[30] != a->initial.x[30] : expected.pc != a->expected_return))
+                    reason = OOT_LEAF_BAD_RETURN;
+                if (reason) { d->phase = 3; d->fault = reason; return result(d, s, out, OOT_LEAF_CONTRACT_FAULT, reason, retired); }
+            }
             d->executing = 1;
-            status = f->run(&working, &window, 1, &executed);
+            status = d->functions[a->function].pauth_run ?
+                d->functions[a->function].pauth_run(&working, &window, d->pauth, 1, &executed) :
+                f->run(&working, &window, 1, &executed);
             d->executing = 0;
             if (status != (kind == OOT_STACK_CALL || kind == OOT_STACK_RETURN ? OOT_LIFT_DISPATCH : OOT_LIFT_BUDGET)) reason = OOT_LEAF_BAD_LIFT_STATUS;
             else if (executed != 1) reason = OOT_LEAF_BAD_COUNT;
@@ -582,19 +647,19 @@ int oot_stack_run(OotStackDispatcher *d, OotArm64State *s, uint64_t budget, OotL
             uint64_t sp = kind == OOT_STACK_CLOSE || kind == OOT_STACK_RETURN ? a->initial.sp : a->base;
             uint64_t fp = kind == OOT_STACK_OPEN || kind == OOT_STACK_CLOSE || kind == OOT_STACK_RETURN ? a->initial.x[29] : a->base;
             uint64_t lr = kind == OOT_STACK_CALL ? d->checkpoint.pc + 4 : kind == OOT_STACK_CLOSE || kind == OOT_STACK_RETURN ? a->initial.x[30] : d->checkpoint.x[30];
-            if (f->policy_version == OOT_STACK_LAYOUT_POLICY_VERSION) {
+            if (f->policy_version >= OOT_STACK_LAYOUT_POLICY_VERSION) {
                 sp = post.sp ? a->initial.sp : a->base;
                 fp = post.fp ? a->base + d->functions[a->function].record_offset : a->initial.x[29];
-                lr = post.lr == 2 ? d->checkpoint.pc + 4 : post.lr == 1 ? a->initial.x[30] : d->checkpoint.x[30];
+                lr = post.lr == 3 ? signed_lr : post.lr == 2 ? d->checkpoint.pc + 4 : post.lr == 1 ? a->initial.x[30] : d->checkpoint.x[30];
             }
             if (working.sp != sp || working.x[29] != fp || working.x[30] != lr) reason = OOT_LEAF_PROTECTED_REGISTER;
         }
         for (i = 0; !reason && i < f->frame_size; ++i)
             if ((i < offset || i >= offset + size) && shadow[i] != before[i]) reason = OOT_STACK_CHANGED;
         if (!reason && kind == OOT_STACK_OPEN &&
-            (read_le(shadow, 8) != a->initial.x[29] || read_le(shadow + 8, 8) != a->initial.x[30])) reason = OOT_STACK_CHANGED;
+            (read_le(shadow, 8) != a->initial.x[29] || read_le(shadow + 8, 8) != (d->pauth ? signed_lr : a->initial.x[30]))) reason = OOT_STACK_CHANGED;
         if (!reason && kind == OOT_STACK_RECORD_SAVE &&
-            (read_le(shadow + offset, 8) != a->initial.x[29] || read_le(shadow + offset + 8, 8) != a->initial.x[30])) reason = OOT_STACK_CHANGED;
+            (read_le(shadow + offset, 8) != a->initial.x[29] || read_le(shadow + offset + 8, 8) != (d->pauth ? signed_lr : a->initial.x[30]))) reason = OOT_STACK_CHANGED;
         if (!reason && kind == OOT_STACK_SAVE && (read_le(shadow + offset, 8) != a->initial.x[flow->saved_a] ||
             (size == 16 && read_le(shadow + offset + 8, 8) != a->initial.x[flow->saved_b]))) reason = OOT_STACK_CHANGED;
         if (!reason && !d->leaf_active && kind == OOT_STACK_CALL && target == d->count) {
@@ -610,10 +675,11 @@ int oot_stack_run(OotStackDispatcher *d, OotArm64State *s, uint64_t budget, OotL
             if (!stored) return result(d, s, out, OOT_LEAF_REJECTED, OOT_STACK_BAD_MEMORY, retired);
             memcpy(a->bytes, shadow, f->frame_size); a->owns = 1;
         }
-        if (f->policy_version == OOT_STACK_LAYOUT_POLICY_VERSION) {
+        if (f->policy_version >= OOT_STACK_LAYOUT_POLICY_VERSION) {
             if (post.owner == 1) { memcpy(a->bytes, shadow, f->frame_size); a->owns = 1; }
             if (post.owner == 2) a->owns = 0;
         } else if (kind == OOT_STACK_CLOSE) a->owns = 0;
+        if (kind == OOT_STACK_SIGN) a->signed_lr = signed_lr;
         if (d->leaf_active && child_status == OOT_LEAF_RETURNED) d->leaf_active = 0;
         else if (kind == OOT_STACK_CALL) {
             if (target != d->count) activate(d, target, &working, d->checkpoint.pc + 4);
