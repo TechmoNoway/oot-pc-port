@@ -1,6 +1,6 @@
 # Project instructions
 
-This is an independent native Windows x86-64 port project. The current code provides a host scaffold, an offline input inspector, and verified segment preparation; do not describe it as a working game port.
+This is an independent native Windows x86-64 port project. The current code provides a host scaffold, offline input inspection, verified segment preparation, and offline module linking; do not describe it as a working game port.
 
 - Keep code, documentation, and commit messages in English.
 - Keep changes focused and verify behavior before reporting success.
@@ -10,3 +10,4 @@ This is an independent native Windows x86-64 port project. The current code prov
 - Run the native host self-test when changing host code.
 - Run `python -B -m unittest discover -s tests -v` when changing input inspection. Test fixtures must be synthetic.
 - Build the local ZBIC helper before running segment integration tests. Keep its external dependency under ignored `toolchain/`, with its license intact.
+- Linking works on private images and must not execute guest code or invent addresses for unresolved strong symbols. Keep linked images and reports under ignored `build/`.

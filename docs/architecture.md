@@ -6,7 +6,9 @@ The executable is a Windows host scaffold written in C17. It queries the system,
 
 The offline Python [input inspector](input-inspection.md) reads NUP, NSO, NPDM, and extracted ExeFS metadata. It verifies the NUP catalog and selected ExeFS file hashes without extracting the game tree.
 
-[Segment preparation](segment-preparation.md) decodes NSO LZ4 blocks or ZBIC frames and checks hashes over the decoded bytes. It writes plain NSO files and a manifest under `build/`. LZ4 decoding is implemented in the project; the ZBIC helper links a pinned external dependency stored under `toolchain/`. Neither relocation nor guest execution is implemented yet.
+[Segment preparation](segment-preparation.md) decodes NSO LZ4 blocks or ZBIC frames and checks hashes over the decoded bytes. It writes plain NSO files and a manifest under `build/`. LZ4 decoding is implemented in the project; the ZBIC helper links a pinned external dependency stored under `toolchain/`.
+
+The [offline linker](offline-linking.md) reads MOD0, dynamic tables, and symbols, establishes guest addresses for private module images, zero-initializes BSS, and applies supported AArch64 relocations. Images can be exported only after a complete link. This does not yet map native host memory or execute guest code.
 
 ## Planned boundaries
 
