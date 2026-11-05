@@ -54,7 +54,7 @@ class SemanticDecoderTests(unittest.TestCase):
     def test_reserved_and_unimplemented_forms_are_rejected(self):
         unsupported = [0, 0xFFFFFFFF, 0x32800000, 0x52C00000, 0x0BC00000,
                        0x0B008000, 0x0A008000, 0x91800000, 0x54000010,
-                       0x8B200000, 0xA9400000, 0xD4000001, 0xD503233F]
+                       0x8B200000, 0xC85F7C00, 0xD4000001, 0xD503233F]
         for word in unsupported:
             with self.subTest(word=hex(word)), self.assertRaises(UnsupportedInstruction):
                 decode_instruction(word, BASE)
@@ -141,6 +141,33 @@ class MemoryDecoderTests(unittest.TestCase):
         self.assertFalse(report["game_runtime_ready"])
 
 
+class PairDecoderTests(unittest.TestCase):
+    def test_standard_stack_frame_encodings(self):
+        save = decode_instruction(0xA9BF7BFD, BASE)  # stp x29,x30,[sp,#-16]!
+        restore = decode_instruction(0xA8C17BFD, BASE)  # ldp x29,x30,[sp],#16
+        self.assertEqual((save.form, save.rd, save.rt2, save.rn, save.width, save.access_size),
+                         ("loadstore_pair", 29, 30, 31, 64, 8))
+        self.assertEqual((save.immediate, save.load, save.writeback, save.post_index), (-16, False, True, False))
+        self.assertEqual((restore.immediate, restore.load, restore.writeback, restore.post_index), (16, True, True, True))
+
+    def test_word_pair_and_signed_word_pair(self):
+        word = decode_instruction(0x29400440, BASE)  # ldp w0,w1,[x2]
+        signed = decode_instruction(0x697F0440, BASE)  # ldpsw x0,x1,[x2,#-8]
+        self.assertEqual((word.width, word.access_size, word.sign_extend, word.writeback), (32, 4, False, False))
+        self.assertEqual((signed.width, signed.access_size, signed.sign_extend, signed.immediate), (64, 4, True, -8))
+
+    def test_store_repeated_value_allowed_load_overlap_rejected(self):
+        self.assertFalse(decode_instruction(0xA9000020, BASE).load)
+        for word in (0xA9400020, 0xA9407FFF, 0xA8C10821, 0xA8810821):
+            with self.subTest(word=hex(word)), self.assertRaises(UnsupportedInstruction):
+                decode_instruction(word, BASE)
+
+    def test_reserved_tagged_vector_and_non_temporal_pairs_rejected(self):
+        for word in (0xE9400440, 0x69000440, 0xAD400440, 0xA8000440):
+            with self.subTest(word=hex(word)), self.assertRaises(UnsupportedInstruction):
+                decode_instruction(word, BASE)
+
+
 class TranslationCliTests(unittest.TestCase):
     def run_cli(self, *args):
         return subprocess.run([sys.executable, "-B", str(ROOT / "tools/lift_arm64.py"), *map(str, args)],
@@ -168,10 +195,10 @@ class TranslationCliTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(dir=ROOT / "build", prefix="lifter-test-") as temporary:
             folder = Path(temporary)
             source, output = folder / "code.raw", folder / "code.c"
-            source.write_bytes(struct.pack("<II", 0xD503201F, 0xA9400000))
+            source.write_bytes(struct.pack("<II", 0xD503201F, 0xC85F7C00))
             result = self.run_cli(source, "--base", hex(BASE), "--output", output)
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn("0xa9400000", result.stderr)
+            self.assertIn("0xc85f7c00", result.stderr)
             self.assertFalse(output.exists())
 
     def test_output_must_stay_under_build(self):

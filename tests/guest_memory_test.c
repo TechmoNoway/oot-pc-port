@@ -70,6 +70,32 @@ int main(void)
     CHECK(!oot_memory_load(&memory, UINT64_MAX, 2, &value));
     CHECK(memory.fault.reason == OOT_MEMORY_ADDRESS_WRAP && value == 0x80);
 
+    {
+        uint8_t a[8] = {0}, b[8] = {0}, saved[8];
+        uint64_t one = 0, two = 0;
+        OotGuestRegion pair_regions[] = {{0x1000, 8, a, 3}, {0x1008, 8, b, 3}};
+        CHECK(oot_memory_init(&memory, pair_regions, 2));
+        CHECK(oot_memory_store_pair(&memory, 0x1000, 8, UINT64_MAX, UINT64_C(0x0123456789abcdef)));
+        CHECK(oot_memory_load_pair(&memory, 0x1000, 8, &one, &two));
+        CHECK(one == UINT64_MAX && two == UINT64_C(0x0123456789abcdef) && b[0] == 0xef && b[7] == 0x01);
+        CHECK(oot_memory_store_pair(&memory, 0x1000, 4, UINT64_MAX, UINT64_C(0x1234567887654321)));
+        CHECK(oot_memory_load_pair(&memory, 0x1000, 4, &one, &two));
+        CHECK(one == UINT64_C(0xffffffff) && two == UINT64_C(0x87654321));
+        memcpy(saved, a, sizeof(a));
+        pair_regions[1].permissions = 1;
+        CHECK(oot_memory_init(&memory, pair_regions, 2));
+        CHECK(!oot_memory_store_pair(&memory, 0x1000, 8, 0, 0));
+        CHECK(memory.fault.size == 16 && memory.fault.failing_address == 0x1008 && memcmp(saved, a, 8) == 0);
+        CHECK(oot_memory_init(&memory, pair_regions, 1));
+        one = 0x1234; two = 0x5678;
+        CHECK(!oot_memory_load_pair(&memory, 0x1000, 8, &one, &two));
+        CHECK(one == 0x1234 && two == 0x5678 && memory.fault.reason == OOT_MEMORY_UNMAPPED);
+        CHECK(!oot_memory_load_pair(&memory, 0x1000, 8, &one, &one));
+        CHECK(!oot_memory_load_pair(&memory, 0x1000, 8, NULL, &two));
+        CHECK(!oot_memory_store_pair(&memory, 0x1000, 1, 0, 0));
+        CHECK(!oot_memory_load(&memory, 0x1000, 16, &one));
+    }
+
     /* Reject malformed tables, and do not retain a previously usable mapping. */
     memcpy(invalid, adjacent, sizeof(invalid));
     invalid[1].base = invalid[0].base + 15;

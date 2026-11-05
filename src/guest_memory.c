@@ -61,7 +61,7 @@ static int check(OotGuestMemory *memory, uint64_t address, unsigned size, unsign
 {
     unsigned index;
     oot_memory_clear_fault(memory);
-    if (memory == NULL || !memory->valid || (size != 1 && size != 2 && size != 4 && size != 8))
+    if (memory == NULL || !memory->valid || size == 0 || size > 16)
         return fail(memory, address, size, access, OOT_MEMORY_CONFIGURATION, address);
     if ((uint64_t)(size - 1) > UINT64_MAX - address)
         return fail(memory, address, size, access, OOT_MEMORY_ADDRESS_WRAP, address);
@@ -75,30 +75,69 @@ static int check(OotGuestMemory *memory, uint64_t address, unsigned size, unsign
     return 1;
 }
 
-int oot_memory_load(OotGuestMemory *memory, uint64_t address, unsigned size, uint64_t *value)
+static uint64_t read_bytes(OotGuestMemory *memory, uint64_t address, unsigned size)
 {
     unsigned index;
     uint64_t result = 0;
-    if (value == NULL)
-        return fail(memory, address, size, OOT_MEMORY_READ, OOT_MEMORY_CONFIGURATION, address);
-    if (!check(memory, address, size, OOT_MEMORY_READ))
-        return 0;
     for (index = 0; index < size; ++index) {
         const OotGuestRegion *region = find_region(memory, address + index);
         result |= (uint64_t)region->data[(size_t)(address + index - region->base)] << (index * 8);
     }
-    *value = result;
+    return result;
+}
+
+static void write_bytes(OotGuestMemory *memory, uint64_t address, unsigned size, uint64_t value)
+{
+    unsigned index;
+    for (index = 0; index < size; ++index) {
+        const OotGuestRegion *region = find_region(memory, address + index);
+        region->data[(size_t)(address + index - region->base)] = (uint8_t)(value >> (index * 8));
+    }
+}
+
+int oot_memory_load(OotGuestMemory *memory, uint64_t address, unsigned size, uint64_t *value)
+{
+    if (value == NULL || (size != 1 && size != 2 && size != 4 && size != 8))
+        return fail(memory, address, size, OOT_MEMORY_READ, OOT_MEMORY_CONFIGURATION, address);
+    if (!check(memory, address, size, OOT_MEMORY_READ))
+        return 0;
+    *value = read_bytes(memory, address, size);
     return 1;
 }
 
 int oot_memory_store(OotGuestMemory *memory, uint64_t address, unsigned size, uint64_t value)
 {
-    unsigned index;
+    if (size != 1 && size != 2 && size != 4 && size != 8)
+        return fail(memory, address, size, OOT_MEMORY_WRITE, OOT_MEMORY_CONFIGURATION, address);
     if (!check(memory, address, size, OOT_MEMORY_WRITE))
         return 0;
-    for (index = 0; index < size; ++index) {
-        const OotGuestRegion *region = find_region(memory, address + index);
-        region->data[(size_t)(address + index - region->base)] = (uint8_t)(value >> (index * 8));
-    }
+    write_bytes(memory, address, size, value);
+    return 1;
+}
+
+int oot_memory_load_pair(OotGuestMemory *memory, uint64_t address, unsigned element_size,
+                         uint64_t *first, uint64_t *second)
+{
+    uint64_t first_value, second_value;
+    if ((element_size != 4 && element_size != 8) || first == NULL || second == NULL || first == second)
+        return fail(memory, address, 0, OOT_MEMORY_READ, OOT_MEMORY_CONFIGURATION, address);
+    if (!check(memory, address, element_size * 2, OOT_MEMORY_READ))
+        return 0;
+    first_value = read_bytes(memory, address, element_size);
+    second_value = read_bytes(memory, address + element_size, element_size);
+    *first = first_value;
+    *second = second_value;
+    return 1;
+}
+
+int oot_memory_store_pair(OotGuestMemory *memory, uint64_t address, unsigned element_size,
+                          uint64_t first, uint64_t second)
+{
+    if (element_size != 4 && element_size != 8)
+        return fail(memory, address, 0, OOT_MEMORY_WRITE, OOT_MEMORY_CONFIGURATION, address);
+    if (!check(memory, address, element_size * 2, OOT_MEMORY_WRITE))
+        return 0;
+    write_bytes(memory, address, element_size, first);
+    write_bytes(memory, address + element_size, element_size, second);
     return 1;
 }

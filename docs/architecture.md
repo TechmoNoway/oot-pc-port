@@ -8,11 +8,11 @@ The offline Python [input inspector](input-inspection.md) reads NUP, NSO, NPDM, 
 
 [Segment preparation](segment-preparation.md) decodes NSO LZ4 blocks or ZBIC frames and checks hashes over the decoded bytes. It writes plain NSO files and a manifest under `build/`. LZ4 decoding is implemented in the project; the ZBIC helper links a pinned external dependency stored under `toolchain/`.
 
-The [offline linker](offline-linking.md) reads MOD0, dynamic tables, and symbols, establishes guest addresses for private module images, zero-initializes BSS, and applies supported AArch64 relocations. Images can be exported only after a complete link. This does not yet map native host memory or execute guest code.
+The [offline linker](offline-linking.md) reads MOD0, dynamic tables, and symbols, establishes guest addresses for private module images, zero-initializes BSS, and applies supported AArch64 relocations. Images can be exported only after a complete link. A [native image bridge](runtime-images.md) now packages exact linked segment and BSS ranges and maps them into caller-owned native backing through checked guest addresses, with a guarded synthetic stack. This does not execute guest code or establish process startup.
 
 [ARM64 analysis](arm64-analysis.md) uses a separate disassembly backend and project control-flow logic to survey prepared code. It reports evidence-based entry candidates and follows direct edges; indirect targets and nonlocal-return semantics remain explicit gaps. Optional semantic coverage classifies exact encodings using the lifter's decoder without executing game code.
 
-The [ARM64 lifter](arm64-lifter.md) emits C17 for a bounded raw code range. It maintains explicit X registers, SP, PC, and NZCV, returns to a dispatcher when PC leaves the translated range, and enforces an instruction budget. Scalar loads and stores use [checked guest memory](guest-memory.md) with caller-owned backing buffers and read/write permissions. Generated synthetic programs compile to native Windows code and are compared with Unicorn ARM64 for state, memory, and selected access faults. Linked game images, native module dispatch, and host services are not connected to this runtime yet.
+The [ARM64 lifter](arm64-lifter.md) emits C17 for a bounded raw code range. It maintains explicit X registers, SP, PC, and NZCV, returns to a dispatcher when PC leaves the translated range, and enforces an instruction budget. Scalar and paired transfers use [checked guest memory](guest-memory.md) with read/write permissions and whole-access preflight. Generated synthetic programs compile to native Windows code and are compared with Unicorn ARM64 for state, memory, and selected access faults. A synthetic translated stack frame also runs on stack backing supplied by the native image bridge. Game functions, native module dispatch, and host services are not connected for execution yet.
 
 ## Planned boundaries
 
@@ -25,7 +25,7 @@ The [ARM64 lifter](arm64-lifter.md) emits C17 for a bounded raw code range. It m
 
 Each boundary needs a verifiable milestone before work advances to gameplay. A successful compilation is not evidence of correct game execution.
 
-The next implementation milestones are paired LDP/STP semantics and a verified bridge from offline linked images to guest-memory regions, with code/rodata/data/BSS permissions and a synthetic stack. Additional integer forms, SIMD/FP, atomics/exclusives, nonlocal returns, and indirect-target discovery remain separate requirements. Game code must remain unexecuted until complete function coverage and required runtime boundaries are established.
+The next implementation milestones are broader integer forms and verified function translation with explicit unsupported boundaries. Process startup still needs a guest ABI, TLS, module initialization, scheduling, and service dispatch. SIMD/FP, atomics/exclusives, nonlocal returns, and indirect-target discovery remain separate requirements. Game code must remain unexecuted until complete function coverage and required runtime boundaries are established.
 
 ## Repository boundaries
 

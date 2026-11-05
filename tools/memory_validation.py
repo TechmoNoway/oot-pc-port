@@ -256,7 +256,12 @@ def validate_memory_program(library, program):
             except UcError:
                 if not faults:
                     raise
-        require(faults == ([trial.expected_fault] if trial.expected_fault else []),
+        reference_fault = trial.expected_fault
+        if faults and trial.reference_fault_sizes:
+            require(len(faults) == 1 and faults[0][2] in trial.reference_fault_sizes,
+                    "unexpected reference paired-access fault width")
+            reference_fault = (*reference_fault[:2], faults[0][2], *reference_fault[3:])
+        require(faults == ([reference_fault] if reference_fault else []),
                 f"unexpected reference fault in {program.name} case {case_index}: {faults}")
         expected = (tuple(machine.reg_read(r) for r in reg_ids),
                     machine.reg_read(registers.UC_ARM64_REG_SP), machine.reg_read(registers.UC_ARM64_REG_PC),

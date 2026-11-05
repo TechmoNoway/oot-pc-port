@@ -51,5 +51,11 @@ OOT_MEMORY_API void oot_memory_clear_fault(OotGuestMemory *memory);
  * This deterministic fault policy is not a model of partial hardware stores. */
 OOT_MEMORY_API int oot_memory_load(OotGuestMemory *memory, uint64_t address, unsigned size, uint64_t *value);
 OOT_MEMORY_API int oot_memory_store(OotGuestMemory *memory, uint64_t address, unsigned size, uint64_t value);
+/* Paired 4/8-byte elements use whole-pair preflight; outputs must be distinct.
+ * No element, register output, or writeback is committed on a rejected pair. */
+OOT_MEMORY_API int oot_memory_load_pair(OotGuestMemory *memory, uint64_t address, unsigned element_size,
+                                       uint64_t *first, uint64_t *second);
+OOT_MEMORY_API int oot_memory_store_pair(OotGuestMemory *memory, uint64_t address, unsigned element_size,
+                                        uint64_t first, uint64_t second);
 
 #endif

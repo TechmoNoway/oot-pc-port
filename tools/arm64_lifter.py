@@ -16,8 +16,8 @@ MAX_WORDS = 16384
 FORMS = ("move_wide", "addsub_immediate", "addsub_shifted", "logical_shifted",
          "pc_relative", "branch_immediate", "branch_condition", "compare_branch",
          "test_branch", "branch_register", "nop", "loadstore_unsigned", "loadstore_immediate",
-         "loadstore_register", "load_literal")
-MEMORY_FORMS = frozenset(("loadstore_unsigned", "loadstore_immediate", "loadstore_register", "load_literal"))
+         "loadstore_register", "load_literal", "loadstore_pair")
+MEMORY_FORMS = frozenset(("loadstore_unsigned", "loadstore_immediate", "loadstore_register", "load_literal", "loadstore_pair"))
 
 
 def signed(value, bits):
@@ -51,6 +51,7 @@ class Instruction:
     writeback: bool = False
     post_index: bool = False
     extend: int = 0
+    rt2: int = 0
 
 
 def decode_instruction(word, pc):
@@ -67,6 +68,19 @@ def decode_instruction(word, pc):
 
     if word == 0xD503201F:
         return ins("nop")
+    if word & 0x3E000000 == 0x28000000:
+        opc, mode, load, rt2 = word >> 30, (word >> 23) & 3, bool(word & (1 << 22)), (word >> 10) & 31
+        if opc == 3 or (opc == 1 and not load) or mode == 0:
+            reject("reserved, tagged, or non-temporal pair encoding is not implemented")
+        if load and rd == rt2:
+            reject("constrained-unpredictable pair load destination overlap")
+        if mode != 2 and rn != 31 and rn in (rd, rt2):
+            reject("constrained-unpredictable pair writeback/base overlap")
+        scale = 3 if opc == 2 else 2
+        return ins("loadstore_pair", width=32 if opc == 0 else 64, rd=rd, rt2=rt2, rn=rn,
+                   access_size=1 << scale, load=load, sign_extend=opc == 1,
+                   immediate=signed((word >> 15) & 0x7F, 7) << scale,
+                   writeback=mode != 2, post_index=mode == 1)
     if word & 0x3F000000 == 0x18000000:
         opc = word >> 30
         if opc == 3:
@@ -173,13 +187,24 @@ def memory_body(ins):
         lines.append("uint64_t address = base;" if ins.post_index else "uint64_t address = base + offset;")
     lines.append("uint64_t value = 0;" if ins.load else
                  f"uint64_t value = oot_arm64_read(s, {ins.rd}, {ins.width}, 0);")
-    transfer = (f"oot_memory_load(memory, address, {ins.access_size}, &value)" if ins.load else
-                f"oot_memory_store(memory, address, {ins.access_size}, value)")
+    pair = ins.form == "loadstore_pair"
+    if pair:
+        lines.append("uint64_t second = 0;" if ins.load else
+                     f"uint64_t second = oot_arm64_read(s, {ins.rt2}, {ins.width}, 0);")
+        transfer = (f"oot_memory_load_pair(memory, address, {ins.access_size}, &value, &second)" if ins.load else
+                    f"oot_memory_store_pair(memory, address, {ins.access_size}, value, second)")
+    else:
+        transfer = (f"oot_memory_load(memory, address, {ins.access_size}, &value)" if ins.load else
+                    f"oot_memory_store(memory, address, {ins.access_size}, value)")
     lines.append(f"if (!{transfer}) {{ *executed = count; return OOT_LIFT_MEMORY_FAULT; }}")
     if ins.load:
         if ins.sign_extend:
             lines.append(f"value = oot_arm64_sign_extend(value, {ins.access_size * 8});")
         lines.append(f"oot_arm64_write(s, {ins.rd}, {ins.width}, 0, value);")
+        if pair:
+            if ins.sign_extend:
+                lines.append(f"second = oot_arm64_sign_extend(second, {ins.access_size * 8});")
+            lines.append(f"oot_arm64_write(s, {ins.rt2}, {ins.width}, 0, second);")
     if ins.writeback:
         lines.append(f"oot_arm64_write(s, {ins.rn}, 64, 1, base + offset);")
     return lines

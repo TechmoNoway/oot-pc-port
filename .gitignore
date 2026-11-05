@@ -18,6 +18,7 @@ __pycache__/
 *.nca
 *.ncz
 *.nso
+*.ootmem
 *.nro
 *.npdm
 *.keys

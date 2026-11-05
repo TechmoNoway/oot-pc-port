@@ -50,6 +50,7 @@ class RegionSpec:
 class MemoryTrial(Trial):
     regions: tuple = ()
     expected_fault: tuple | None = None  # address, failing_address, width, access, reason
+    reference_fault_sizes: tuple = ()  # Paired accesses may be split by the reference backend.
 
 
 @dataclass

@@ -14,6 +14,9 @@ $compilerArguments = @(
     '-DWIN32_LEAN_AND_MEAN', '-DNOMINMAX', '-D_WIN32_WINNT=0x0A00',
     (Join-Path $projectRoot 'src/main.c'),
     (Join-Path $projectRoot 'src/host_win32.c'),
+    (Join-Path $projectRoot 'src/guest_memory.c'),
+    (Join-Path $projectRoot 'src/runtime_image.c'),
+    '-D_CRT_SECURE_NO_WARNINGS', '-lbcrypt',
     '-o', $executable
 )
 & $Compiler @compilerArguments

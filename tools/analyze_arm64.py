@@ -33,7 +33,7 @@ def main():
         seeds = relocated_code_seeds(linker.modules)
         report = {"schema_version": 2, "format": "arm64-census", "decoder": decoder.metadata,
                   "guest_code_executed": False, "translation_performed": False,
-                  "lifter": {"scope": "integer/scalar-memory/control-flow subset", "forms": list(FORMS),
+                  "lifter": {"scope": "integer/scalar-pair-memory/control-flow subset", "forms": list(FORMS),
                              "coverage_measured": args.lifter_coverage, "game_runtime_ready": False},
                   "method": "metadata-rooted static traversal with direct branches and unresolved indirect boundaries",
                   "coverage_is_complete": False, "modules": []}

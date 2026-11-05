@@ -52,6 +52,6 @@ This does not implement nonlocal returns or find arbitrary indirect calls to tho
 
 Synthetic tests cover branch displacements, literal widths, indirect boundaries, metadata entries, PLT/GOT matching, nonlocal continuations, undecoded frontiers, ambiguous literals, report accounting, and deterministic output. Run the full suite using the project environment. Decoder integration tests skip when the optional analysis dependency is missing; CI installs it so those tests run.
 
-The integer, scalar-memory, and control-flow subsets now have [native differential verification](arm64-lifter.md). Paired transfers and integration of linked images into checked guest memory are next. Indirect-target recovery, pointer authentication, atomic/exclusive behavior, SIMD/FP, and nonlocal returns require separate semantic work.
+The integer, scalar/paired-memory, and control-flow subsets now have [native differential verification](arm64-lifter.md). [Native image mapping](runtime-images.md) connects linked regions to the C memory backend without executing game code. Broader integer coverage, verified function translation, indirect-target recovery, pointer authentication, atomic/exclusive behavior, SIMD/FP, and nonlocal returns require further work.
 
 References: [Capstone Python API](https://www.capstone-engine.org/lang_python.html), [Arm A64 instruction set](https://developer.arm.com/documentation/ddi0602/latest), and [ELF function symbol metadata](https://gabi.xinuos.com/elf/05-symtab.html).

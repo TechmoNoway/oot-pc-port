@@ -17,10 +17,11 @@ This milestone translates bounded raw ARM64 instruction ranges to C17. Synthetic
 | Scalar memory | LDR/STR byte, halfword, word, doubleword; LDRSB/LDRSH to W/X; LDRSW to X |
 | Memory addressing | Unsigned scaled immediate; signed unscaled (LDUR/STUR variants); pre/post-index; UXTW/LSL/SXTW/SXTX register offset |
 | Literal memory | PC-relative LDR W/X and LDRSW |
+| Paired memory | LDP/STP W/X and LDPSW X, with signed offset and pre/post-index modes |
 
 Aliases such as CMP, CMN, TST, and register MOV inherit their underlying encoding semantics. W-register writes zero the upper X bits. Flag-setting arithmetic computes N/Z/C/V with unsigned operations; logical flag writes clear C/V. Shifts avoid signed C overflow, implementation-defined signed right shifts, and shifts by the operand width. Reserved encodings and unsupported forms fail before source emission.
 
-Paired transfers, unprivileged transfers, prefetch, extended-register arithmetic, logical immediates, carry arithmetic, bitfields, division, system registers, SVC, pointer authentication, atomics/exclusives, SIMD/FP, and setjmp/longjmp services are not implemented. Constrained-unpredictable base/transfer overlap with writeback is rejected. Recognizing a BR/BLR encoding does not discover its possible destinations or supply a callable native target.
+Non-temporal/tagged pairs, unprivileged transfers, prefetch, extended-register arithmetic, logical immediates, carry arithmetic, bitfields, division, system registers, SVC, pointer authentication, atomics/exclusives, SIMD/FP, and setjmp/longjmp services are not implemented. Constrained-unpredictable base/transfer overlap with writeback and identical pair-load destinations are rejected. Repeated pair-store sources are allowed. Recognizing a BR/BLR encoding does not discover its possible destinations or supply a callable native target.
 
 ## State and execution boundary
 
@@ -35,7 +36,7 @@ The generated function returns:
 
 - `OOT_LIFT_DISPATCH` when PC is outside its translated instruction set, including a misaligned target. It leaves that PC for a future dispatcher to resolve or fault. Reaching the end of a range is not proof of a guest function return.
 - `OOT_LIFT_BUDGET` when PC is still translated and the budget has been consumed. A zero budget performs no instruction. The executed count is always returned.
-- `OOT_LIFT_MEMORY_FAULT` when a data access fails. PC and architectural state remain at the faulting instruction, its writeback is skipped, and it is excluded from the retired instruction count. Previously retired instructions remain effective. The backend records access details when a memory object is supplied.
+- `OOT_LIFT_MEMORY_FAULT` when a data access fails. PC and architectural state remain at the faulting instruction, its writeback is skipped, and it is excluded from the retired instruction count. Previously retired instructions remain effective. Whole-pair preflight preserves both outputs/elements on a rejected pair. The backend records access details when a memory object is supplied.
 
 Each translated instruction updates explicit guest state. Branches never cast guest addresses to host function pointers. Calls and returns use this same dispatch loop, so guest recursion does not grow the host C call stack in this subset. Scalar data transfers use checked regions with explicit permissions. There is no complete module runtime yet.
 
@@ -83,6 +84,10 @@ To measure supported encodings among statically discovered game instructions wit
   --report build/arm64-lifter-coverage.json --lifter-coverage
 ```
 
-The next milestones are paired LDP/STP translation and a verified bridge from linked module images to guest-memory regions and a synthetic stack. Integer coverage and runtime services still need further work before executing game functions.
+Paired-transfer validation covers W/X widths, LDPSW sign extension, positive/negative offset limits, pre/post-index writeback, SP/ZR, base/destination aliases without writeback, repeated store sources, stack frames, and cross-region accesses. Reference faults cover a missing/protected first element; the reference backend may report either element-width or combined-width callbacks, which are explicitly normalized to the native whole-pair request. Rejected second-element and wrapping-pair behavior is checked separately as a project preflight policy, not hardware partial-access equivalence.
+
+The paired-transfer milestone extends the suite to 26,168 comparisons across 20 synthetic programs, including native stack frames and 163 reference access-fault cases. Both MSVC and GCC also pass the separate native image-bridge tests.
+
+The [native image bridge](runtime-images.md) supplies mapped linked bytes and a guarded synthetic stack. The next milestones are broader integer coverage, verified function translation, and process/runtime services before executing game functions.
 
 References: [Arm A64 instruction set](https://developer.arm.com/documentation/ddi0602/latest), [Unicorn programming API](https://www.unicorn-engine.org/docs/tutorial.html), and [pinned Unicorn package](https://pypi.org/project/unicorn/2.1.4/).
