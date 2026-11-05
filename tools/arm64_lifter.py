@@ -1,4 +1,4 @@
-"""Independent integer/control-flow ARM64 decoder and bounded C17 emitter.
+"""Independent integer/scalar-memory/control-flow decoder and bounded C17 emitter.
 
 Only exact encodings accepted here have implemented semantics. Capstone syntax
 decoding is deliberately not used to decide semantic support.
@@ -15,7 +15,9 @@ U64 = (1 << 64) - 1
 MAX_WORDS = 16384
 FORMS = ("move_wide", "addsub_immediate", "addsub_shifted", "logical_shifted",
          "pc_relative", "branch_immediate", "branch_condition", "compare_branch",
-         "test_branch", "branch_register", "nop")
+         "test_branch", "branch_register", "nop", "loadstore_unsigned", "loadstore_immediate",
+         "loadstore_register", "load_literal")
+MEMORY_FORMS = frozenset(("loadstore_unsigned", "loadstore_immediate", "loadstore_register", "load_literal"))
 
 
 def signed(value, bits):
@@ -43,6 +45,12 @@ class Instruction:
     flags: bool = False
     invert: bool = False
     target: int = 0
+    access_size: int = 0
+    load: bool = False
+    sign_extend: bool = False
+    writeback: bool = False
+    post_index: bool = False
+    extend: int = 0
 
 
 def decode_instruction(word, pc):
@@ -59,6 +67,34 @@ def decode_instruction(word, pc):
 
     if word == 0xD503201F:
         return ins("nop")
+    if word & 0x3F000000 == 0x18000000:
+        opc = word >> 30
+        if opc == 3:
+            reject("prefetch literal is not implemented")
+        return ins("load_literal", rd=rd, width=32 if opc == 0 else 64,
+                   access_size=8 if opc == 1 else 4, load=True, sign_extend=opc == 2,
+                   target=(pc + signed((word >> 5) & 0x7FFFF, 19) * 4) & U64)
+    if word & 0x3F000000 in (0x39000000, 0x38000000):
+        size, opc = word >> 30, (word >> 22) & 3
+        if (size == 3 and opc >= 2) or (size == 2 and opc == 3):
+            reject("reserved or prefetch scalar memory encoding")
+        args = dict(rd=rd, rn=rn, access_size=1 << size, load=opc != 0,
+                    sign_extend=opc >= 2, width=64 if size == 3 or opc == 2 else 32)
+        if word & (1 << 24):
+            return ins("loadstore_unsigned", immediate=((word >> 10) & 0xFFF) << size, **args)
+        if word & (1 << 21):
+            extend = (word >> 13) & 7
+            if ((word >> 10) & 3) != 2 or extend not in (2, 3, 6, 7):
+                reject("unsupported scalar register-offset encoding")
+            return ins("loadstore_register", rm=rm, extend=extend,
+                       amount=size if word & (1 << 12) else 0, **args)
+        mode = (word >> 10) & 3
+        if mode == 2:
+            reject("unprivileged scalar memory encoding is not implemented")
+        if mode != 0 and rn == rd and rn != 31:
+            reject("constrained-unpredictable writeback/base overlap")
+        return ins("loadstore_immediate", immediate=signed((word >> 12) & 0x1FF, 9),
+                   writeback=mode != 0, post_index=mode == 1, **args)
     if word & 0x1F800000 == 0x12800000:
         operation, amount = (word >> 29) & 3, ((word >> 21) & 3) * 16
         if operation == 1 or amount >= width:
@@ -119,6 +155,36 @@ def constant(value):
     return f"UINT64_C(0x{value & U64:x})"
 
 
+def memory_body(ins):
+    lines = []
+    if ins.form == "load_literal":
+        lines.append(f"uint64_t address = {constant(ins.target)};")
+    else:
+        lines.append(f"uint64_t base = oot_arm64_read(s, {ins.rn}, 64, 1);")
+        if ins.form == "loadstore_register":
+            width = 32 if ins.extend in (2, 6) else 64
+            lines.append(f"uint64_t offset = oot_arm64_read(s, {ins.rm}, {width}, 0);")
+            if ins.extend == 6:
+                lines.append("offset = oot_arm64_sign_extend(offset, 32);")
+            if ins.amount:
+                lines.append(f"offset <<= {ins.amount};")
+        else:
+            lines.append(f"uint64_t offset = {constant(ins.immediate)};")
+        lines.append("uint64_t address = base;" if ins.post_index else "uint64_t address = base + offset;")
+    lines.append("uint64_t value = 0;" if ins.load else
+                 f"uint64_t value = oot_arm64_read(s, {ins.rd}, {ins.width}, 0);")
+    transfer = (f"oot_memory_load(memory, address, {ins.access_size}, &value)" if ins.load else
+                f"oot_memory_store(memory, address, {ins.access_size}, value)")
+    lines.append(f"if (!{transfer}) {{ *executed = count; return OOT_LIFT_MEMORY_FAULT; }}")
+    if ins.load:
+        if ins.sign_extend:
+            lines.append(f"value = oot_arm64_sign_extend(value, {ins.access_size * 8});")
+        lines.append(f"oot_arm64_write(s, {ins.rd}, {ins.width}, 0, value);")
+    if ins.writeback:
+        lines.append(f"oot_arm64_write(s, {ins.rn}, 64, 1, base + offset);")
+    return lines
+
+
 def body(ins):
     width, rd, rn, rm = ins.width, ins.rd, ins.rn, ins.rm
     next_pc = constant(ins.pc + 4)
@@ -130,7 +196,9 @@ def body(ins):
         return f"oot_arm64_write(s, {rd}, {width}, {int(use_sp)}, {value});"
 
     lines = []
-    if ins.form == "move_wide":
+    if ins.form in MEMORY_FORMS:
+        lines.extend(memory_body(ins))
+    elif ins.form == "move_wide":
         value = constant(ins.immediate)
         if ins.operation == 0:
             value = f"~{value}"
@@ -184,9 +252,10 @@ def emit_c(data, base, name="oot_lift_run"):
     require(re.fullmatch(r"oot_lift_[A-Za-z0-9_]+", name) is not None,
             "function name must start with oot_lift_ and contain only identifier characters")
     instructions = decode_block(data, base)  # Complete validation before producing source.
-    lines = ['/* Generated ARM64 integer/control-flow translation. */', '#include "arm64_lift.h"', "",
-             f"OOT_LIFT_EXPORT int {name}(OotArm64State *s, uint64_t budget, uint64_t *executed)",
-             "{", "    uint64_t count = 0;", "    for (;;) {", "        switch (s->pc) {"]
+    lines = ['/* Generated ARM64 integer/scalar-memory/control-flow translation. */', '#include "arm64_lift.h"', "",
+             f"OOT_LIFT_EXPORT int {name}(OotArm64State *s, OotGuestMemory *memory, uint64_t budget, uint64_t *executed)",
+             "{", "    uint64_t count = 0;", "    oot_memory_clear_fault(memory);",
+             "    for (;;) {", "        switch (s->pc) {"]
     for ins in instructions:
         lines.extend([f"        case {constant(ins.pc)}: {{ /* {ins.form} 0x{ins.word:08x} */",
                       "            if (count == budget) { *executed = count; return OOT_LIFT_BUDGET; }"])
@@ -194,7 +263,8 @@ def emit_c(data, base, name="oot_lift_run"):
         lines.extend(["            ++count;", "            break;", "        }"])
     lines.extend(["        default: *executed = count; return OOT_LIFT_DISPATCH;",
                   "        }", "    }", "}", ""])
-    report = {"schema_version": 1, "base": base, "byte_count": len(data),
+    report = {"schema_version": 2, "abi_version": 2, "base": base, "byte_count": len(data),
               "instruction_count": len(instructions), "forms": dict(Counter(i.form for i in instructions)),
-              "function": name, "guest_memory_access": False, "game_runtime_ready": False}
+              "function": name, "guest_memory_access": any(i.form in MEMORY_FORMS for i in instructions),
+              "game_runtime_ready": False}
     return "\n".join(lines), report

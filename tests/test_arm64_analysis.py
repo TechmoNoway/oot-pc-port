@@ -142,9 +142,9 @@ class DiscoveryTests(unittest.TestCase):
         self.assertFalse(result["lifter_coverage_measured"])
         self.assertIsNone(result["lifter_supported_encoding_words"])
         coverage = analyze_module(module, self.decoder, lifter_coverage=True)
-        self.assertEqual(coverage["lifter_supported_encoding_words"], 8)
-        self.assertEqual(coverage["lifter_unsupported_encoding_words"], 1)
-        self.assertEqual(sum(coverage["lifter_form_counts"].values()), 8)
+        self.assertEqual(coverage["lifter_supported_encoding_words"], 9)
+        self.assertEqual(coverage["lifter_unsupported_encoding_words"], 0)
+        self.assertEqual(sum(coverage["lifter_form_counts"].values()), 9)
 
     def test_undecoded_frontier_is_not_silently_skipped(self):
         module = Module("main", synthetic_module({0: branch(0, 0x40), 0x40: 0xFFFFFFFF, 0x44: RET}))

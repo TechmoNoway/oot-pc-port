@@ -2,6 +2,9 @@
 #define OOT_ARM64_LIFT_H
 
 #include <stdint.h>
+#include "guest_memory.h"
+
+#define OOT_LIFT_ABI_VERSION 2
 
 #if defined(_WIN32)
 #define OOT_LIFT_EXPORT __declspec(dllexport)
@@ -19,8 +22,16 @@ typedef struct OotArm64State {
 
 enum OotLiftStatus {
     OOT_LIFT_DISPATCH = 0, /* PC left the translated instruction set. */
-    OOT_LIFT_BUDGET = 1    /* PC is translated, but the budget was exhausted. */
+    OOT_LIFT_BUDGET = 1,   /* PC is translated, but the budget was exhausted. */
+    OOT_LIFT_MEMORY_FAULT = 2 /* Faulting instruction did not retire. */
 };
+
+static inline uint64_t oot_arm64_sign_extend(uint64_t value, unsigned bits)
+{
+    if (bits == 64)
+        return value;
+    return value | ((value & (UINT64_C(1) << (bits - 1))) ? (UINT64_MAX << bits) : 0);
+}
 
 static inline uint64_t oot_arm64_mask(unsigned width)
 {

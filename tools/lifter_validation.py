@@ -1,8 +1,7 @@
-"""Compile synthetic lifted C and compare integer state with Unicorn ARM64."""
+"""Compile synthetic lifted C and compare state, memory, and faults with Unicorn ARM64."""
 
 import argparse
-from ctypes import CDLL, POINTER, Structure, byref, c_int, c_uint32, c_uint64
-from dataclasses import dataclass
+from ctypes import CDLL, POINTER, byref, c_int, c_uint64
 from importlib.metadata import version
 import json
 import os
@@ -10,44 +9,16 @@ from pathlib import Path
 import random
 import re
 import shutil
-import struct
 import subprocess
 import tempfile
 
 from arm64_lifter import FORMS, U64, decode_block, emit_c
 from input_formats import InputError, require
+from lifter_validation_types import BASE, Memory, Program, State, Trial
+from memory_validation import memory_programs, validate_memory_policy, validate_memory_program
 
 ROOT = Path(__file__).resolve().parent.parent
-BASE = 0x1000000
 SEED = 0x0CA41234
-
-
-class State(Structure):
-    _fields_ = [("x", c_uint64 * 31), ("sp", c_uint64), ("pc", c_uint64), ("nzcv", c_uint32)]
-
-    def values(self):
-        return tuple(self.x), self.sp, self.pc, self.nzcv
-
-
-@dataclass
-class Trial:
-    index: int
-    registers: list
-    sp: int
-    nzcv: int
-    budget: int = 1
-
-
-@dataclass
-class Program:
-    name: str
-    words: list
-    trials: list
-    base: int = BASE
-
-    @property
-    def data(self):
-        return struct.pack(f"<{len(self.words)}I", *self.words)
 
 
 def move(sf, opc, rd, immediate=0xA55A, hw=0):
@@ -169,7 +140,7 @@ def synthetic_programs():
     programs.append(Program("outside_entry", [0xD503201F],
                             [Trial(index, [0] * 31, 0, 0, budget)
                              for index in (-1, 1) for budget in (0, 1)]))
-    return programs
+    return programs + memory_programs()
 
 
 def find_cmake():
@@ -205,13 +176,15 @@ def compile_library(programs, mode="cmake"):
         require(compiler is not None, "gcc is not available on PATH")
         library = directory / ("lifted.dll" if os.name == "nt" else "lifted.so")
         run([compiler, "-std=c17", "-O2", "-Wall", "-Wextra", "-Wpedantic", "-Werror", "-shared",
-             "-I", str(ROOT / "src"), str(source), "-o", str(library)])
+             "-DOOT_MEMORY_SHARED_EXPORTS",
+             "-I", str(ROOT / "src"), str(source), str(ROOT / "src/guest_memory.c"), "-o", str(library)])
         compiler_info = subprocess.run([compiler, "--version"], capture_output=True, text=True, check=True).stdout.splitlines()[0]
     else:
         cmake = find_cmake()
         (directory / "CMakeLists.txt").write_text(
             'cmake_minimum_required(VERSION 3.20)\nproject(lift_validation LANGUAGES C)\n'
-            'add_library(lifted SHARED lifted.c)\n'
+            f'add_library(lifted SHARED lifted.c "{(ROOT / "src/guest_memory.c").as_posix()}")\n'
+            'target_compile_definitions(lifted PRIVATE OOT_MEMORY_SHARED_EXPORTS)\n'
             'target_compile_features(lifted PRIVATE c_std_17)\n'
             f'target_include_directories(lifted PRIVATE "{(ROOT / "src").as_posix()}")\n'
             'if(MSVC)\n target_compile_options(lifted PRIVATE /W4 /WX)\n'
@@ -234,6 +207,8 @@ def compile_library(programs, mode="cmake"):
 
 
 def validate_program(library, program):
+    if program.memory:
+        return validate_memory_program(library, program)
     try:
         from unicorn import Uc, UC_ARCH_ARM64, UC_MODE_ARM, UC_HOOK_CODE
         from unicorn import arm64_const as registers
@@ -256,7 +231,7 @@ def validate_program(library, program):
 
     machine.hook_add(UC_HOOK_CODE, hook)
     native = getattr(library, f"oot_lift_{program.name}")
-    native.argtypes = [POINTER(State), c_uint64, POINTER(c_uint64)]
+    native.argtypes = [POINTER(State), POINTER(Memory), c_uint64, POINTER(c_uint64)]
     native.restype = c_int
     for case_index, trial in enumerate(program.trials):
         state = State()
@@ -276,7 +251,7 @@ def validate_program(library, program):
                     machine.reg_read(registers.UC_ARM64_REG_NZCV))
         expected_status = int(expected[2] in pcs)
         count = c_uint64(U64)
-        status = native(byref(state), trial.budget, byref(count))
+        status = native(byref(state), None, trial.budget, byref(count))
         if state.values() != expected or status != expected_status or count.value != steps[0]:
             raise AssertionError(json.dumps({"program": program.name, "case": case_index,
                 "word": f"0x{program.words[trial.index]:08x}" if 0 <= trial.index < len(program.words) else None,
@@ -290,12 +265,18 @@ def run_validation(mode="cmake"):
     programs = synthetic_programs()
     library, build = compile_library(programs, mode)
     count = sum(validate_program(library, program) for program in programs)
+    memory_policy = validate_memory_policy(library)
     observed_forms = sorted({ins.form for p in programs for ins in decode_block(p.data, p.base)})
     require(set(observed_forms) == set(FORMS), "validation must exercise every implemented form")
-    report = {"schema_version": 1, "result": "passed", "seed": SEED,
+    report = {"schema_version": 2, "abi_version": 2, "result": "passed", "seed": SEED,
               "reference": {"engine": "Unicorn ARM64", "version": version("unicorn")},
               "synthetic_only": True, "game_code_executed": False,
-              "comparison": ["x0-x30", "sp", "pc", "nzcv", "instruction_count", "dispatch_or_budget"],
+              "comparison": ["x0-x30", "sp", "pc", "nzcv", "retired_instruction_count", "exit_status",
+                             "all_mapped_data_bytes", "aligned_unmapped_and_permission_faults"],
+              "memory_trial_count": sum(len(p.trials) for p in programs if p.memory),
+              "memory_policy_checks": memory_policy,
+              "reference_fault_trial_count": sum(t.expected_fault is not None for p in programs if p.memory for t in p.trials),
+              "fault_policy": "preflight whole scalar access; cross-boundary store atomicity is a project policy, not hardware equivalence",
               "trial_count": count, "program_count": len(programs), "forms": observed_forms,
               "native_build": build}
     report_path = ROOT / f"build/lifter-validation/{mode}-report.json"

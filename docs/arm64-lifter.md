@@ -1,4 +1,4 @@
-# ARM64 integer/control-flow C lifter
+# ARM64 C lifter
 
 This milestone translates bounded raw ARM64 instruction ranges to C17. Synthetic translations run as native Windows code and are compared with an independent ARM64 reference. The game executable remains a host scaffold; building it does not automatically translate or launch the game.
 
@@ -14,19 +14,30 @@ This milestone translates bounded raw ARM64 instruction ranges to C17. Synthetic
 | Direct control flow | B, BL, B.cond, CBZ, CBNZ, TBZ, TBNZ |
 | Indirect control flow | BR, BLR, RET with explicit guest PC and link-register updates |
 | Hint | Exact NOP encoding |
+| Scalar memory | LDR/STR byte, halfword, word, doubleword; LDRSB/LDRSH to W/X; LDRSW to X |
+| Memory addressing | Unsigned scaled immediate; signed unscaled (LDUR/STUR variants); pre/post-index; UXTW/LSL/SXTW/SXTX register offset |
+| Literal memory | PC-relative LDR W/X and LDRSW |
 
 Aliases such as CMP, CMN, TST, and register MOV inherit their underlying encoding semantics. W-register writes zero the upper X bits. Flag-setting arithmetic computes N/Z/C/V with unsigned operations; logical flag writes clear C/V. Shifts avoid signed C overflow, implementation-defined signed right shifts, and shifts by the operand width. Reserved encodings and unsupported forms fail before source emission.
 
-Memory instructions, extended-register arithmetic, logical immediates, carry arithmetic, bitfields, division, system registers, SVC, pointer authentication, atomics/exclusives, SIMD/FP, and setjmp/longjmp services are not implemented. Recognizing a BR/BLR encoding does not discover its possible destinations or supply a callable native target.
+Paired transfers, unprivileged transfers, prefetch, extended-register arithmetic, logical immediates, carry arithmetic, bitfields, division, system registers, SVC, pointer authentication, atomics/exclusives, SIMD/FP, and setjmp/longjmp services are not implemented. Constrained-unpredictable base/transfer overlap with writeback is rejected. Recognizing a BR/BLR encoding does not discover its possible destinations or supply a callable native target.
 
 ## State and execution boundary
 
-`src/arm64_lift.h` defines `OotArm64State` with X0-X30, SP, PC, and architectural NZCV bits 31:28. Callers supply a valid state pointer, a valid executed-count pointer, canonical NZCV, and an instruction budget. The generated function returns:
+`src/arm64_lift.h` defines `OotArm64State` with X0-X30, SP, PC, and architectural NZCV bits 31:28. ABI version 2 adds an explicit `OotGuestMemory *` argument. Callers supply a valid state pointer, a valid executed-count pointer, canonical NZCV, and an instruction budget. Memory instructions need an initialized [guest-memory](guest-memory.md) object; a null memory argument is allowed for integer-only execution and faults on an attempted data access. Regenerate and recompile older generated translations after this ABI change.
+
+```c
+int oot_lift_run(OotArm64State *state, OotGuestMemory *memory,
+                 uint64_t budget, uint64_t *executed);
+```
+
+The generated function returns:
 
 - `OOT_LIFT_DISPATCH` when PC is outside its translated instruction set, including a misaligned target. It leaves that PC for a future dispatcher to resolve or fault. Reaching the end of a range is not proof of a guest function return.
 - `OOT_LIFT_BUDGET` when PC is still translated and the budget has been consumed. A zero budget performs no instruction. The executed count is always returned.
+- `OOT_LIFT_MEMORY_FAULT` when a data access fails. PC and architectural state remain at the faulting instruction, its writeback is skipped, and it is excluded from the retired instruction count. Previously retired instructions remain effective. The backend records access details when a memory object is supplied.
 
-Each translated instruction updates explicit guest state. Branches never cast guest addresses to host function pointers. Calls and returns use this same dispatch loop, so guest recursion does not grow the host C call stack in this subset. There is no guest-memory interface or complete module runtime yet.
+Each translated instruction updates explicit guest state. Branches never cast guest addresses to host function pointers. Calls and returns use this same dispatch loop, so guest recursion does not grow the host C call stack in this subset. Scalar data transfers use checked regions with explicit permissions. There is no complete module runtime yet.
 
 ## Generate a bounded translation
 
@@ -38,7 +49,7 @@ Use a raw little-endian code range, with an explicit guest base address. The inp
   --output build/lifted/synthetic.c --report build/lifted/synthetic.json
 ```
 
-Choose fresh output paths under `build/`. Include `src/` when compiling the generated source. The report records selected-byte SHA-256, the guest range, and exact form counts. Generated game-derived translations must stay outside Git and are not run by validation.
+Choose fresh output paths under `build/`. Include `src/` and link `src/guest_memory.c` (or the CMake `oot-guest-memory` static library) when compiling the generated source. Report schema 2 records ABI version, selected-byte SHA-256, the guest range, exact form counts, and whether memory instructions occur. Generated game-derived translations must stay outside Git and are not run by validation.
 
 ## Differential validation
 
@@ -53,9 +64,11 @@ Install the pinned analysis and test dependencies inside the project environment
 
 The default uses CMake and a Release native compiler. Generated C is compiled as a shared test library, with warnings treated as errors, and called through Python's native FFI. Unicorn 2.1.4 executes the independently encoded synthetic ARM64 cases as the reference. It is a development dependency, not the game's runtime. Third-party packages stay in the ignored virtual environment with their own licenses.
 
-The deterministic suite exercises every listed family, both widths, arithmetic and shift boundaries, destination/source aliases, SP/XZR, all B.cond conditions with all 16 flag states, backward branches, loops, BL/BLR/RET, BLR X30, budget exhaustion, dispatcher exits, and addresses above 4 GiB. It compares all integer registers, SP, PC, NZCV, instruction count, and exit status. Reports, generated source, compiler logs, and libraries remain under `build/lifter-validation/`. The report records compiler and reference versions. Passing these cases supplies evidence for the tested subset, not proof for every input or a playable port.
+The deterministic suite exercises every listed family, both widths, arithmetic and shift boundaries, destination/source aliases, SP/XZR, all B.cond conditions with all 16 flag states, backward branches, loops, BL/BLR/RET, BLR X30, budget exhaustion, dispatcher exits, and addresses above 4 GiB. Memory cases cover all scalar widths, signed loads, addressing/extension modes, unaligned and cross-region accesses, base/index/destination aliases, stack-like save/restore, selected faults, and successful address arithmetic wrapping to a mapped low address. It compares all integer registers, SP, PC, NZCV, retired count, exit status, mapped data bytes, and aligned missing/protected-page fault details. Additional backend-policy checks cover fault retry, stale-fault clearing, null memory, and rejected transfers across the address-space limit. Reports, generated source, compiler logs, and libraries remain under `build/lifter-validation/`. Passing these cases supplies evidence for the tested subset, not proof for every input or a playable port.
 
-The initial milestone passed 18,914 comparisons across eight synthetic programs with both MSVC and GCC. A static census of the locally prepared 1.1.1 inputs classified 9,021,974 of 16,956,388 discovered instruction words as supported encodings. That count does not measure complete translated functions or gameplay progress; it excludes undiscovered code and does not resolve runtime services or memory accesses.
+The initial integer/control-flow milestone passed 18,914 comparisons across eight synthetic programs with both MSVC and GCC. The memory milestone extends those same cases with scalar transfer and fault comparisons; the current report records counts and compiler/reference versions. A supported-encoding census does not measure complete translated functions or gameplay progress; it excludes undiscovered code and does not establish runtime services or valid memory mappings.
+
+The scalar-memory milestone exercises 24,414 comparisons across 16 synthetic programs, including 5,500 memory cases and 133 reference fault cases. Its local static census classifies 13,088,048 of 16,956,388 discovered instruction words as supported encodings; no game instructions are executed by this census or the validation suite.
 
 The full Python suite includes native differential validation when its dependency is installed. Windows CI installs it and runs it through CTest. A direct invocation is:
 
@@ -70,6 +83,6 @@ To measure supported encodings among statically discovered game instructions wit
   --report build/arm64-lifter-coverage.json --lifter-coverage
 ```
 
-The next milestone is checked guest-memory access and scalar load/store translation, with differential comparisons extended to memory contents and fault behavior.
+The next milestones are paired LDP/STP translation and a verified bridge from linked module images to guest-memory regions and a synthetic stack. Integer coverage and runtime services still need further work before executing game functions.
 
 References: [Arm A64 instruction set](https://developer.arm.com/documentation/ddi0602/latest), [Unicorn programming API](https://www.unicorn-engine.org/docs/tutorial.html), and [pinned Unicorn package](https://pypi.org/project/unicorn/2.1.4/).

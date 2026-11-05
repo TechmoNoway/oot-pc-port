@@ -54,7 +54,7 @@ class SemanticDecoderTests(unittest.TestCase):
     def test_reserved_and_unimplemented_forms_are_rejected(self):
         unsupported = [0, 0xFFFFFFFF, 0x32800000, 0x52C00000, 0x0BC00000,
                        0x0B008000, 0x0A008000, 0x91800000, 0x54000010,
-                       0x8B200000, 0xF9400000, 0xD4000001, 0xD503233F]
+                       0x8B200000, 0xA9400000, 0xD4000001, 0xD503233F]
         for word in unsupported:
             with self.subTest(word=hex(word)), self.assertRaises(UnsupportedInstruction):
                 decode_instruction(word, BASE)
@@ -91,6 +91,56 @@ class SemanticDecoderTests(unittest.TestCase):
         self.assertEqual(State.nzcv.offset, 264)
 
 
+class MemoryDecoderTests(unittest.TestCase):
+    def test_unsigned_load_and_store_width_and_scale(self):
+        ins = decode_instruction(0xF9400420, BASE)  # ldr x0,[x1,#8]
+        self.assertEqual((ins.form, ins.width, ins.access_size, ins.immediate, ins.rn, ins.rd, ins.load),
+                         ("loadstore_unsigned", 64, 8, 8, 1, 0, True))
+        store = decode_instruction(0x7900043F, BASE)  # strh wzr,[x1,#2]
+        self.assertEqual((store.width, store.access_size, store.immediate, store.rd, store.load),
+                         (32, 2, 2, 31, False))
+
+    def test_sign_extension_has_explicit_destination_width(self):
+        for word, access, width in ((0x39800020, 1, 64), (0x39C00020, 1, 32),
+                                    (0x79800020, 2, 64), (0x79C00020, 2, 32), (0xB9800020, 4, 64)):
+            with self.subTest(word=hex(word)):
+                ins = decode_instruction(word, BASE)
+                self.assertEqual((ins.sign_extend, ins.access_size, ins.width), (True, access, width))
+
+    def test_pre_post_and_unscaled_signed_offsets(self):
+        for word, immediate, wb, post in ((0xF85F8C20, -8, True, False),
+                                         (0xF8408420, 8, True, True), (0xF85F8020, -8, False, False)):
+            with self.subTest(word=hex(word)):
+                ins = decode_instruction(word, BASE)
+                self.assertEqual((ins.immediate, ins.writeback, ins.post_index), (immediate, wb, post))
+
+    def test_register_offset_extension_and_scale(self):
+        ins = decode_instruction(0xF8625820, BASE)  # ldr x0,[x1,w2,uxtw #3]
+        self.assertEqual((ins.form, ins.rn, ins.rm, ins.extend, ins.amount),
+                         ("loadstore_register", 1, 2, 2, 3))
+
+    def test_literal_address_and_load_width(self):
+        for word, width, access, signed in ((0x18FFFFE0, 32, 4, False),
+                                           (0x58FFFFE0, 64, 8, False), (0x98FFFFE0, 64, 4, True)):
+            ins = decode_instruction(word, BASE)
+            self.assertEqual((ins.target, ins.width, ins.access_size, ins.sign_extend),
+                             (BASE - 4, width, access, signed))
+
+    def test_reject_reserved_unprivileged_vector_atomic_and_overlap_forms(self):
+        for word in (0xF9800020, 0xF9C00020, 0xB9C00020, 0xD8000000, 0x3D400020,
+                     0xF8620820, 0xF8200020, 0xF8400820, 0xF8400C21, 0xF8000C21, 0xC85F7C20):
+            with self.subTest(word=hex(word)), self.assertRaises(UnsupportedInstruction):
+                decode_instruction(word, BASE)
+        # XZR and SP are distinct architectural registers despite sharing encoding 31.
+        self.assertTrue(decode_instruction(0xF8400FFF, BASE).writeback)
+
+    def test_memory_report_records_abi_and_access(self):
+        _, report = emit_c(struct.pack("<I", 0xF9400420), BASE)
+        self.assertEqual(report["abi_version"], 2)
+        self.assertTrue(report["guest_memory_access"])
+        self.assertFalse(report["game_runtime_ready"])
+
+
 class TranslationCliTests(unittest.TestCase):
     def run_cli(self, *args):
         return subprocess.run([sys.executable, "-B", str(ROOT / "tools/lift_arm64.py"), *map(str, args)],
@@ -118,10 +168,10 @@ class TranslationCliTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(dir=ROOT / "build", prefix="lifter-test-") as temporary:
             folder = Path(temporary)
             source, output = folder / "code.raw", folder / "code.c"
-            source.write_bytes(struct.pack("<II", 0xD503201F, 0xF9400000))
+            source.write_bytes(struct.pack("<II", 0xD503201F, 0xA9400000))
             result = self.run_cli(source, "--base", hex(BASE), "--output", output)
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn("0xf9400000", result.stderr)
+            self.assertIn("0xa9400000", result.stderr)
             self.assertFalse(output.exists())
 
     def test_output_must_stay_under_build(self):
@@ -133,10 +183,13 @@ class TranslationCliTests(unittest.TestCase):
 
 @unittest.skipUnless(importlib.util.find_spec("unicorn"), "install tools/requirements-lifter.txt for native differential tests")
 class NativeDifferentialTests(unittest.TestCase):
-    def test_generated_c_matches_unicorn_integer_state_and_control_flow(self):
+    def test_generated_c_matches_unicorn_state_memory_and_faults(self):
         report, path = run_validation(os.environ.get("OOT_LIFTER_COMPILER", "cmake"))
         self.assertEqual(report["result"], "passed")
         self.assertGreater(report["trial_count"], 18000)
+        self.assertGreater(report["memory_trial_count"], 5000)
+        self.assertGreater(report["reference_fault_trial_count"], 100)
+        self.assertIn("retry_after_mapping", report["memory_policy_checks"])
         self.assertTrue(path.is_file())
 
 

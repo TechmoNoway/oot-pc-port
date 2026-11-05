@@ -12,7 +12,7 @@ The [offline linker](offline-linking.md) reads MOD0, dynamic tables, and symbols
 
 [ARM64 analysis](arm64-analysis.md) uses a separate disassembly backend and project control-flow logic to survey prepared code. It reports evidence-based entry candidates and follows direct edges; indirect targets and nonlocal-return semantics remain explicit gaps. Optional semantic coverage classifies exact encodings using the lifter's decoder without executing game code.
 
-The [integer/control-flow lifter](arm64-lifter.md) emits C17 for a bounded raw code range. It maintains explicit X registers, SP, PC, and NZCV, returns to a dispatcher when PC leaves the translated range, and enforces an instruction budget. Its generated synthetic programs compile to native Windows code and are compared with Unicorn ARM64. This is a subset implementation: memory instructions, native module dispatch, and host services are not connected to the game.
+The [ARM64 lifter](arm64-lifter.md) emits C17 for a bounded raw code range. It maintains explicit X registers, SP, PC, and NZCV, returns to a dispatcher when PC leaves the translated range, and enforces an instruction budget. Scalar loads and stores use [checked guest memory](guest-memory.md) with caller-owned backing buffers and read/write permissions. Generated synthetic programs compile to native Windows code and are compared with Unicorn ARM64 for state, memory, and selected access faults. Linked game images, native module dispatch, and host services are not connected to this runtime yet.
 
 ## Planned boundaries
 
@@ -25,7 +25,7 @@ The [integer/control-flow lifter](arm64-lifter.md) emits C17 for a bounded raw c
 
 Each boundary needs a verifiable milestone before work advances to gameplay. A successful compilation is not evidence of correct game execution.
 
-The next implementation milestone is a checked guest-memory interface plus scalar load/store semantics, including width, sign extension, addressing, and faults. Extend the same synthetic differential validation to memory contents before attempting translated game functions. Additional integer forms, SIMD/FP, atomics/exclusives, nonlocal returns, and indirect-target discovery remain separate requirements.
+The next implementation milestones are paired LDP/STP semantics and a verified bridge from offline linked images to guest-memory regions, with code/rodata/data/BSS permissions and a synthetic stack. Additional integer forms, SIMD/FP, atomics/exclusives, nonlocal returns, and indirect-target discovery remain separate requirements. Game code must remain unexecuted until complete function coverage and required runtime boundaries are established.
 
 ## Repository boundaries
 
