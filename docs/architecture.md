@@ -14,6 +14,8 @@ The [offline linker](offline-linking.md) reads MOD0, dynamic tables, and symbols
 
 The [ARM64 lifter](arm64-lifter.md) emits C17 for a bounded raw code range. It maintains explicit X registers, SP, PC, and NZCV, returns to a dispatcher when PC leaves the translated range, and enforces an instruction budget. Scalar and paired transfers use [checked guest memory](guest-memory.md) with read/write permissions and whole-access preflight. Generated synthetic programs compile to native Windows code and are compared with Unicorn ARM64 for state, memory, and selected access faults. A synthetic translated stack frame also runs on stack backing supplied by the native image bridge. Game functions, native module dispatch, and host services are not connected for execution yet.
 
+[Leaf verification](leaf-verification.md) adds a conservative structural boundary for short, acyclic register-only regions with standard returns and preserved X18-X30/SP. Six complete synthetic functions cover arithmetic mixing, signed minimum, bitfield insertion, signed remainder, carry propagation, and a two-return diamond. Native results are checked against independent formulas as well as ARM64 execution. Metadata-rooted game candidates are surveyed statically and remain unexecuted.
+
 ## Planned boundaries
 
 1. Input inspection: identify the game build, inspect module metadata, and validate user-provided inputs.
@@ -25,7 +27,7 @@ The [ARM64 lifter](arm64-lifter.md) emits C17 for a bounded raw code range. It m
 
 Each boundary needs a verifiable milestone before work advances to gameplay. A successful compilation is not evidence of correct game execution.
 
-The next implementation milestones are broader integer forms and verified function translation with explicit unsupported boundaries. Process startup still needs a guest ABI, TLS, module initialization, scheduling, and service dispatch. SIMD/FP, atomics/exclusives, nonlocal returns, and indirect-target discovery remain separate requirements. Game code must remain unexecuted until complete function coverage and required runtime boundaries are established.
+The next implementation milestone is controlled function dispatch with explicit entry, return, and state preconditions, followed by remaining integer/system forms. Process startup still needs a guest ABI, TLS, module initialization, scheduling, and service dispatch. SIMD/FP, atomics/exclusives, nonlocal returns, and indirect-target discovery remain separate requirements. Game code must remain unexecuted until complete function coverage and required runtime boundaries are established.
 
 ## Repository boundaries
 

@@ -54,7 +54,7 @@ class SemanticDecoderTests(unittest.TestCase):
     def test_reserved_and_unimplemented_forms_are_rejected(self):
         unsupported = [0, 0xFFFFFFFF, 0x32800000, 0x52C00000, 0x0BC00000,
                        0x0B008000, 0x0A008000, 0x91800000, 0x54000010,
-                       0x8B200000, 0xC85F7C00, 0xD4000001, 0xD503233F]
+                       0x8B201400, 0xC85F7C00, 0xD4000001, 0xD503233F]
         for word in unsupported:
             with self.subTest(word=hex(word)), self.assertRaises(UnsupportedInstruction):
                 decode_instruction(word, BASE)
@@ -168,6 +168,28 @@ class PairDecoderTests(unittest.TestCase):
                 decode_instruction(word, BASE)
 
 
+class ExtendedIntegerDecoderTests(unittest.TestCase):
+    def test_known_alias_encodings_and_immediate_masks(self):
+        mask = decode_instruction(0x92001C3F, BASE)
+        self.assertEqual((mask.form, mask.mask, mask.rd), ("logical_immediate", 0x000000FF000000FF, 31))
+        field = decode_instruction(0xD3485C20, BASE)  # ubfx x0,x1,#8,#16
+        self.assertEqual((field.form, field.amount, field.immediate, field.operation), ("bitfield", 8, 23, 2))
+        signed = decode_instruction(0x93401C20, BASE)  # sxtb x0,w1
+        self.assertEqual((signed.form, signed.operation, signed.width), ("bitfield", 0, 64))
+
+    def test_select_divide_multiply_shift_and_carry_forms(self):
+        for word, form in ((0xDA820420, "conditional_select"), (0x1AC20C20, "divide"),
+                           (0x9B020C20, "multiply_add"), (0x9AC22C20, "variable_shift"),
+                           (0xFA020020, "addsub_carry"), (0x8B22C020, "addsub_extended")):
+            with self.subTest(word=hex(word)):
+                self.assertEqual(decode_instruction(word, BASE).form, form)
+
+    def test_reserved_masks_and_unimplemented_integer_extensions_rejected(self):
+        for word in (0x12400020, 0x9240FC20, 0x13400020, 0x9300FC20, 0xF3400020,
+                     0x0B221420, 0xBA820020, 0x9B220C20, 0x9AC20020):
+            with self.subTest(word=hex(word)), self.assertRaises(UnsupportedInstruction):
+                decode_instruction(word, BASE)
+
 class TranslationCliTests(unittest.TestCase):
     def run_cli(self, *args):
         return subprocess.run([sys.executable, "-B", str(ROOT / "tools/lift_arm64.py"), *map(str, args)],
@@ -217,6 +239,8 @@ class NativeDifferentialTests(unittest.TestCase):
         self.assertGreater(report["memory_trial_count"], 5000)
         self.assertGreater(report["reference_fault_trial_count"], 100)
         self.assertIn("retry_after_mapping", report["memory_policy_checks"])
+        self.assertEqual(report["verified_synthetic_leaf_count"], 6)
+        self.assertGreaterEqual(report["whole_leaf_result_trials"], 768)
         self.assertTrue(path.is_file())
 
 

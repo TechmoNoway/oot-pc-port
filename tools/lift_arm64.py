@@ -9,6 +9,7 @@ import sys
 from arm64_lifter import MAX_WORDS, emit_c
 from input_formats import require
 from link_exefs import build_destination
+from leaf_verifier import verify_leaf
 
 
 def integer(text):
@@ -24,6 +25,7 @@ def main():
     parser.add_argument("--output", type=Path, required=True, help="fresh C file under build/")
     parser.add_argument("--report", type=Path, help="fresh JSON file under build/")
     parser.add_argument("--name", default="oot_lift_run")
+    parser.add_argument("--verify-leaf", action="store_true", help="require a closed acyclic register-only leaf before emitting C")
     args = parser.parse_args()
     try:
         output = build_destination(args.output)
@@ -40,7 +42,10 @@ def main():
             source.seek(args.offset)
             data = source.read(size)
         require(len(data) == size, "input changed while reading the selected range")
+        proof = verify_leaf(data, args.base) if args.verify_leaf else None
         code, report = emit_c(data, args.base, args.name)
+        if proof:
+            report["leaf_verification"] = proof
         report.update({"source_sha256": hashlib.sha256(data).hexdigest(), "file_offset": args.offset,
                        "guest_code_executed": False, "translation_does_not_prove_function_completeness": True})
         # Unsupported or malformed instructions cannot leave partially translated source.

@@ -124,6 +124,16 @@ class MetadataTests(unittest.TestCase):
 
 @unittest.skipUnless(HAS_CAPSTONE, "install tools/requirements-analysis.txt for decoder integration tests")
 class DiscoveryTests(unittest.TestCase):
+    def test_unsupported_semantics_are_counted_by_syntax_and_family(self):
+        module = Module("main", synthetic_module({0: branch(0, 0x40), 0x40: 0xD4000001,
+                                                  0x44: 0xD53BD040, 0x48: RET}))
+        result = analyze_module(module, self.decoder, sample_limit=1, lifter_coverage=True)
+        self.assertEqual(result["lifter_unsupported_mnemonics"], {"mrs": 1, "svc": 1})
+        self.assertEqual(sum(result["lifter_unsupported_families"].values()), 2)
+        self.assertEqual(len(result["lifter_unsupported_samples"]), 1)
+        self.assertEqual(result["lifter_supported_encoding_words"] + result["lifter_unsupported_encoding_words"],
+                         result["discovered_code_words"])
+
     def setUp(self):
         self.decoder = Decoder()
 

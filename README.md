@@ -18,10 +18,12 @@ A bounded [ARM64 C lifter](docs/arm64-lifter.md) translates selected integer ope
 
 [Native image mapping](docs/runtime-images.md) packages completely linked module regions, preserves BSS relocations, and loads verified data into the C memory backend with a guarded synthetic stack. Mapping does not execute game code.
 
+[Leaf verification](docs/leaf-verification.md) checks bounded register-only regions for closed, acyclic control flow and preserved registers. Complete synthetic leaf functions are validated against both ARM64 execution and independent mathematical results. A static survey reports game-code candidates without executing them or claiming original function identity.
+
 The game is not playable yet. Process startup, broader instruction semantics, operating-system services, and graphics remain to be implemented.
 
 ## Development direction
 
-The next milestones are broader integer coverage, verified function translation, indirect-target recovery, process startup and operating-system services, and graphics. See [docs/architecture.md](docs/architecture.md).
+The next milestones are controlled function dispatch, remaining integer/system semantics, indirect-target recovery, process startup and operating-system services, and graphics. See [docs/architecture.md](docs/architecture.md).
 
 Game containers, keys, extracted files, generated game code, saves, shader caches, and compiled executables stay outside version control. Build output belongs under `build/`; future generated output belongs under `generated/`.

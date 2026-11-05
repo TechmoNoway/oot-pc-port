@@ -17,6 +17,9 @@ from input_formats import InputError, require
 from lifter_validation_types import BASE, Memory, Program, State, Trial
 from memory_validation import memory_programs, validate_memory_policy, validate_memory_program
 from pair_validation import pair_programs, validate_pair_policy
+from integer_validation import integer_programs
+from leaf_validation import leaf_programs
+from leaf_verifier import verify_leaf
 
 ROOT = Path(__file__).resolve().parent.parent
 SEED = 0x0CA41234
@@ -141,7 +144,7 @@ def synthetic_programs():
     programs.append(Program("outside_entry", [0xD503201F],
                             [Trial(index, [0] * 31, 0, 0, budget)
                              for index in (-1, 1) for budget in (0, 1)]))
-    return programs + memory_programs() + pair_programs()
+    return programs + memory_programs() + pair_programs() + integer_programs() + leaf_programs()
 
 
 def find_cmake():
@@ -162,6 +165,8 @@ def compile_library(programs, mode="cmake"):
     chunks, reports = [], []
     for program in programs:
         code, report = emit_c(program.data, program.base, f"oot_lift_{program.name}")
+        if program.leaf:
+            report["leaf_verification"] = verify_leaf(program.data, program.base)
         chunks.append(code)
         reports.append(report)
     source.write_text("\n".join(chunks), encoding="utf-8")
@@ -256,6 +261,9 @@ def validate_program(library, program):
         expected_status = int(expected[2] in pcs)
         count = c_uint64(U64)
         status = native(byref(state), None, trial.budget, byref(count))
+        if trial.expected_x is not None:
+            require(program.leaf and status == 0 and all(state.x[r] == v for r, v in trial.expected_x.items()),
+                    f"complete leaf mathematical result mismatch: {program.name} {case_index}")
         if state.values() != expected or status != expected_status or count.value != steps[0]:
             raise AssertionError(json.dumps({"program": program.name, "case": case_index,
                 "word": f"0x{program.words[trial.index]:08x}" if 0 <= trial.index < len(program.words) else None,
@@ -278,6 +286,8 @@ def run_validation(mode="cmake"):
               "comparison": ["x0-x30", "sp", "pc", "nzcv", "retired_instruction_count", "exit_status",
                              "all_mapped_data_bytes", "aligned_unmapped_and_permission_faults"],
               "memory_trial_count": sum(len(p.trials) for p in programs if p.memory),
+              "verified_synthetic_leaf_count": sum(p.leaf for p in programs),
+              "whole_leaf_result_trials": sum(t.expected_x is not None for p in programs if p.leaf for t in p.trials),
               "memory_policy_checks": memory_policy,
               "reference_fault_trial_count": sum(t.expected_fault is not None for p in programs if p.memory for t in p.trials),
               "fault_policy": "preflight whole scalar access; cross-boundary store atomicity is a project policy, not hardware equivalence",

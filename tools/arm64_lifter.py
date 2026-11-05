@@ -16,7 +16,8 @@ MAX_WORDS = 16384
 FORMS = ("move_wide", "addsub_immediate", "addsub_shifted", "logical_shifted",
          "pc_relative", "branch_immediate", "branch_condition", "compare_branch",
          "test_branch", "branch_register", "nop", "loadstore_unsigned", "loadstore_immediate",
-         "loadstore_register", "load_literal", "loadstore_pair")
+         "loadstore_register", "load_literal", "loadstore_pair", "logical_immediate", "bitfield",
+         "conditional_select", "addsub_extended", "variable_shift", "multiply_add", "divide", "addsub_carry")
 MEMORY_FORMS = frozenset(("loadstore_unsigned", "loadstore_immediate", "loadstore_register", "load_literal", "loadstore_pair"))
 
 
@@ -52,6 +53,26 @@ class Instruction:
     post_index: bool = False
     extend: int = 0
     rt2: int = 0
+    mask: int = 0
+    top_mask: int = 0
+    condition: int = 0
+    ra: int = 0
+
+
+def bit_masks(n, imms, immr, width, logical):
+    """Decode repeating bit masks without relying on disassembler aliases."""
+    length = ((n << 6) | (~imms & 63)).bit_length() - 1
+    require(length >= 1 and (1 << length) <= width, "reserved bit-mask element size")
+    element_bits = 1 << length
+    levels = element_bits - 1
+    s, r = imms & levels, immr & levels
+    require(not logical or s != levels, "reserved all-ones logical immediate")
+    element_mask = (1 << element_bits) - 1
+    ones = (1 << (s + 1)) - 1
+    rotated = ((ones >> r) | (ones << (element_bits - r))) & element_mask
+    top = (1 << (((s - r) & levels) + 1)) - 1
+    return (sum(rotated << i for i in range(0, width, element_bits)),
+            sum(top << i for i in range(0, width, element_bits)))
 
 
 def decode_instruction(word, pc):
@@ -68,6 +89,37 @@ def decode_instruction(word, pc):
 
     if word == 0xD503201F:
         return ins("nop")
+    if word & 0x1F800000 in (0x12000000, 0x13000000):
+        logical = word & 0x1F800000 == 0x12000000
+        n, immr, imms, opc = (word >> 22) & 1, (word >> 16) & 63, (word >> 10) & 63, (word >> 29) & 3
+        if not logical and (opc == 3 or n != (width == 64) or immr >= width or imms >= width):
+            reject("reserved bitfield encoding")
+        try:
+            mask, top_mask = bit_masks(n, imms, immr, width, logical)
+        except InputError as error:
+            reject(str(error))
+        return ins("logical_immediate" if logical else "bitfield", width=width, rd=rd, rn=rn,
+                   operation=opc, amount=immr, immediate=imms, mask=mask, top_mask=top_mask)
+    if word & 0x3FE00800 == 0x1A800000:
+        return ins("conditional_select", width=width, rd=rd, rn=rn, rm=rm,
+                   condition=(word >> 12) & 15, operation=(((word >> 30) & 1) << 1) | ((word >> 10) & 1))
+    if word & 0x1FE00000 == 0x0B200000:
+        amount = (word >> 10) & 7
+        if amount > 4:
+            reject("reserved extended-register shift")
+        return ins("addsub_extended", width=width, rd=rd, rn=rn, rm=rm, extend=(word >> 13) & 7,
+                   amount=amount, operation=(word >> 30) & 1, flags=bool(word & (1 << 29)))
+    if word & 0x1FE0FC00 == 0x1A000000:
+        return ins("addsub_carry", width=width, rd=rd, rn=rn, rm=rm,
+                   operation=(word >> 30) & 1, flags=bool(word & (1 << 29)))
+    if word & 0x7FE00000 == 0x1B000000:
+        return ins("multiply_add", width=width, rd=rd, rn=rn, rm=rm, ra=(word >> 10) & 31,
+                   operation=(word >> 15) & 1)
+    opcode = word & 0x7FE0FC00
+    if opcode in (0x1AC02000, 0x1AC02400, 0x1AC02800, 0x1AC02C00):
+        return ins("variable_shift", width=width, rd=rd, rn=rn, rm=rm, shift=(word >> 10) & 3)
+    if opcode in (0x1AC00800, 0x1AC00C00):
+        return ins("divide", width=width, rd=rd, rn=rn, rm=rm, operation=(word >> 10) & 1)
     if word & 0x3E000000 == 0x28000000:
         opc, mode, load, rt2 = word >> 30, (word >> 23) & 3, bool(word & (1 << 22)), (word >> 10) & 31
         if opc == 3 or (opc == 1 and not load) or mode == 0:
@@ -230,13 +282,47 @@ def body(ins):
         elif ins.operation == 3:
             value = f"({read(rd)} & ~{constant(0xFFFF << ins.amount)}) | {value}"
         lines.append(write(value))
-    elif ins.form in ("addsub_immediate", "addsub_shifted"):
+    elif ins.form in ("addsub_immediate", "addsub_shifted", "addsub_extended"):
         immediate = ins.form == "addsub_immediate"
         right = constant(ins.immediate) if immediate else (
             f"oot_arm64_shift({read(rm)}, {ins.shift}, {ins.amount}, {width})")
-        lines.extend([f"uint64_t a = {read(rn, immediate)};", f"uint64_t b = {right};",
+        use_sp = ins.form != "addsub_shifted"
+        if ins.form == "addsub_extended":
+            right = f"oot_arm64_extend(oot_arm64_read(s, {rm}, 64, 0), {ins.extend}, {ins.amount}, {width})"
+        lines.extend([f"uint64_t a = {read(rn, use_sp)};", f"uint64_t b = {right};",
                       f"uint64_t r = oot_arm64_addsub(s, a, b, {width}, {ins.operation}, {int(ins.flags)});",
-                      write("r", immediate and not ins.flags)])
+                      write("r", use_sp and not ins.flags)])
+    elif ins.form == "addsub_carry":
+        lines.extend([f"uint64_t a = {read(rn)};", f"uint64_t b = {read(rm)};",
+                      f"uint64_t r = oot_arm64_carry(s, a, b, {width}, {ins.operation}, {int(ins.flags)});", write("r")])
+    elif ins.form == "logical_immediate":
+        operator = ("&", "|", "^", "&")[ins.operation]
+        lines.append(f"uint64_t r = {read(rn)} {operator} {constant(ins.mask)};")
+        if ins.operation == 3:
+            lines.append(f"s->nzcv = oot_arm64_nz(r, {width});")
+        lines.append(write("r", ins.operation != 3))
+    elif ins.form == "bitfield":
+        lines.extend([f"uint64_t source = {read(rn)};",
+                      f"uint64_t bottom = oot_arm64_shift(source, 3, {ins.amount}, {width}) & {constant(ins.mask)};"])
+        if ins.operation == 1:
+            lines.append(f"uint64_t previous = {read(rd)};")
+            lines.append(f"bottom |= previous & ~{constant(ins.mask)};")
+            top = "previous"
+        elif ins.operation == 0:
+            top = f"((source >> {ins.immediate}) & 1) ? UINT64_MAX : 0"
+        else:
+            top = "0"
+        lines.extend([f"uint64_t top = {top};", write(f"(top & ~{constant(ins.top_mask)}) | (bottom & {constant(ins.top_mask)})")])
+    elif ins.form == "conditional_select":
+        other = (read(rm), f"{read(rm)} + 1", f"~{read(rm)}", f"0 - {read(rm)}")[ins.operation]
+        lines.extend([f"uint64_t r = oot_arm64_condition(s->nzcv, {ins.condition}) ? {read(rn)} : ({other});", write("r")])
+    elif ins.form == "variable_shift":
+        lines.append(write(f"oot_arm64_shift({read(rn)}, {ins.shift}, (unsigned)({read(rm)} & {width - 1}), {width})"))
+    elif ins.form == "multiply_add":
+        operator = "-" if ins.operation else "+"
+        lines.append(write(f"{read(ins.ra)} {operator} ({read(rn)} * {read(rm)})"))
+    elif ins.form == "divide":
+        lines.append(write(f"oot_arm64_divide({read(rn)}, {read(rm)}, {width}, {ins.operation})"))
     elif ins.form == "logical_shifted":
         lines.extend([f"uint64_t a = {read(rn)};",
                       f"uint64_t b = oot_arm64_shift({read(rm)}, {ins.shift}, {ins.amount}, {width});"])

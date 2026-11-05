@@ -135,6 +135,8 @@ def analyze_module(module, decoder, pointer_seeds=(), progress=None, sample_limi
     plt_returns = {pc + 12: item for pc, item in stubs.items()}
     histogram, groups, control, svc = Counter(), Counter(), Counter(), Counter()
     supported_forms = Counter()
+    unsupported_mnemonics, unsupported_families = Counter(), Counter()
+    unsupported_samples = []
     unknown, branch_samples, indirect_samples, nonlocal_calls = [], [], [], []
     outside, unknown_count, unresolved_jumps, unresolved_calls = 0, 0, 0, 0
 
@@ -164,8 +166,12 @@ def analyze_module(module, decoder, pointer_seeds=(), progress=None, sample_limi
             if lifter_coverage:
                 try:
                     implemented = decode_instruction(word, module.base + pc)
-                except UnsupportedInstruction:
-                    pass
+                except UnsupportedInstruction as error:
+                    unsupported_mnemonics[mnemonic] += 1
+                    unsupported_families[FAMILIES[families[index]]] += 1
+                    if len(unsupported_samples) < sample_limit:
+                        unsupported_samples.append({"offset": pc, "word": f"0x{word:08x}",
+                                                    "mnemonic": mnemonic, "reason": str(error)})
                 else:
                     supported_forms[implemented.form] += 1
             literal = literal_reference(word, pc)
@@ -243,5 +249,8 @@ def analyze_module(module, decoder, pointer_seeds=(), progress=None, sample_limi
         "lifter_supported_encoding_words": sum(supported_forms.values()) if lifter_coverage else None,
         "lifter_unsupported_encoding_words": decoded_code - sum(supported_forms.values()) if lifter_coverage else None,
         "lifter_form_counts": dict(sorted(supported_forms.items())) if lifter_coverage else None,
+        "lifter_unsupported_mnemonics": dict(sorted(unsupported_mnemonics.items())) if lifter_coverage else None,
+        "lifter_unsupported_families": dict(sorted(unsupported_families.items())) if lifter_coverage else None,
+        "lifter_unsupported_samples": unsupported_samples if lifter_coverage else None,
         "translated_code_executed": False,
     }

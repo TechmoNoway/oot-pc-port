@@ -10,6 +10,13 @@ This milestone translates bounded raw ARM64 instruction ranges to C17. Synthetic
 | Add/subtract immediate | ADD, ADDS, SUB, SUBS, optional immediate shift, context-dependent SP/XZR |
 | Add/subtract shifted register | ADD, ADDS, SUB, SUBS with LSL, LSR, ASR |
 | Logical shifted register | AND, BIC, ORR, ORN, EOR, EON, ANDS, BICS with LSL, LSR, ASR, ROR |
+| Logical immediate | AND, ORR, EOR, ANDS with independently decoded repeating bit masks |
+| Bitfields | SBFM, BFM, UBFM, including immediate shift, extract, insert, and extension aliases |
+| Extended arithmetic | ADD/ADDS/SUB/SUBS with unsigned/signed byte, halfword, word, X extensions and shifts 0-4 |
+| Carry arithmetic | ADC, ADCS, SBC, SBCS |
+| Conditional select | CSEL, CSINC, CSINV, CSNEG and their aliases, all condition codes |
+| Variable shift | LSLV, LSRV, ASRV, RORV with masked shift counts |
+| Multiply/divide | MADD, MSUB, MUL, MNEG, UDIV, SDIV in W/X widths |
 | PC-relative addresses | ADR and ADRP with signed displacements |
 | Direct control flow | B, BL, B.cond, CBZ, CBNZ, TBZ, TBNZ |
 | Indirect control flow | BR, BLR, RET with explicit guest PC and link-register updates |
@@ -21,7 +28,9 @@ This milestone translates bounded raw ARM64 instruction ranges to C17. Synthetic
 
 Aliases such as CMP, CMN, TST, and register MOV inherit their underlying encoding semantics. W-register writes zero the upper X bits. Flag-setting arithmetic computes N/Z/C/V with unsigned operations; logical flag writes clear C/V. Shifts avoid signed C overflow, implementation-defined signed right shifts, and shifts by the operand width. Reserved encodings and unsupported forms fail before source emission.
 
-Non-temporal/tagged pairs, unprivileged transfers, prefetch, extended-register arithmetic, logical immediates, carry arithmetic, bitfields, division, system registers, SVC, pointer authentication, atomics/exclusives, SIMD/FP, and setjmp/longjmp services are not implemented. Constrained-unpredictable base/transfer overlap with writeback and identical pair-load destinations are rejected. Repeated pair-store sources are allowed. Recognizing a BR/BLR encoding does not discover its possible destinations or supply a callable native target.
+Conditional compare, EXTR, bit-reversal/counting forms, long/high multiply, non-temporal/tagged pairs, unprivileged transfers, prefetch, system registers, SVC, pointer authentication, atomics/exclusives, SIMD/FP, and setjmp/longjmp services are not implemented. Constrained-unpredictable base/transfer overlap with writeback and identical pair-load destinations are rejected. Repeated pair-store sources are allowed. Recognizing a BR/BLR encoding does not discover its possible destinations or supply a callable native target.
+
+Division by zero returns zero. Signed division uses unsigned magnitudes, including the minimum-integer divided by -1 case, and never invokes undefined signed host division. Multiply/add and negate operations use unsigned wrapping arithmetic. Logical immediate destinations handle SP separately from source ZR; flag-setting forms discard destination 31 as ZR. Bitfield masks and sign-fill are decoded independently of mnemonic aliases. Reserved encodings remain hard translation failures.
 
 ## State and execution boundary
 
@@ -88,6 +97,8 @@ Paired-transfer validation covers W/X widths, LDPSW sign extension, positive/neg
 
 The paired-transfer milestone extends the suite to 26,168 comparisons across 20 synthetic programs, including native stack frames and 163 reference access-fault cases. Both MSVC and GCC also pass the separate native image-bridge tests.
 
-The [native image bridge](runtime-images.md) supplies mapped linked bytes and a guarded synthetic stack. The next milestones are broader integer coverage, verified function translation, and process/runtime services before executing game functions.
+The extended integer milestone passes 72,764 native/reference comparisons across 27 synthetic programs, including six [verified leaf functions](leaf-verification.md) with 768 independent mathematical result checks. The leaf tests also exercise zero/partial budgets. These are entirely artificial programs; game candidates are only analyzed statically.
+
+The [native image bridge](runtime-images.md) supplies mapped linked bytes and a guarded synthetic stack. Controlled function dispatch, remaining instruction forms, and process/runtime services are still required before executing game functions.
 
 References: [Arm A64 instruction set](https://developer.arm.com/documentation/ddi0602/latest), [Unicorn programming API](https://www.unicorn-engine.org/docs/tutorial.html), and [pinned Unicorn package](https://pypi.org/project/unicorn/2.1.4/).

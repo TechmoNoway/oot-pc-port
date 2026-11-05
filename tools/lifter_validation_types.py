@@ -37,6 +37,7 @@ class Trial:
     sp: int
     nzcv: int
     budget: int = 1
+    expected_x: dict | None = None
 
 
 @dataclass(frozen=True)
@@ -60,6 +61,7 @@ class Program:
     trials: list
     base: int = BASE
     memory: bool = False
+    leaf: bool = False
 
     @property
     def data(self):

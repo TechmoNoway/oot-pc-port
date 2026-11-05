@@ -110,4 +110,50 @@ static inline unsigned oot_arm64_condition(uint32_t nzcv, unsigned condition)
     return (condition & 1) && condition != 15 ? !holds : holds;
 }
 
+/* All arithmetic stays unsigned, including signed divide magnitudes. */
+static inline uint64_t oot_arm64_divide(uint64_t left, uint64_t right,
+                                       unsigned width, unsigned signed_division)
+{
+    uint64_t mask = oot_arm64_mask(width), sign = UINT64_C(1) << (width - 1);
+    unsigned negative = signed_division && ((left ^ right) & sign) != 0;
+    uint64_t quotient;
+    if (right == 0)
+        return 0;
+    if (signed_division) {
+        if (left & sign) left = (0 - left) & mask;
+        if (right & sign) right = (0 - right) & mask;
+    }
+    quotient = left / right;
+    return (negative ? 0 - quotient : quotient) & mask;
+}
+
+static inline uint64_t oot_arm64_extend(uint64_t value, unsigned option,
+                                       unsigned shift, unsigned width)
+{
+    unsigned bits = 8u << (option & 3);
+    if (bits != 64)
+        value &= (UINT64_C(1) << bits) - 1;
+    if (option & 4)
+        value = oot_arm64_sign_extend(value, bits);
+    return (value << shift) & oot_arm64_mask(width);
+}
+
+static inline uint64_t oot_arm64_carry(OotArm64State *s, uint64_t left, uint64_t right,
+                                      unsigned width, unsigned subtract, unsigned set_flags)
+{
+    uint64_t mask = oot_arm64_mask(width), first, result, overflow;
+    unsigned input_carry = (s->nzcv >> 29) & 1, carry;
+    if (subtract)
+        right = ~right & mask;
+    first = (left + right) & mask;
+    result = (first + input_carry) & mask;
+    if (set_flags) {
+        carry = first < left || result < first;
+        overflow = ~(left ^ right) & (left ^ result);
+        s->nzcv = oot_arm64_nz(result, width) | ((uint32_t)carry << 29) |
+                  (uint32_t)(((overflow >> (width - 1)) & 1) << 28);
+    }
+    return result;
+}
+
 #endif
