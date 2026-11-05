@@ -30,6 +30,8 @@ Aliases such as CMP, CMN, TST, and register MOV inherit their underlying encodin
 
 Conditional compare, EXTR, bit-reversal/counting forms, long/high multiply, non-temporal/tagged pairs, unprivileged transfers, prefetch, system registers, SVC, pointer authentication, atomics/exclusives, SIMD/FP, and setjmp/longjmp services are not implemented. Constrained-unpredictable base/transfer overlap with writeback and identical pair-load destinations are rejected. Repeated pair-store sources are allowed. Recognizing a BR/BLR encoding does not discover its possible destinations or supply a callable native target.
 
+These limits describe the ordinary lifter/registry ABI. A separate opt-in [pointer authentication model](pointer-authentication.md) implements six exact PAC/AUT/authenticated-return encodings with an extra context argument and a restricted address configuration. It cannot be registered as an ordinary lifted callback; existing profile acceptance and coverage counts are unchanged.
+
 Division by zero returns zero. Signed division uses unsigned magnitudes, including the minimum-integer divided by -1 case, and never invokes undefined signed host division. Multiply/add and negate operations use unsigned wrapping arithmetic. Logical immediate destinations handle SP separately from source ZR; flag-setting forms discard destination 31 as ZR. Bitfield masks and sign-fill are decoded independently of mnemonic aliases. Reserved encodings remain hard translation failures.
 
 ## State and execution boundary

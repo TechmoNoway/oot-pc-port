@@ -65,7 +65,7 @@ Discovery blockers were 190,368 unsupported-encoding frontiers, 31,286 window bo
 
 Diagnostic prefix observations found 74,101 FP/LR pre-index stores, 57,766 SUB-SP allocations, 3,992 other pre-index stack-pair stores, and 148,537 other starts, including observations following leading hints. These observations do not increase accepted-profile counts. They help choose future layouts after the earlier semantic frontiers are addressed.
 
-The immediate priority is a specified and independently tested PAC/authenticated-return model, followed by ordered/atomic memory semantics and a new survey. PAC must not be removed or treated as an unverified no-op to inflate coverage. Loop/layout, indirect-target, general memory, startup, service, and renderer requirements remain separate. These counts measure policy acceptance of candidate regions, not gameplay progress or permission to execute game code.
+The separate [PAC/authenticated-return model](pointer-authentication.md) now passes synthetic native/reference tests. The immediate priority is integrating it into an explicit function policy/dispatcher, followed by a new survey and ordered/atomic memory semantics. PAC must not be removed or treated as an unverified no-op to inflate coverage. Loop/layout, indirect-target, general memory, startup, service, and renderer requirements remain separate. These counts measure policy acceptance of candidate regions, not gameplay progress or permission to execute game code.
 
 ## Verification
 
