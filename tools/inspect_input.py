@@ -16,6 +16,8 @@ def main() -> int:
     parser.add_argument("input", type=Path, help="NUP, NSO, NPDM, or extracted ExeFS directory")
     parser.add_argument("--package", type=int, help="NUP package index (required when more than one is present)")
     parser.add_argument("--report", type=Path, help="also save JSON to a file under this project's build directory")
+    parser.add_argument("--verify-segments", action="store_true", help="decode NSO segments and check required SHA-256 hashes")
+    parser.add_argument("--zbic-decoder", type=Path, help="path to the local ZBIC helper")
     args = parser.parse_args()
     try:
         if args.report:
@@ -23,7 +25,7 @@ def main() -> int:
             build = Path(__file__).resolve().parent.parent / "build"
             if not report_path.is_relative_to(build) or report_path == args.input.resolve():
                 raise InputError("Report destination must be under the project build directory and differ from the input")
-        report = {"schema_version": 1, "inspection": inspect_path(args.input, args.package)}
+        report = {"schema_version": 1, "inspection": inspect_path(args.input, args.package, args.verify_segments, args.zbic_decoder)}
         encoded = json.dumps(report, indent=2, ensure_ascii=True) + "\n"
         if args.report:
             report_path.parent.mkdir(parents=True, exist_ok=True)

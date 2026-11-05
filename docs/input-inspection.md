@@ -23,7 +23,9 @@ The NUP catalog hash is checked before its directory tables are used. Only selec
 
 NUP entries can use zstd compression independently of the compression inside an NSO. To inspect compressed NUP entries, use Python 3.14's `compression.zstd`, the optional `zstandard` module, or an available `zstd` command. On Windows the inspector also checks the usual MSYS2 location `C:\msys64\usr\bin\zstd.exe`. External decoding uses temporary files that are removed afterward.
 
-The inspector identifies LZ4 and ZBIC NSO segments but does not decompress them yet. Segment hashes and NPDM signatures are not verified. Matching a container's own file hash confirms consistency with its catalog, not authenticity or completeness of the original game dump. Reports record these verification limits explicitly.
+The default metadata-only mode identifies LZ4 and ZBIC NSO segments without decompressing them. Pass `--verify-segments` to decode segments and compare hashes where the NSO header requires them. ZBIC decoding needs the local helper described in [segment preparation](segment-preparation.md); `--zbic-decoder PATH` or `OOT_ZBIC_DECODER` selects it.
+
+NPDM signatures are not verified. Matching a container's own file hash confirms consistency with its catalog, not authenticity or completeness of the original game dump. Reports record these verification limits explicitly.
 
 Catalogs are limited to 128 MiB and each inspected module to 256 MiB. Decoded ExeFS output is bounded by its declared size. Unsupported layouts, out-of-bounds ranges, repeated directory references, duplicate paths, and hash mismatches fail with exit code 1.
 

@@ -10,6 +10,8 @@ import struct
 import subprocess
 import tempfile
 
+EXEFS_NAMES = ("rtld", "main", *(f"subsdk{index}" for index in range(10)), "sdk", "main.npdm")
+
 
 class InputError(ValueError):
     """Invalid, truncated, or unsupported input."""
@@ -231,10 +233,10 @@ class NupCatalog:
                     require(codec != 0 or stored == size, "Raw NUP file size mismatch")
                     yield path + (name,), (size, payload, stored, digest, codec)
 
-    def exefs_report(self, package_index: int) -> list[dict]:
+    def read_exefs(self, package_index: int):
         require(0 <= package_index < len(self.packages), "NUP package index is out of bounds")
         package = self.packages[package_index]
-        reports, seen = [], set()
+        seen = set()
         with self.path.open("rb") as stream:
             for path, record in self.files_in(package["exefs_directory"]):
                 name = "/".join(path)
@@ -248,15 +250,20 @@ class NupCatalog:
                 data = payload if codec == 0 else decode_zstd(payload, size)
                 digest = hashlib.sha256(data).digest()
                 require(digest == expected, f"NUP ExeFS SHA-256 mismatch: {name}")
-                report = describe_file(name, data)
-                report["container_sha256_verified"] = True
-                report["container_compression"] = "none" if codec == 0 else "zstd"
-                reports.append(report)
-        require(bool(reports), "The selected NUP package has no ExeFS files")
+                yield name, data, {"container_sha256_verified": True,
+                                   "container_compression": "none" if codec == 0 else "zstd"}
+        require(bool(seen), "The selected NUP package has no ExeFS files")
+
+    def exefs_report(self, package_index: int, verify_segments=False, decoder=None) -> list[dict]:
+        reports = []
+        for name, data, container in self.read_exefs(package_index):
+            report = describe_file(name, data, verify_segments, decoder)
+            report.update(container)
+            reports.append(report)
         return reports
 
 
-def describe_file(name: str, data: bytes) -> dict:
+def describe_file(name: str, data: bytes, verify_segments=False, decoder=None) -> dict:
     module = Path(name).name
     if module in ("main", "rtld", "sdk") or (module.startswith("subsdk") and module[6:].isdigit()):
         require(data[:4] == b"NSO0", f"Invalid NSO signature: {name}")
@@ -264,7 +271,12 @@ def describe_file(name: str, data: bytes) -> dict:
         require(data[:4] == b"META", f"Invalid NPDM signature: {name}")
     report = {"name": name, "bytes": len(data), "sha256": hashlib.sha256(data).hexdigest()}
     if data[:4] == b"NSO0":
-        report.update(inspect_nso(data))
+        if verify_segments:
+            from nso_segments import decode_nso
+            _, verified = decode_nso(data, decoder)
+            report.update(verified)
+        else:
+            report.update(inspect_nso(data))
     elif data[:4] == b"META":
         report.update(inspect_npdm(data))
     else:
@@ -272,16 +284,15 @@ def describe_file(name: str, data: bytes) -> dict:
     return report
 
 
-def inspect_path(path: Path, package_index: int | None = None) -> dict:
+def inspect_path(path: Path, package_index: int | None = None, verify_segments=False, decoder=None) -> dict:
     if path.is_dir():
         require(package_index is None, "--package applies only to NUP input")
-        names = ["rtld", "main"] + [f"subsdk{index}" for index in range(10)] + ["sdk", "main.npdm"]
         files = []
-        for name in names:
+        for name in EXEFS_NAMES:
             candidate = path / name
             if candidate.is_file():
                 require(candidate.stat().st_size <= NupCatalog.MAX_MODULE_BYTES, "ExeFS module exceeds inspection size limit")
-                files.append(describe_file(name, candidate.read_bytes()))
+                files.append(describe_file(name, candidate.read_bytes(), verify_segments, decoder))
         require(any(item["name"] == "main" for item in files), "ExeFS directory has no main module")
         return {"format": "exefs", "files": files}
     with path.open("rb") as stream:
@@ -294,10 +305,10 @@ def inspect_path(path: Path, package_index: int | None = None) -> dict:
         return {
             "format": "nup", "bytes": catalog.file_size, "catalog_sha256_verified": True,
             "catalog_file_count": catalog.file_count, "packages": catalog.packages,
-            "selected_package": selected, "files": catalog.exefs_report(selected),
+            "selected_package": selected, "files": catalog.exefs_report(selected, verify_segments, decoder),
             "romfs_payloads_checked": False,
         }
     require(package_index is None, "--package applies only to NUP input")
     require(magic in (b"NSO0", b"META"), "Input is not a recognized NUP, NSO, or NPDM file")
     require(path.stat().st_size <= NupCatalog.MAX_MODULE_BYTES, "Input exceeds inspection size limit")
-    return describe_file(path.name, path.read_bytes())
+    return describe_file(path.name, path.read_bytes(), verify_segments, decoder)
