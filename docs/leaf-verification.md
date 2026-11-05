@@ -8,9 +8,9 @@ This milestone establishes a conservative structural boundary for small code reg
 
 The allowed value-producing forms are the implemented moves, integer arithmetic/logic, extended/carry arithmetic, conditional selects, shifts, bitfields, multiply/divide, and PC-relative addresses. NOP and direct branches are allowed. X18-X30 and SP must not be written; source reads of those registers are permitted. NZCV and scratch registers X0-X17 may change. These restrictions deliberately exclude normal stack frames, pointer authentication, and functions that save/restore protected registers. A rejected region is outside this policy, not necessarily invalid ARM64 or a broken game function.
 
-The reported instruction bound assumes entry PC equals the declared base, canonical NZCV, and X30 outside the declared range. The existing emitted function remains a budgeted dispatcher loop; the proof does not add runtime entry guards. Callers must enforce the preconditions before relying on the bound. A return leaves PC at the caller-supplied X30, whose validity as a future executable target is not proven here.
+The reported instruction bound assumes entry PC equals the declared base, canonical NZCV, and X30 outside the declared range. The raw lifted function remains a budgeted loop. `--verify-leaf` now also emits a compiled-symbol descriptor for the [controlled dispatcher](leaf-dispatch.md), which enforces runtime guards when the descriptor is registered and invoked through that API. Direct calls to the raw lifted symbol still require the caller to enforce preconditions. A return token is not proof of a future executable target or a complete process startup ABI.
 
-The verifier records SHA-256 of the exact range, form counts, return count, longest conservative path, policy name, and preconditions. It rejects unreachable padding/data instead of silently trimming it. Branch-condition correlations are not solved; both conditional successors are considered conservatively.
+The verifier records SHA-256 of the exact range, form counts, return count, longest conservative path, per-instruction successor/rank metadata, policy name, and preconditions. It rejects unreachable padding/data instead of silently trimming it. Branch-condition correlations are not solved; both conditional successors are considered conservatively.
 
 ## Verify before emitting C
 
@@ -20,7 +20,7 @@ The verifier records SHA-256 of the exact range, form counts, return count, long
   --output build/leaf/synthetic.c --report build/leaf/synthetic.json
 ```
 
-All existing raw-range/output rules still apply. A policy failure leaves no partially emitted C file. The report embeds `leaf_verification`. This structural result is separate from proving mathematical behavior for all inputs or proving that the selected range matches one original source function.
+All existing raw-range/output rules still apply. A policy failure leaves no partially emitted C file. The report embeds `leaf_verification` and names the descriptor getter. The generated C includes that getter, a pointer to its compiled lifted symbol, and constant CFG metadata; it does not cast the guest entry to a native pointer. ABI/policy mismatches fail compilation or registration. This structural result is separate from proving mathematical behavior for all inputs or proving that the selected range matches one original source function.
 
 ## Complete synthetic functions
 
@@ -48,4 +48,4 @@ The survey verifies prepared inputs and requires a complete offline link. Roots 
 
 The local 1.1.1 survey finds 40,038 candidate regions meeting this structural policy: rtld 5, main 38,511, subsdk0 29, sdk 1,493. These counts include trivial return stubs and other metadata candidates. Metadata is not proof of original function ownership; conservative windows can reject otherwise valid leaves or identify a closed subregion. Counts do not measure gameplay progress or universal semantic correctness.
 
-The next boundary is controlled function dispatch that enforces entry/return/state contracts and reports failures explicitly, using synthetic callers and callees before game candidates are considered for execution.
+The [controlled leaf dispatcher](leaf-dispatch.md) now enforces these contracts and passes synthetic caller/callee tests. Binding registry provenance to mapped image hashes and handling broader function profiles remain separate boundaries before game candidates can be considered for execution.

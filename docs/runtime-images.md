@@ -55,4 +55,6 @@ Synthetic integration checks compare every native region byte with its linked im
 
 There is no native guest startup, TLS allocation, heap, scheduler, service dispatch, constructor execution, or game-function dispatcher yet. More instruction semantics and verified function boundaries are required before executing game functions.
 
+The [controlled leaf dispatcher](leaf-dispatch.md) is now tested with a compiled synthetic leaf whose bytes match a synthetic mapped image and whose SP is supplied by this bridge. That integration preserves the mapped stack and performs no game execution. The current trusted registry is not yet bound automatically to package/module/range hashes; host code supplies the compatible compiled descriptors explicitly.
+
 Reference: [Windows BCryptHash API](https://learn.microsoft.com/en-us/windows/win32/api/bcrypt/nf-bcrypt-bcrypthash).

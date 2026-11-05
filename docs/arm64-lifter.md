@@ -99,6 +99,6 @@ The paired-transfer milestone extends the suite to 26,168 comparisons across 20 
 
 The extended integer milestone passes 72,764 native/reference comparisons across 27 synthetic programs, including six [verified leaf functions](leaf-verification.md) with 768 independent mathematical result checks. The leaf tests also exercise zero/partial budgets. These are entirely artificial programs; game candidates are only analyzed statically.
 
-The [native image bridge](runtime-images.md) supplies mapped linked bytes and a guarded synthetic stack. Controlled function dispatch, remaining instruction forms, and process/runtime services are still required before executing game functions.
+The [native image bridge](runtime-images.md) supplies mapped linked bytes and a guarded synthetic stack. Verified-leaf emission also supplies CFG descriptors for the [controlled dispatcher](leaf-dispatch.md). Registry/image hash binding, broader function profiles, remaining instruction forms, and process/runtime services are still required before executing game functions.
 
 References: [Arm A64 instruction set](https://developer.arm.com/documentation/ddi0602/latest), [Unicorn programming API](https://www.unicorn-engine.org/docs/tutorial.html), and [pinned Unicorn package](https://pypi.org/project/unicorn/2.1.4/).

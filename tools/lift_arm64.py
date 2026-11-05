@@ -9,7 +9,7 @@ import sys
 from arm64_lifter import MAX_WORDS, emit_c
 from input_formats import require
 from link_exefs import build_destination
-from leaf_verifier import verify_leaf
+from leaf_verifier import emit_leaf_descriptor, verify_leaf
 
 
 def integer(text):
@@ -46,6 +46,8 @@ def main():
         code, report = emit_c(data, args.base, args.name)
         if proof:
             report["leaf_verification"] = proof
+            code += "\n" + emit_leaf_descriptor(data, args.base, args.name)
+            report["leaf_descriptor_getter"] = "oot_leaf_descriptor_" + args.name[len("oot_lift_"):]
         report.update({"source_sha256": hashlib.sha256(data).hexdigest(), "file_offset": args.offset,
                        "guest_code_executed": False, "translation_does_not_prove_function_completeness": True})
         # Unsupported or malformed instructions cannot leave partially translated source.

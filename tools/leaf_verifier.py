@@ -2,6 +2,7 @@
 
 from collections import Counter
 import hashlib
+import re
 
 from arm64_lifter import decode_block
 from input_formats import InputError, require
@@ -60,8 +61,33 @@ def verify_leaf(data, base):
     return {"schema_version": 1, "policy": POLICY, "base": base, "byte_count": len(data),
             "source_sha256": hashlib.sha256(data).hexdigest(), "instruction_count": len(instructions),
             "forms": dict(sorted(Counter(i.form for i in instructions).items())),
+            "control_flow": [{"next": [(pc - base) // 4 for pc in edges[ins.pc]],
+                              "max_steps": lengths[ins.pc]} for ins in instructions],
             "return_count": returns, "max_retired_instructions": bound,
             "acyclic": True, "all_declared_words_reachable": True,
             "protected_registers": "x18-x30,sp", "memory_access": False, "external_calls": False,
             "preconditions": ["entry PC equals base", "X30 is outside the declared range", "canonical NZCV"],
             "guest_code_executed": False, "proof_scope": "structural policy, not function identity or universal semantic equivalence"}
+
+
+def emit_leaf_descriptor(data, base, function_name):
+    """Bind verified CFG metadata to a compiled symbol, never a guest pointer."""
+    require(re.fullmatch(r"oot_lift_[A-Za-z0-9_]+", function_name) is not None, "invalid leaf function identifier")
+    proof = verify_leaf(data, base)
+    suffix = function_name[len("oot_lift_"):]
+    steps, descriptor = f"oot_leaf_steps_{suffix}", f"oot_leaf_info_{suffix}"
+    lines = ['#include "leaf_dispatch.h"',
+             '#if OOT_LIFT_ABI_VERSION != 2 || OOT_LEAF_POLICY_VERSION != 1',
+             '#error Regenerate this leaf descriptor for the current ABI and policy', '#endif',
+             f"static const OotLeafStep {steps}[] = {{"]
+    for row in proof["control_flow"]:
+        successors = row["next"]
+        a = successors[0] if successors else "OOT_LEAF_RETURN"
+        b = successors[-1] if successors else "OOT_LEAF_RETURN"
+        lines.append(f"    {{{a}, {b}, {row['max_steps']}, 0}},")
+    lines.extend(["};", f"static const OotLeafFunction {descriptor} = {{",
+                  f"    UINT64_C(0x{base:x}), {proof['instruction_count']}, {proof['max_retired_instructions']},",
+                  f"    OOT_LIFT_ABI_VERSION, OOT_LEAF_POLICY_VERSION, {function_name}, {steps}", "};",
+                  f"OOT_LIFT_EXPORT const OotLeafFunction *oot_leaf_descriptor_{suffix}(void)",
+                  "{", f"    return &{descriptor};", "}", ""])
+    return "\n".join(lines)

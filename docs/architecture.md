@@ -16,6 +16,8 @@ The [ARM64 lifter](arm64-lifter.md) emits C17 for a bounded raw code range. It m
 
 [Leaf verification](leaf-verification.md) adds a conservative structural boundary for short, acyclic register-only regions with standard returns and preserved X18-X30/SP. Six complete synthetic functions cover arithmetic mixing, signed minimum, bitfield insertion, signed remainder, carry propagation, and a two-return diamond. Native results are checked against independent formulas as well as ARM64 execution. Metadata-rooted game candidates are surveyed statically and remain unexecuted.
 
+The [controlled leaf dispatcher](leaf-dispatch.md) copies and validates generated entry/CFG metadata, binds entries to trusted compiled C symbols, and checks entry, return, stack alignment/bounds, NZCV, and paused state. It executes one lifted instruction at a time on a private state copy and commits only after the step satisfies its CFG, retirement, and register contract. Synthetic native caller/callee chains match ARM64 reference execution, and a synthetic mapped image can supply its stack. Production game callbacks are not registered or executed.
+
 ## Planned boundaries
 
 1. Input inspection: identify the game build, inspect module metadata, and validate user-provided inputs.
@@ -27,7 +29,7 @@ The [ARM64 lifter](arm64-lifter.md) emits C17 for a bounded raw code range. It m
 
 Each boundary needs a verifiable milestone before work advances to gameplay. A successful compilation is not evidence of correct game execution.
 
-The next implementation milestone is controlled function dispatch with explicit entry, return, and state preconditions, followed by remaining integer/system forms. Process startup still needs a guest ABI, TLS, module initialization, scheduling, and service dispatch. SIMD/FP, atomics/exclusives, nonlocal returns, and indirect-target discovery remain separate requirements. Game code must remain unexecuted until complete function coverage and required runtime boundaries are established.
+The next implementation milestones are binding compiled callback registries to verified image/range hashes and extending controlled dispatch beyond register-only leaves. Process startup still needs a guest ABI, TLS, module initialization, scheduling, and service dispatch. Remaining integer/system forms, SIMD/FP, atomics/exclusives, nonlocal returns, and indirect-target discovery remain separate requirements. Game code must remain unexecuted until complete function coverage and required runtime boundaries are established.
 
 ## Repository boundaries
 

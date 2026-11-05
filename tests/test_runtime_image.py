@@ -1,6 +1,6 @@
 """Verified synthetic linked images, native map permissions, and package rejection."""
 
-from ctypes import POINTER, byref, c_char_p, c_int, c_size_t, c_uint64, c_void_p, create_string_buffer, string_at
+from ctypes import POINTER, byref, c_char_p, c_int, c_size_t, c_uint32, c_uint64, c_void_p, create_string_buffer, string_at
 import hashlib
 import json
 import os
@@ -20,7 +20,8 @@ from module_linker import Linker, Module
 from pair_validation import pair
 from prepare_exefs import prepare
 from prepare_runtime import HEADER, REGION, STACK_BASE, STACK_SIZE, make_package, write_package
-from test_module_linker import fixture, symbol
+from test_module_linker import change_memory, fixture, symbol
+from dispatcher_validation import LeafFunction, Report, bindings
 
 HOST = Path(os.environ.get("OOT_NATIVE_HOST", str(ROOT / "build/cmake/Release/oot-pc-port.exe")))
 
@@ -29,7 +30,9 @@ def linked_fixture(bss_relocation=True):
     relocations = [(0x2000, 1027, 0, 0x40)]
     if bss_relocation:
         relocations.append((0x2200, 1027, 0, 0x44))
-    module = Module("main", fixture(rela=relocations))
+    raw = fixture(rela=relocations)
+    raw = change_memory(raw, 0x40, struct.pack("<II", 0x91001C20, 0xD65F03C0))  # add x0,x1,#7; ret
+    module = Module("main", raw)
     linker = Linker([module])
     assert linker.apply()["link_complete"]
     return linker
@@ -109,7 +112,11 @@ class NativeRuntimeTests(unittest.TestCase):
     def setUpClass(cls):
         # Independently generated stack program only, not an extracted function.
         words = [pair(2, False, 29, 30, 31, 3, -2), 0x910003FD, 0xD280001E, pair(2, True, 29, 30, 31, 1, 2)]
-        cls.library, cls.build = compile_library([Program("bridge_stack", words, [])], os.environ.get("OOT_LIFTER_COMPILER", "cmake"))
+        leaf_base = linked_fixture().modules[0].base + 0x40
+        cls.leaf_base = leaf_base
+        cls.library, cls.build = compile_library([Program("bridge_stack", words, []),
+            Program("runtime_leaf", [0x91001C20, 0xD65F03C0], [], base=leaf_base, leaf=True)],
+            os.environ.get("OOT_LIFTER_COMPILER", "cmake"))
         lib = cls.library
         lib.oot_runtime_open.argtypes = [c_char_p, c_char_p, c_size_t]
         lib.oot_runtime_open.restype = c_void_p
@@ -125,6 +132,7 @@ class NativeRuntimeTests(unittest.TestCase):
         lib.oot_memory_store.argtypes = [POINTER(Memory), c_uint64, c_int, c_uint64]
         lib.oot_lift_bridge_stack.argtypes = [POINTER(State), POINTER(Memory), c_uint64, POINTER(c_uint64)]
         lib.oot_lift_bridge_stack.restype = c_int
+        bindings(lib)
 
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory(dir=ROOT / "build")
@@ -196,6 +204,36 @@ class NativeRuntimeTests(unittest.TestCase):
                 region = memory.regions[index]
                 self.assertEqual(string_at(region.data, region.size), b"\0" * region.size)
         finally:
+            self.library.oot_runtime_close(handle)
+
+    def test_verified_dispatch_on_a_mapped_synthetic_image_and_stack(self):
+        handle, error = self.open_blob(make_package(linked_fixture())[0])
+        self.assertTrue(handle, error)
+        context = None
+        try:
+            getter = self.library.oot_leaf_descriptor_runtime_leaf
+            getter.argtypes, getter.restype = [], POINTER(LeafFunction)
+            functions = (LeafFunction * 1)(LeafFunction.from_buffer_copy(getter().contents))
+            returns, create_error = (c_uint64 * 1)(0x20000000), c_uint32(0)
+            context = self.library.oot_leaf_dispatcher_create(functions, 1, returns, 1,
+                STACK_BASE, STACK_BASE + STACK_SIZE, byref(create_error))
+            self.assertTrue(context, create_error.value)
+            state, report = State(), Report()
+            state.pc, state.sp, state.x[1], state.x[30] = self.leaf_base, self.library.oot_runtime_stack_pointer(handle), 5, returns[0]
+            memory = self.library.oot_runtime_memory(handle)
+            value = c_uint64()
+            self.assertEqual(self.library.oot_memory_load(memory, self.leaf_base, 8, byref(value)), 1)
+            self.assertEqual(value.value, int.from_bytes(struct.pack("<II", 0x91001C20, 0xD65F03C0), "little"))
+            self.assertEqual(self.library.oot_leaf_begin(context, byref(state), self.leaf_base, returns[0], byref(report)), 0)
+            self.assertEqual(self.library.oot_leaf_run(context, byref(state), 1, byref(report)), 1)
+            self.assertEqual((state.pc, state.x[0], report.total_retired), (self.leaf_base + 4, 12, 1))
+            self.assertEqual(self.library.oot_leaf_run(context, byref(state), 10, byref(report)), 2)
+            self.assertEqual((state.pc, state.sp, report.total_retired), (returns[0], STACK_BASE + STACK_SIZE, 2))
+            self.assertEqual(self.library.oot_memory_load(memory, state.sp - 8, 8, byref(value)), 1)
+            self.assertEqual(value.value, 0)
+        finally:
+            if context:
+                self.assertEqual(self.library.oot_leaf_dispatcher_destroy(context), 1)
             self.library.oot_runtime_close(handle)
 
     def test_native_rejects_corrupt_metadata_ranges_payload_and_checksum(self):
