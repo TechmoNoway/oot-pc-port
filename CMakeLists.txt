@@ -16,3 +16,9 @@ endif()
 
 enable_testing()
 add_test(NAME host_self_test COMMAND oot-pc-port --self-test)
+
+find_package(Python3 3.10 COMPONENTS Interpreter QUIET)
+if(Python3_FOUND)
+    add_test(NAME input_inspection_tests
+        COMMAND "${Python3_EXECUTABLE}" -B -m unittest discover -s "${CMAKE_CURRENT_SOURCE_DIR}/tests" -v)
+endif()

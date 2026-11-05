@@ -1,0 +1,25 @@
+name: Checks
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+      - name: Configure Windows host
+        run: cmake -S . -B build -A x64
+      - name: Build Windows host
+        run: cmake --build build --config Release
+      - name: Test host and input inspector
+        run: ctest --test-dir build -C Release --output-on-failure

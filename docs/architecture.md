@@ -4,6 +4,8 @@
 
 The executable is a Windows host scaffold written in C17. It queries the system, allocates and releases memory using Win32, and checks those operations with a self-test. It does not load or execute game code.
 
+The offline Python [input inspector](input-inspection.md) reads NUP, NSO, NPDM, and extracted ExeFS metadata. It verifies the NUP catalog and selected ExeFS file hashes without extracting the game tree. Segment decompression, segment-hash verification, and guest execution are not implemented yet.
+
 ## Planned boundaries
 
 1. Input inspection: identify the game build, inspect module metadata, and validate user-provided inputs.
