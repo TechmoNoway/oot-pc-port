@@ -10,6 +10,8 @@ The offline Python [input inspector](input-inspection.md) reads NUP, NSO, NPDM, 
 
 The [offline linker](offline-linking.md) reads MOD0, dynamic tables, and symbols, establishes guest addresses for private module images, zero-initializes BSS, and applies supported AArch64 relocations. Images can be exported only after a complete link. This does not yet map native host memory or execute guest code.
 
+[ARM64 analysis](arm64-analysis.md) uses a separate disassembly backend and project control-flow logic to survey prepared code. It reports evidence-based entry candidates and follows direct edges; indirect targets and nonlocal-return semantics remain explicit gaps. There is no implemented C lifter yet.
+
 ## Planned boundaries
 
 1. Input inspection: identify the game build, inspect module metadata, and validate user-provided inputs.

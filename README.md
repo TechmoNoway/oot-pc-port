@@ -12,10 +12,12 @@ An offline [input inspector](docs/input-inspection.md) reads NUP, NSO, and NPDM 
 
 [Offline linking](docs/offline-linking.md) reads MOD0 and dynamic tables, lays out module images with BSS, resolves supplied symbols, and applies supported AArch64 RELA/RELR relocations.
 
+[ARM64 analysis](docs/arm64-analysis.md) surveys decoded instruction families, metadata-based entry candidates, direct control flow, unresolved indirect branches, and recognized `setjmp`/`longjmp` PLT calls. Syntax decoding is separate from C-lifter support.
+
 The game is not playable yet. Native guest-memory mapping, ARM64 translation, operating-system services, and graphics are planned.
 
 ## Development direction
 
-The next milestones are ARM64 instruction analysis, native guest-memory mapping, operating-system services, and graphics. See [docs/architecture.md](docs/architecture.md).
+The next milestones are a tested integer/control-flow lifter, indirect-target recovery, native guest-memory mapping, operating-system services, and graphics. See [docs/architecture.md](docs/architecture.md).
 
 Game containers, keys, extracted files, generated game code, saves, shader caches, and compiled executables stay outside version control. Build output belongs under `build/`; future generated output belongs under `generated/`.
