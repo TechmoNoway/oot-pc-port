@@ -191,7 +191,7 @@ def compile_library(programs, mode="cmake", extra_source=""):
              "-DOOT_MEMORY_SHARED_EXPORTS", "-D_CRT_SECURE_NO_WARNINGS", "-D_WIN32_WINNT=0x0A00",
              "-I", str(ROOT / "src"), str(source), str(ROOT / "src/guest_memory.c"),
              str(ROOT / "src/runtime_image.c"), str(ROOT / "src/host_win32.c"), str(ROOT / "src/leaf_dispatch.c"),
-             str(ROOT / "src/frame_dispatch.c"), str(ROOT / "src/stack_dispatch.c"), str(ROOT / "src/pauth.c"), str(ROOT / "src/checked_read.c"),
+             str(ROOT / "src/frame_dispatch.c"), str(ROOT / "src/stack_dispatch.c"), str(ROOT / "src/pauth.c"), str(ROOT / "src/checked_read.c"), str(ROOT / "src/plt_bridge.c"),
              "-lbcrypt", "-o", str(library)])
         compiler_info = subprocess.run([compiler, "--version"], capture_output=True, text=True, check=True).stdout.splitlines()[0]
     else:
@@ -201,7 +201,7 @@ def compile_library(programs, mode="cmake", extra_source=""):
             f'add_library(lifted SHARED lifted.c "{(ROOT / "src/guest_memory.c").as_posix()}" '
             f'"{(ROOT / "src/runtime_image.c").as_posix()}" "{(ROOT / "src/host_win32.c").as_posix()}" '
             f'"{(ROOT / "src/leaf_dispatch.c").as_posix()}" "{(ROOT / "src/frame_dispatch.c").as_posix()}" '
-            f'"{(ROOT / "src/stack_dispatch.c").as_posix()}" "{(ROOT / "src/pauth.c").as_posix()}" "{(ROOT / "src/checked_read.c").as_posix()}")\n'
+            f'"{(ROOT / "src/stack_dispatch.c").as_posix()}" "{(ROOT / "src/pauth.c").as_posix()}" "{(ROOT / "src/checked_read.c").as_posix()}" "{(ROOT / "src/plt_bridge.c").as_posix()}")\n'
             'target_link_libraries(lifted PRIVATE bcrypt)\n'
             'target_compile_definitions(lifted PRIVATE OOT_MEMORY_SHARED_EXPORTS _CRT_SECURE_NO_WARNINGS _WIN32_WINNT=0x0A00)\n'
             'target_compile_features(lifted PRIVATE c_std_17)\n'

@@ -52,17 +52,26 @@ def verify_call_stack_functions(frames, leaves, root):
     return _verify_layout(frames, leaves, root, True, True, True)
 
 
+def verify_plt_stack_functions(frames,leaves,root,plts):
+    from plt_verifier import verify_plt_stub
+    require(len(plts)<=256,'too many PLT bridges')
+    terminal={entry:verify_plt_stub(p['data'],entry,p['slot'],p['target'],leaves,p['symbol']) for entry,p in plts.items()}
+    return _verify_layout(frames,leaves,root,True,True,True,terminal)
+
+
 def lr_pair(i, load):
     return (i.form == "loadstore_pair" and i.access_size == 8 and i.rn == 31 and i.load == load and
             i.writeback and i.post_index == load and
             ((i.rd == 30 and 19 <= i.rt2 <= 28) or (i.rt2 == 30 and 19 <= i.rd <= 28)))
 
 
-def _verify_layout(frames, leaves, root, pauth, reads=False, lr_calls=False):
+def _verify_layout(frames, leaves, root, pauth, reads=False, lr_calls=False, plts=None):
     require(0 < len(frames) <= MAX_FUNCTIONS and len(leaves) <= 256 and root in frames, "invalid layout registry/root")
     ranges = sorted((entry, entry + len(code)) for entry, code in [*frames.items(), *leaves.items()])
+    if plts is not None:ranges=sorted(ranges+[(entry,entry+16) for entry in plts])
     require(all(a[1] <= b[0] for a, b in zip(ranges, ranges[1:])), "layout registry code overlaps")
     leaf_proofs = {entry: verify_leaf(code, entry) for entry, code in leaves.items()}
+    if plts is not None:leaf_proofs.update(plts) # Real terminal bridge proofs, never substituted RET bodies.
     proofs = {}
     for entry, data in frames.items():
         require(16 <= len(data) <= MAX_WORDS * 4, "layout function size exceeds policy")
@@ -151,7 +160,7 @@ def _verify_layout(frames, leaves, root, pauth, reads=False, lr_calls=False):
             elif index < epilogue:
                 f["writable_mask"] = mask
                 if i.form == "branch_immediate" and i.operation == 1:
-                    require(i.target in frames or i.target in leaves, "unregistered layout call target")
+                    require(i.target in frames or i.target in leaf_proofs, "unregistered layout call target")
                     s.update(kind=CALL, callee=i.target); state["lr"] = 2; calls.append(i.target)
                 elif i.form in ("branch_condition", "compare_branch", "test_branch") or i.form == "branch_immediate":
                     targets = [i.target] if i.form == "branch_immediate" else list(dict.fromkeys((i.target, i.pc + 4)))
@@ -209,6 +218,7 @@ def _verify_layout(frames, leaves, root, pauth, reads=False, lr_calls=False):
         if lr_calls:
             proofs[entry].update(policy="lr-pair-read-stack-dag-v6", layout="lr-pair" if lr_frame else proofs[entry]["layout"],
                 open_word=ins[head].word if lr_frame else 0, close_word=ins[close_index].word if lr_frame else 0)
+        if plts is not None:proofs[entry].update(policy='plt-leaf-stack-dag-v7')
     return verify_cfg_graphs(proofs, leaf_proofs, root)
 
 
@@ -228,7 +238,11 @@ def emit_call_stack_descriptor(p, name):
     return _emit_descriptor(p, name, True, True, True)
 
 
-def _emit_descriptor(p, name, pauth, reads=False, lr_calls=False):
+def emit_plt_stack_descriptor(p,name):
+    return _emit_descriptor(p,name,True,True,True,True)
+
+
+def _emit_descriptor(p, name, pauth, reads=False, lr_calls=False, plt=False):
     prefix = "oot_pauth_lift_" if pauth else "oot_lift_"
     require(re.fullmatch(prefix + r"[A-Za-z0-9_]+", name) is not None, "invalid layout identifier")
     suffix = name[len(prefix):]
@@ -248,12 +262,13 @@ def _emit_descriptor(p, name, pauth, reads=False, lr_calls=False):
         lines += ['#if OOT_STACK_READ_POLICY_VERSION != 5', '#error Regenerate read descriptor', '#endif',
                   f'static const uint32_t oot_read_words_{suffix}[] = {{' + ', '.join(f'UINT32_C(0x{w:08x})' for w in p['read_words']) + '};']
     if lr_calls: lines += ['#if OOT_STACK_CALL_POLICY_VERSION != 6', '#error Regenerate call descriptor', '#endif']
+    if plt:lines+=['#if OOT_STACK_PLT_POLICY_VERSION != 7','#error Regenerate PLT frame descriptor','#endif']
     lines += [f'static const {descriptor} oot_layout_info_{suffix} = {{']
     if lr_calls: lines += ['    {']
     if reads: lines += ['    {']
     if pauth: lines += ['    {']
     lines += ['    {', '        {',
-        f"            UINT64_C(0x{p['base']:x}), {p['instruction_count']}, {p['max_retired_instructions']}, 2, {6 if lr_calls else 5 if reads else 4 if pauth else 3},",
+        f"            UINT64_C(0x{p['base']:x}), {p['instruction_count']}, {p['max_retired_instructions']}, 2, {7 if plt else 6 if lr_calls else 5 if reads else 4 if pauth else 3},",
         f"            {p['frame_size']}, {p['max_depth']}, {'NULL' if pauth else name}, oot_layout_steps_{suffix}, {{{{",
         '                ' + ', '.join(f'0x{b:02x}' for b in bytes.fromhex(p['source_sha256'])), '            }}', '        },',
         f"        oot_layout_flow_{suffix}, UINT32_C(0x{p['saved_mask']:x}), 0", '    },',
@@ -262,6 +277,6 @@ def _emit_descriptor(p, name, pauth, reads=False, lr_calls=False):
     if reads: lines += ['    },', f'    oot_read_words_{suffix}']
     if lr_calls: lines += ['    },', f"    UINT32_C(0x{p['open_word']:08x}), UINT32_C(0x{p['close_word']:08x})"]
     lines += ['};',
-        f'OOT_LIFT_EXPORT const {descriptor} *oot_stack_{"call" if lr_calls else "read" if reads else "pauth" if pauth else "layout"}_descriptor_{suffix}(void)',
+        f'OOT_LIFT_EXPORT const {descriptor} *oot_stack_{"plt" if plt else "call" if lr_calls else "read" if reads else "pauth" if pauth else "layout"}_descriptor_{suffix}(void)',
         '{', f'    return &oot_layout_info_{suffix};', '}', '']
     return '\n'.join(lines)

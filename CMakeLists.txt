@@ -83,7 +83,7 @@ else()
     target_compile_options(oot-frame-dispatch PRIVATE -Wall -Wextra -Wpedantic -Werror)
 endif()
 
-add_library(oot-stack-dispatch STATIC src/stack_dispatch.c src/checked_read.c)
+add_library(oot-stack-dispatch STATIC src/stack_dispatch.c src/checked_read.c src/plt_bridge.c)
 target_link_libraries(oot-stack-dispatch PUBLIC oot-leaf-dispatch oot-pauth)
 if(MSVC)
     target_compile_options(oot-stack-dispatch PRIVATE /W4 /WX)

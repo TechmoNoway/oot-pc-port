@@ -1,5 +1,6 @@
 #include "stack_dispatch.h"
 #include "checked_read.h"
+#include "plt_bridge.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -22,6 +23,12 @@ typedef struct Activation {
     uint8_t bytes[OOT_STACK_MAX_FRAME];
     unsigned owns;
 } Activation;
+typedef struct OwnedPlt {
+    OotPltFunction info;
+    uint64_t page;
+    uint32_t target_words;
+    OotCodeHash target_hash;
+} OwnedPlt;
 struct OotStackDispatcher {
     OotRuntimeImage *image;
     OotLeafDispatcher *leaf;
@@ -34,6 +41,9 @@ struct OotStackDispatcher {
     size_t count, root, depth, return_count;
     OotReadRange read_ranges[OOT_STACK_MAX_READ_RANGES];
     size_t read_count;
+    OwnedPlt plts[OOT_STACK_MAX_PLT];
+    size_t plt_count, active_plt;
+    uint64_t plt_return;
     unsigned phase, executing, leaf_active, fault;
 };
 
@@ -50,6 +60,27 @@ static size_t find_function(const OotStackDispatcher *d, uint64_t entry)
     size_t i;
     for (i = 0; i < d->count && d->functions[i].info.entry != entry; ++i) { }
     return i;
+}
+
+static size_t find_plt(const OotStackDispatcher *d, uint64_t entry)
+{
+    size_t i;
+    for (i = 0; i < d->plt_count && d->plts[i].info.entry != entry; ++i) { }
+    return i;
+}
+
+static unsigned plt_check(OotStackDispatcher *d, size_t index, uint64_t *got)
+{
+    const OwnedPlt *o = &d->plts[index];
+    const OotPltFunction *p = &o->info;
+    uint64_t target;
+    int code = oot_runtime_check_code(d->image,d->body_hash,p->entry,16,p->hash.bytes);
+    if (code == OOT_CODE_MATCH)
+        code = oot_runtime_check_code(d->image,d->body_hash,p->target,o->target_words*4,o->target_hash.bytes);
+    if (code != OOT_CODE_MATCH) return code == OOT_CODE_BAD_IMAGE ? OOT_LEAF_BAD_IMAGE : OOT_LEAF_BAD_CODE;
+    if (!oot_memory_load(oot_runtime_memory(d->image),p->slot,8,&target)) return OOT_STACK_BAD_MEMORY;
+    if (got) *got = target;
+    return target == p->target ? 0 : OOT_STACK_BAD_PLT_TARGET;
 }
 
 static unsigned code_match(const OotStackDispatcher *d, size_t index)
@@ -178,7 +209,7 @@ static int validate_offset_layout(OwnedFunction *o)
         unsigned first = o->open_word & 31, second = (o->open_word >> 10) & 31;
         uint32_t variables = UINT32_C(0x003f8000) | UINT32_C(0x7c1f);
         partner = first == 30 ? second : first;
-        if (f->policy_version != OOT_STACK_CALL_POLICY_VERSION || split || partner < 19 || partner > 28 ||
+        if ((f->policy_version != OOT_STACK_CALL_POLICY_VERSION && f->policy_version != OOT_STACK_PLT_POLICY_VERSION) || split || partner < 19 || partner > 28 ||
             (first != 30 && second != 30) || (o->open_word & ~variables) != UINT32_C(0xa98003e0) ||
             (o->close_word & ~variables) != UINT32_C(0xa8c003e0) ||
             (o->open_word & UINT32_C(0x7c1f)) != (o->close_word & UINT32_C(0x7c1f)) ||
@@ -288,7 +319,8 @@ static OotStackDispatcher *create_registry(OotRuntimeImage *image,
     const uint8_t body_hash[32], const uint64_t *returns, size_t return_count, uint32_t *error,
     const OotStackCfgFunction *cfg, const OotStackLayoutFunction *layout,
     const OotStackPauthFunction *pac, OotPauth *pauth, const OotStackReadFunction *reads,
-    const OotReadRange *ranges, size_t range_count, const OotStackCallFunction *lr_calls)
+    const OotReadRange *ranges, size_t range_count, const OotStackCallFunction *lr_calls,
+    const OotPltFunction *plts, size_t plt_count)
 {
     OotStackDispatcher *d;
     uint64_t sites[256 + OOT_STACK_MAX_FUNCTIONS * OOT_STACK_MAX_WORDS];
@@ -300,6 +332,7 @@ static OotStackDispatcher *create_registry(OotRuntimeImage *image,
         leaf_count > OOT_LEAF_MAX_FUNCTIONS || (leaf_count && (leaves == NULL || hashes == NULL)) ||
         body_hash == NULL || returns == NULL || return_count == 0 || return_count > 256 ||
         (pac && oot_pauth_model(pauth) != OOT_PAUTH_QARMA5_VA39) ||
+        (plts && (!lr_calls || !leaf_count || !plt_count || plt_count > OOT_STACK_MAX_PLT)) || (!plts && plt_count) ||
         (reads && (!ranges || !range_count || range_count > OOT_STACK_MAX_READ_RANGES))) return NULL;
     d = calloc(1, sizeof(*d));
     if (d == NULL) { if (error != NULL) *error = OOT_LEAF_ALLOCATION_FAILED; return NULL; }
@@ -311,7 +344,7 @@ static OotStackDispatcher *create_registry(OotRuntimeImage *image,
             f->entry > UINT64_MAX - (uint64_t)f->instruction_count * 4 ||
             (pac ? (f->run != NULL || pac[i].run == NULL) : f->run == NULL) || f->steps == NULL ||
             (pac && (!canonical_pointer(f->entry) || !canonical_pointer(f->entry + (uint64_t)f->instruction_count * 4 - 1))) ||
-            f->abi_version != OOT_LIFT_ABI_VERSION || f->policy_version != (lr_calls ? OOT_STACK_CALL_POLICY_VERSION : reads ? OOT_STACK_READ_POLICY_VERSION : pac ? OOT_STACK_PAUTH_POLICY_VERSION : layout != NULL ? OOT_STACK_LAYOUT_POLICY_VERSION :
+            f->abi_version != OOT_LIFT_ABI_VERSION || f->policy_version != (plts ? OOT_STACK_PLT_POLICY_VERSION : lr_calls ? OOT_STACK_CALL_POLICY_VERSION : reads ? OOT_STACK_READ_POLICY_VERSION : pac ? OOT_STACK_PAUTH_POLICY_VERSION : layout != NULL ? OOT_STACK_LAYOUT_POLICY_VERSION :
                 cfg != NULL ? OOT_STACK_CFG_POLICY_VERSION : OOT_STACK_POLICY_VERSION) ||
             f->frame_size < 16 || f->frame_size > OOT_STACK_MAX_FRAME || f->frame_size % 16 ||
             (i && f->entry < functions[i - 1].entry + (uint64_t)functions[i - 1].instruction_count * 4)) goto failure;
@@ -369,10 +402,34 @@ static OotStackDispatcher *create_registry(OotRuntimeImage *image,
     }
     d->root = find_function(d, root);
     if (d->root == count) goto failure;
+    d->plt_count = plt_count;
+    for (i = 0; i < plt_count; ++i) {
+        OwnedPlt *o = &d->plts[i];
+        const OotPltFunction *p = &plts[i];
+        const OotGuestMemory *m = oot_runtime_memory(image);
+        int readable = 0;
+        o->info = *p;
+        if (!oot_plt_decode(p,&o->page) || (i && p->entry < plts[i-1].entry+16) ||
+            p->slot >= oot_runtime_stack_base(image) || oot_runtime_stack_base(image)-p->slot < 8) goto failure;
+        for (j = 0; j < count; ++j)
+            if (p->entry < functions[j].entry+functions[j].instruction_count*4 && functions[j].entry < p->entry+16) goto failure;
+        for (j = 0; j < leaf_count; ++j) {
+            if (p->entry < leaves[j].entry+leaves[j].instruction_count*4 && leaves[j].entry < p->entry+16) goto failure;
+            if (p->target == leaves[j].entry) { o->target_words = leaves[j].instruction_count; o->target_hash = hashes[j]; }
+        }
+        if (!o->target_words) goto failure;
+        for (j = 0; j < m->count; ++j) {
+            const OotGuestRegion *r = &m->regions[j];
+            if ((r->permissions & OOT_MEMORY_READ) && p->slot >= r->base && p->slot-r->base < r->size &&
+                8 <= r->size-(p->slot-r->base)) readable = 1;
+        }
+        if (!readable) goto failure;
+    }
     for (i = 0; i < return_count; ++i) {
         if (returns[i] % 4 || (pac && !canonical_pointer(returns[i])) || (i && returns[i] <= returns[i - 1])) goto failure;
         for (j = 0; j < count; ++j)
             if (returns[i] >= functions[j].entry && returns[i] < functions[j].entry + (uint64_t)functions[j].instruction_count * 4) goto failure;
+        for (j = 0; j < plt_count; ++j) if (returns[i] >= plts[j].entry && returns[i] < plts[j].entry+16) goto failure;
         d->returns[i] = sites[i] = returns[i];
     }
     d->return_count = return_count;
@@ -401,8 +458,13 @@ static OotStackDispatcher *create_registry(OotRuntimeImage *image,
                 if (depth < depths[k] + 1) depth = depths[k] + 1;
             } else {
                 for (k = 0; k < leaf_count && leaves[k].entry != target; ++k) { }
-                if (k == leaf_count) goto failure;
-                bound += leaves[k].max_steps;
+                if (k != leaf_count) bound += leaves[k].max_steps;
+                else {
+                    size_t li;
+                    k = find_plt(d,target); if (k == plt_count) goto failure;
+                    for (li = 0; li < leaf_count && leaves[li].entry != plts[k].target; ++li) { }
+                    bound += 4 + leaves[li].max_steps;
+                }
             }
         }
         if (ready) {
@@ -416,7 +478,13 @@ static OotStackDispatcher *create_registry(OotRuntimeImage *image,
                         if (k != count) weight += bounds[k];
                         else {
                             for (k = 0; k < leaf_count && leaves[k].entry != step->callee; ++k) { }
-                            weight += leaves[k].max_steps;
+                            if (k != leaf_count) weight += leaves[k].max_steps;
+                            else {
+                                size_t pi = find_plt(d,step->callee), li;
+                                if (pi == plt_count) goto failure;
+                                for (li = 0; li < leaf_count && leaves[li].entry != plts[pi].target; ++li) { }
+                                weight += 4 + leaves[li].max_steps;
+                            }
                         }
                     }
                     if (flow->next_a != UINT16_MAX) longest = d->functions[i].flow[flow->next_a].max_steps;
@@ -448,6 +516,13 @@ static OotStackDispatcher *create_registry(OotRuntimeImage *image,
         d->pauth = pauth;
     }
     memcpy(d->body_hash, body_hash, 32);
+    for (i = 0; i < plt_count; ++i) {
+        unsigned reason = plt_check(d,i,NULL);
+        uint64_t word;
+        if (reason) { if (error) *error = reason; goto failure; }
+        for (j = 0; j < 4; ++j)
+            if (!oot_memory_load(oot_runtime_memory(image),plts[i].entry+j*4,4,&word) || word != plts[i].words[j]) goto failure;
+    }
     for (i = 0; i < count; ++i) {
         unsigned reason = code_match(d, i);
         if (reason) { if (error != NULL) *error = reason; goto failure; }
@@ -492,7 +567,7 @@ OotStackDispatcher *oot_stack_create(OotRuntimeImage *image,
     const OotLeafFunction *leaves, size_t leaf_count, const OotCodeHash *hashes,
     const uint8_t body_hash[32], const uint64_t *returns, size_t return_count, uint32_t *error)
 {
-    return create_registry(image, functions, count, root, leaves, leaf_count, hashes, body_hash, returns, return_count, error, NULL, NULL, NULL, NULL, NULL, NULL, 0, NULL);
+    return create_registry(image, functions, count, root, leaves, leaf_count, hashes, body_hash, returns, return_count, error, NULL, NULL, NULL, NULL, NULL, NULL, 0, NULL, NULL, 0);
 }
 
 OotStackDispatcher *oot_stack_create_cfg(OotRuntimeImage *image,
@@ -505,7 +580,7 @@ OotStackDispatcher *oot_stack_create_cfg(OotRuntimeImage *image,
     if (error != NULL) *error = OOT_LEAF_BAD_ARGUMENT;
     if (functions == NULL || count == 0 || count > OOT_STACK_MAX_FUNCTIONS) return NULL;
     for (i = 0; i < count; ++i) common[i] = functions[i].info;
-    return create_registry(image, common, count, root, leaves, leaf_count, hashes, body_hash, returns, return_count, error, functions, NULL, NULL, NULL, NULL, NULL, 0, NULL);
+    return create_registry(image, common, count, root, leaves, leaf_count, hashes, body_hash, returns, return_count, error, functions, NULL, NULL, NULL, NULL, NULL, 0, NULL, NULL, 0);
 }
 
 OotStackDispatcher *oot_stack_create_layout(OotRuntimeImage *image,
@@ -519,7 +594,7 @@ OotStackDispatcher *oot_stack_create_layout(OotRuntimeImage *image,
     if (error != NULL) *error = OOT_LEAF_BAD_ARGUMENT;
     if (functions == NULL || count == 0 || count > OOT_STACK_MAX_FUNCTIONS) return NULL;
     for (i = 0; i < count; ++i) { cfg[i] = functions[i].cfg; common[i] = cfg[i].info; }
-    return create_registry(image, common, count, root, leaves, leaf_count, hashes, body_hash, returns, return_count, error, cfg, functions, NULL, NULL, NULL, NULL, 0, NULL);
+    return create_registry(image, common, count, root, leaves, leaf_count, hashes, body_hash, returns, return_count, error, cfg, functions, NULL, NULL, NULL, NULL, 0, NULL, NULL, 0);
 }
 
 OotStackDispatcher *oot_stack_create_pauth(OotRuntimeImage *image,
@@ -535,7 +610,7 @@ OotStackDispatcher *oot_stack_create_pauth(OotRuntimeImage *image,
     if (!functions || !count || count > OOT_STACK_MAX_FUNCTIONS) return NULL;
     for (i = 0; i < count; ++i) { layout[i] = functions[i].layout; cfg[i] = layout[i].cfg; common[i] = cfg[i].info; }
     return create_registry(image, common, count, root, leaves, leaf_count, hashes, body_hash, returns, return_count,
-                           error, cfg, layout, functions, pauth, NULL, NULL, 0, NULL);
+                           error, cfg, layout, functions, pauth, NULL, NULL, 0, NULL, NULL, 0);
 }
 
 OotStackDispatcher *oot_stack_create_reads(OotRuntimeImage *image,
@@ -553,7 +628,7 @@ OotStackDispatcher *oot_stack_create_reads(OotRuntimeImage *image,
     if (!functions || !count || count > OOT_STACK_MAX_FUNCTIONS) return NULL;
     for (i=0;i<count;++i) { pac[i]=functions[i].pauth; layout[i]=pac[i].layout; cfg[i]=layout[i].cfg; common[i]=cfg[i].info; }
     return create_registry(image,common,count,root,leaves,leaf_count,hashes,body_hash,returns,return_count,error,
-                           cfg,layout,pac,pauth,functions,ranges,range_count,NULL);
+                           cfg,layout,pac,pauth,functions,ranges,range_count,NULL,NULL,0);
 }
 
 OotStackDispatcher *oot_stack_create_calls(OotRuntimeImage *image,
@@ -575,7 +650,30 @@ OotStackDispatcher *oot_stack_create_calls(OotRuntimeImage *image,
         layout[i] = pac[i].layout; cfg[i] = layout[i].cfg; common[i] = cfg[i].info;
     }
     return create_registry(image,common,count,root,leaves,leaf_count,hashes,body_hash,returns,return_count,error,
-                           cfg,layout,pac,pauth,reads,ranges,range_count,functions);
+                           cfg,layout,pac,pauth,reads,ranges,range_count,functions,NULL,0);
+}
+
+OotStackDispatcher *oot_stack_create_plt(OotRuntimeImage *image,
+    const OotStackCallFunction *functions, size_t count, uint64_t root,
+    const OotLeafFunction *leaves, size_t leaf_count, const OotCodeHash *hashes,
+    const uint8_t body_hash[32], const uint64_t *returns, size_t return_count,
+    OotPauth *pauth, const OotReadRange *ranges, size_t range_count,
+    const OotPltFunction *plts, size_t plt_count, uint32_t *error)
+{
+    OotStackFunction common[OOT_STACK_MAX_FUNCTIONS];
+    OotStackCfgFunction cfg[OOT_STACK_MAX_FUNCTIONS];
+    OotStackLayoutFunction layout[OOT_STACK_MAX_FUNCTIONS];
+    OotStackPauthFunction pac[OOT_STACK_MAX_FUNCTIONS];
+    OotStackReadFunction reads[OOT_STACK_MAX_FUNCTIONS];
+    size_t i;
+    if (error) *error = OOT_LEAF_BAD_ARGUMENT;
+    if (!functions || !count || count > OOT_STACK_MAX_FUNCTIONS || !plts || !plt_count) return NULL;
+    for (i = 0; i < count; ++i) {
+        reads[i] = functions[i].reads; pac[i] = reads[i].pauth;
+        layout[i] = pac[i].layout; cfg[i] = layout[i].cfg; common[i] = cfg[i].info;
+    }
+    return create_registry(image,common,count,root,leaves,leaf_count,hashes,body_hash,returns,return_count,error,
+                           cfg,layout,pac,pauth,reads,ranges,range_count,functions,plts,plt_count);
 }
 
 static int same_state(const OotArm64State *a, const OotArm64State *b)
@@ -614,7 +712,7 @@ int oot_stack_begin(OotStackDispatcher *d, const OotArm64State *s, uint64_t expe
     if (d->leaf != NULL) (void)oot_leaf_abort(d->leaf, NULL);
     d->depth = 0; activate(d, d->root, s, expected_return);
     d->checkpoint = *s; d->expected_return = expected_return; d->total = 0;
-    d->phase = 1; d->fault = 0; d->leaf_active = 0;
+    d->phase = 1; d->fault = 0; d->leaf_active = 0; d->active_plt = 0;
     return result(d, s, out, OOT_LEAF_READY, 0, 0);
 }
 
@@ -623,7 +721,7 @@ int oot_stack_abort(OotStackDispatcher *d, OotLeafReport *out)
     if (d == NULL) return result(NULL, NULL, out, OOT_LEAF_REJECTED, OOT_LEAF_BAD_ARGUMENT, 0);
     if (d->executing) return result(d, &d->checkpoint, out, OOT_LEAF_REJECTED, OOT_LEAF_REENTRY, 0);
     if (d->leaf != NULL) (void)oot_leaf_abort(d->leaf, NULL);
-    d->phase = 0; d->depth = 0; d->total = 0; d->leaf_active = 0;
+    d->phase = 0; d->depth = 0; d->total = 0; d->leaf_active = 0; d->active_plt = 0;
     return result(d, NULL, out, OOT_LEAF_READY, 0, 0);
 }
 
@@ -656,6 +754,52 @@ static unsigned check_owners(OotStackDispatcher *d, int check_code)
         if (reason) return reason;
         if (a->owns && (!read_frame(d, a, bytes) || memcmp(bytes, a->bytes, d->functions[a->function].info.frame_size)))
             return OOT_STACK_CHANGED;
+    }
+    if (d->active_plt) return plt_check(d,d->active_plt-1,NULL);
+    return 0;
+}
+
+/* One original bridge instruction, with no image/frame access exposed to code. */
+static unsigned plt_step(OotStackDispatcher *d, OotArm64State *working, int *contract)
+{
+    const OwnedPlt *o = &d->plts[d->active_plt-1];
+    const OotPltFunction *p = &o->info;
+    OotArm64State expected;
+    OotGuestMemory window;
+    OotGuestRegion region;
+    uint8_t bytes[8] = {0}, original[8] = {0};
+    uint64_t got, executed = UINT64_MAX;
+    unsigned index, i, reason = plt_check(d,d->active_plt-1,&got);
+    int status;
+    *contract = 0;
+    if (reason) return reason;
+    if (working->pc < p->entry || working->pc-p->entry >= 16 || (working->pc-p->entry)%4)
+        return OOT_LEAF_BAD_STATE;
+    index = (unsigned)((working->pc-p->entry)/4);
+    if (!oot_plt_expected(p,o->page,index,working,&expected)) return OOT_LEAF_BAD_STATE;
+    if (index == 1) {
+        for (i = 0; i < 8; ++i) bytes[i] = original[i] = (uint8_t)(got >> (i*8));
+        region = (OotGuestRegion){p->slot,8,bytes,OOT_MEMORY_READ};
+        (void)oot_memory_init(&window,&region,1);
+    } else (void)oot_memory_init(&window,NULL,0);
+    d->executing = 1;
+    status = p->run(working,&window,1,&executed);
+    d->executing = 0;
+    if (status != (index == 3 ? OOT_LIFT_DISPATCH : OOT_LIFT_BUDGET)) reason = OOT_LEAF_BAD_LIFT_STATUS;
+    else if (executed != 1) reason = OOT_LEAF_BAD_COUNT;
+    else if (working->pc != expected.pc) reason = OOT_LEAF_BAD_EDGE;
+    else if (window.fault.reason) reason = OOT_STACK_BAD_MEMORY;
+    else if (!same_state(working,&expected) || window.valid != 1 ||
+        (index == 1 ? (window.regions != &region || window.count != 1 || region.base != p->slot || region.size != 8 ||
+            region.data != bytes || region.permissions != OOT_MEMORY_READ || memcmp(bytes,original,8)) :
+            (window.regions != NULL || window.count != 0))) reason = OOT_STACK_BAD_PLT_EFFECT;
+    if (reason) { *contract = 1; return reason; }
+    reason = check_owners(d,0);
+    if (reason) return reason;
+    if (index == 3) {
+        OotLeafReport report;
+        if (oot_leaf_begin(d->leaf,working,p->target,d->plt_return,&report) != OOT_LEAF_READY) return report.error;
+        d->leaf_active = 1;
     }
     return 0;
 }
@@ -703,10 +847,21 @@ int oot_stack_run(OotStackDispatcher *d, OotArm64State *s, uint64_t budget, OotL
         OotStackLayoutStep post = {0, 1, 0, 0};
         int child_status = 0;
         size_t target = d->count;
+        size_t bridge = d->plt_count;
         uint64_t next = d->checkpoint.pc + 4;
         uint64_t signed_lr = a->signed_lr;
         reason = check_owners(d, 0);
         if (reason) return result(d, s, out, OOT_LEAF_REJECTED, reason, retired);
+        if (d->active_plt && !d->leaf_active) {
+            int contract;
+            reason = plt_step(d,&working,&contract);
+            if (reason) {
+                if (contract) { d->phase = 3; d->fault = reason; }
+                return result(d,s,out,contract ? OOT_LEAF_CONTRACT_FAULT : OOT_LEAF_REJECTED,reason,retired);
+            }
+            d->checkpoint = working; *s = working; ++retired; ++d->total;
+            continue;
+        }
         if (!read_frame(d, a, shadow)) return result(d, s, out, OOT_LEAF_REJECTED, OOT_STACK_BAD_MEMORY, retired);
         memcpy(before, shadow, f->frame_size);
         if (d->leaf_active) {
@@ -742,6 +897,12 @@ int oot_stack_run(OotStackDispatcher *d, OotArm64State *s, uint64_t budget, OotL
                     reason = code_match(d, target);
                     if (!reason && (d->depth == OOT_STACK_MAX_DEPTH || !fits(d, target, working.sp))) reason = OOT_STACK_DEPTH;
                     if (reason) return result(d, s, out, OOT_LEAF_REJECTED, reason, retired);
+                } else {
+                    bridge = find_plt(d,next);
+                    if (bridge != d->plt_count) {
+                        reason = plt_check(d,bridge,NULL);
+                        if (reason) return result(d,s,out,OOT_LEAF_REJECTED,reason,retired);
+                    }
                 }
             }
             if (kind == OOT_STACK_READ) {
@@ -815,7 +976,7 @@ int oot_stack_run(OotStackDispatcher *d, OotArm64State *s, uint64_t budget, OotL
             (read_le(shadow + offset, 8) != a->initial.x[29] || read_le(shadow + offset + 8, 8) != (d->pauth ? signed_lr : a->initial.x[30]))) reason = OOT_STACK_CHANGED;
         if (!reason && kind == OOT_STACK_SAVE && (read_le(shadow + offset, 8) != a->initial.x[flow->saved_a] ||
             (size == 16 && read_le(shadow + offset + 8, 8) != a->initial.x[flow->saved_b]))) reason = OOT_STACK_CHANGED;
-        if (!reason && !d->leaf_active && kind == OOT_STACK_CALL && target == d->count) {
+        if (!reason && !d->leaf_active && kind == OOT_STACK_CALL && target == d->count && bridge == d->plt_count) {
             OotLeafReport child_report;
             if (oot_leaf_begin(d->leaf, &working, working.pc, d->checkpoint.pc + 4, &child_report) != OOT_LEAF_READY)
                 return result(d, s, out, OOT_LEAF_REJECTED, child_report.error, retired);
@@ -833,9 +994,10 @@ int oot_stack_run(OotStackDispatcher *d, OotArm64State *s, uint64_t budget, OotL
             if (post.owner == 2) a->owns = 0;
         } else if (kind == OOT_STACK_CLOSE) a->owns = 0;
         if (kind == OOT_STACK_SIGN) a->signed_lr = signed_lr;
-        if (d->leaf_active && child_status == OOT_LEAF_RETURNED) d->leaf_active = 0;
+        if (d->leaf_active && child_status == OOT_LEAF_RETURNED) { d->leaf_active = 0; d->active_plt = 0; }
         else if (kind == OOT_STACK_CALL) {
             if (target != d->count) activate(d, target, &working, d->checkpoint.pc + 4);
+            else if (bridge != d->plt_count) { d->active_plt = bridge+1; d->plt_return = d->checkpoint.pc+4; }
             else d->leaf_active = 1;
         }
         d->checkpoint = working; *s = working; ++retired; ++d->total;

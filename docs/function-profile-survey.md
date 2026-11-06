@@ -125,6 +125,14 @@ The separate [callee audit](callee-audit.md) reproduces these policy-6 results a
 
 Bounded original-byte probes remain diagnostic and never satisfy other dependencies. PLT annotations record the linked GOT snapshot only. Seventy-two frontier PLT stubs resolve to existing verified register-only leaves, but an explicit verified transfer contract is still required before dispatch. The accepted count stays 1,688 and no game C or native callbacks are generated.
 
+## Checked PLT-to-leaf comparison
+
+`--plt` compares the unchanged policy 6 with [policy 7](plt-dispatch.md), using the same PAC discovery and actual framed/leaf proofs. A separate global catalog recognizes exact relocation-backed stubs whose linked targets are real verified register-only leaves. Only stubs required by a root's actual closure and their actual target leaf bytes enter that root's proof; no stub is turned into a fake register-only function or used to relax an older policy. Each call bound includes four original stub instructions plus the leaf bound.
+
+The local 1.1.1 catalog contains 386 eligible bridges, including all 72 in the earlier missing-callee frontier. A single registry still permits at most 256 explicit bridges. Source/text hashes and all metadata/discovery denominators are unchanged. Policy 6 retains 1,688 candidates; policy 7 accepts **1,703 structural candidates (13,645 root words)**: 1,686 in main and 17 in SDK. The 15 additional candidates are SDK regions. Counts overlap and do not measure gameplay coverage.
+
+First call-dependency failures decrease from 16,458 to 16,405. Of the 53 regions advancing past that first category, only 15 become accepted: memory-policy failures increase from 11,409 to 11,437 and bounds/registry failures from 162 to 172. Runtime GOT checks remain obligations, and the report explicitly records that it has not performed them or supplied runtime read ranges. No game C, callbacks or execution are produced by the survey.
+
 ## Verification
 
 Synthetic tests cover positive leaf and framed cases under all profiles, real transitive closures, unavailable callees, call cycles, metadata aliases/window boundaries, multiple returns, indirect boundaries, unreachable words, samples/limits, PAC-prefix rejection, source preservation, fresh-output checks, and tampered-input rejection. The full Python suite continues to run the native/reference profile tests; the survey itself remains static and does not compile or run candidates.

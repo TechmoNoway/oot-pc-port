@@ -9,6 +9,8 @@
 #define OOT_STACK_PAUTH_POLICY_VERSION 4u
 #define OOT_STACK_READ_POLICY_VERSION 5u
 #define OOT_STACK_CALL_POLICY_VERSION 6u
+#define OOT_STACK_PLT_POLICY_VERSION 7u
+#define OOT_STACK_MAX_PLT 256u
 #define OOT_STACK_MAX_READ_RANGES 128u
 #define OOT_STACK_MAX_FUNCTIONS 32u
 #define OOT_STACK_MAX_WORDS 128u
@@ -22,7 +24,8 @@ enum OotStackKind { OOT_STACK_OPEN, OOT_STACK_FP, OOT_STACK_NORMAL, OOT_STACK_CA
     OOT_STACK_SIGN, OOT_STACK_AUTH, OOT_STACK_READ, OOT_STACK_OPEN_LR, OOT_STACK_CLOSE_LR };
 enum OotStackError { OOT_STACK_BAD_REGISTRY = 48, OOT_STACK_CHANGED = 49,
     OOT_STACK_BAD_MEMORY = 50, OOT_STACK_DEPTH = 51,
-    OOT_STACK_BAD_READ_RANGE = 52, OOT_STACK_BAD_READ_EFFECT = 53 };
+    OOT_STACK_BAD_READ_RANGE = 52, OOT_STACK_BAD_READ_EFFECT = 53,
+    OOT_STACK_BAD_PLT_TARGET = 54, OOT_STACK_BAD_PLT_EFFECT = 55 };
 typedef struct OotStackStep { uint32_t kind, offset, size, reserved; uint64_t callee; } OotStackStep;
 typedef struct OotStackFunction {
     uint64_t entry;
@@ -70,6 +73,14 @@ typedef struct OotStackCallFunction {
     OotStackReadFunction reads;
     uint32_t open_word, close_word;
 } OotStackCallFunction;
+/* Exact ADRP X16 / LDR X17 / ADD X16 / BR X17 bridge. The sole target is a
+ * registered ordinary leaf; run is trusted compiled code with the raw ABI. */
+typedef struct OotPltFunction {
+    uint64_t entry, slot, target;
+    OotLeafRun run;
+    uint32_t words[4];
+    OotCodeHash hash;
+} OotPltFunction;
 typedef struct OotStackDispatcher OotStackDispatcher;
 
 /* Separate single-threaded bounded DAG profile. Copies trusted compiled metadata,
@@ -107,6 +118,12 @@ OOT_MEMORY_API OotStackDispatcher *oot_stack_create_calls(OotRuntimeImage *image
     const OotLeafFunction *leaves, size_t leaf_count, const OotCodeHash *hashes,
     const uint8_t body_hash[32], const uint64_t *returns, size_t return_count,
     OotPauth *pauth, const OotReadRange *ranges, size_t range_count, uint32_t *error);
+OOT_MEMORY_API OotStackDispatcher *oot_stack_create_plt(OotRuntimeImage *image,
+    const OotStackCallFunction *functions, size_t count, uint64_t root,
+    const OotLeafFunction *leaves, size_t leaf_count, const OotCodeHash *hashes,
+    const uint8_t body_hash[32], const uint64_t *returns, size_t return_count,
+    OotPauth *pauth, const OotReadRange *ranges, size_t range_count,
+    const OotPltFunction *plts, size_t plt_count, uint32_t *error);
 OOT_MEMORY_API int oot_stack_destroy(OotStackDispatcher *dispatcher);
 OOT_MEMORY_API int oot_stack_begin(OotStackDispatcher *dispatcher, const OotArm64State *state,
     uint64_t expected_return, OotLeafReport *report);

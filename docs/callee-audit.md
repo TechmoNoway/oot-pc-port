@@ -62,6 +62,8 @@ The 1,973 PLT stubs reference 1,880 distinct linked snapshot addresses. Their on
 
 This points to two concrete implementation areas: an explicit verified PLT tail-transfer boundary, initially restricted to already verified register-only leaves, and missing instruction families such as conditional compare. Adding more entry seeds alone would address little of this measured frontier. The 72 leaf-directed stubs are candidates for a future bounded bridge, not a promise that 72 functions or any fixed number of roots will become accepted. Exact stub/GOT/target checks, instruction budgets, retained ownership, and synthetic native/reference validation must precede such an extension.
 
+The later [policy-7 PLT milestone](plt-dispatch.md) implements this bounded transfer contract and verifies all 72 original frontier stubs. Its separate static survey accepts 1,703 candidates, up 15. This historical audit remains a policy-6 baseline; its snapshot annotations still grant no runtime dispatch permissions.
+
 ## Verification
 
 Thirteen synthetic tests cover real mixed closures, shared and transitive frontiers, repeated BL-site deduplication, unavailable targets, blocked metadata and unchanged boundaries, word/symbol limits, overlapping internal-label probes, successful probes that stay unregistered, dependencies between probes that remain unresolved, relocation-backed PLT snapshots and nonlocal symbols, lookalike-stub rejection, non-text/gap/unmapped targets, deterministic accounting, strict baseline comparisons, input integrity, fresh output, and CLI rollback. The complete regression suite remains applicable. No game callbacks are generated or executed during these checks.

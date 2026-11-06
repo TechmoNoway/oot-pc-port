@@ -42,6 +42,8 @@ An opt-in [pointer authentication model](docs/pointer-authentication.md) impleme
 
 A [callee dependency audit](docs/callee-audit.md) traces 16,458 dependency-blocked roots to 5,463 distinct missing targets on the same verified inputs. Most are blocked metadata entries or PLT stubs; only two lack metadata. Diagnostic probes and linked GOT snapshots do not grant dispatch permissions or increase the accepted count.
 
+[Checked PLT dispatch](docs/plt-dispatch.md) adds policy 7/schema 8 for exact relocation-backed stubs targeting registered ordinary leaves. All four original instructions retain their state effects and budget accounting; current GOT and code hashes are checked across yields. Synthetic native tests pass on MSVC/GCC. Its static survey accepts 1,703 structural candidates, up 15, with game callbacks remaining ungenerated and unexecuted.
+
 The game is not playable yet. Process startup, broader instruction semantics, operating-system services, and graphics remain to be implemented.
 
 ## Development direction
