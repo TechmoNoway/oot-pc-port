@@ -35,6 +35,7 @@ def main():
     parser.add_argument("--max-words", type=int, default=256)
     parser.add_argument("--pauth", action="store_true", help="separate PAC policy/discovery survey; preserve default profiles")
     parser.add_argument("--reads", action="store_true", help="compare PAC and checked-read structural policies; no runtime read capabilities granted")
+    parser.add_argument("--lr-calls", action="store_true", help="compare checked-read and LR-pair frame policies on original bytes")
     args = parser.parse_args()
     try:
         path = build_destination(args.report)
@@ -46,7 +47,7 @@ def main():
         print("Verified prepared inputs and complete link; surveying metadata candidates.", file=sys.stderr, flush=True)
         def progress(module, stage, done, total):
             print(f"{module}: {stage} {done}/{total}", file=sys.stderr, flush=True)
-        report = survey_modules(linker.modules, args.samples, args.max_words, progress, pauth=args.pauth, reads=args.reads)
+        report = survey_modules(linker.modules, args.samples, args.max_words, progress, pauth=args.pauth, reads=args.reads,lr_calls=args.lr_calls)
         report["offline_link"] = linked
         write_report(report, path)
         print(json.dumps({"report": str(path), "metadata_entry_candidates": report["totals"]["metadata_entry_candidates"],

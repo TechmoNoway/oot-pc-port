@@ -13,6 +13,7 @@ from pauth_lifter import decode_pauth_block, MODEL
 
 ALLOC, RECORD_SAVE, RECORD_RESTORE, DEALLOC = 11, 12, 13, 14
 SIGN, AUTH, READ = 15, 16, 17
+OPEN_LR, CLOSE_LR = 18, 19
 READ_FORMS = frozenset(("loadstore_unsigned", "loadstore_immediate", "loadstore_register", "load_literal", "loadstore_pair", "load_acquire_rcpc"))
 
 
@@ -47,7 +48,17 @@ def verify_read_stack_functions(frames, leaves, root):
     return _verify_layout(frames, leaves, root, True, True)
 
 
-def _verify_layout(frames, leaves, root, pauth, reads=False):
+def verify_call_stack_functions(frames, leaves, root):
+    return _verify_layout(frames, leaves, root, True, True, True)
+
+
+def lr_pair(i, load):
+    return (i.form == "loadstore_pair" and i.access_size == 8 and i.rn == 31 and i.load == load and
+            i.writeback and i.post_index == load and
+            ((i.rd == 30 and 19 <= i.rt2 <= 28) or (i.rt2 == 30 and 19 <= i.rd <= 28)))
+
+
+def _verify_layout(frames, leaves, root, pauth, reads=False, lr_calls=False):
     require(0 < len(frames) <= MAX_FUNCTIONS and len(leaves) <= 256 and root in frames, "invalid layout registry/root")
     ranges = sorted((entry, entry + len(code)) for entry, code in [*frames.items(), *leaves.items()])
     require(all(a[1] <= b[0] for a, b in zip(ranges, ranges[1:])), "layout registry code overlaps")
@@ -69,6 +80,8 @@ def _verify_layout(frames, leaves, root, pauth, reads=False):
                 auth_tail, auth_word = 1, ins[-2].word
         else:
             require(ins[-1].word == 0xD65F03C0, "invalid fixed frame/return")
+        lr_frame = lr_calls and lr_pair(ins[head], False)
+        partner = (ins[head].rt2 if ins[head].rd == 30 else ins[head].rd) if lr_frame else None
         split = sp_change(ins[head], True)
         size = ins[head].immediate if split else -ins[head].immediate
         require(16 <= size <= MAX_FRAME and size % 16 == 0, "invalid fixed frame/return")
@@ -81,16 +94,22 @@ def _verify_layout(frames, leaves, root, pauth, reads=False):
             require(record_access(ins[close_index - 1], True) and not ins[close_index - 1].writeback and ins[close_index - 1].immediate == record and
                     sp_change(ins[close_index], False) and ins[close_index].immediate == size, "mismatched split frame restore/deallocation")
             start, tail = head + 2, 3 + auth_tail
+        elif lr_frame:
+            require(lr_pair(ins[close_index], True) and ins[close_index].immediate == size and
+                    (ins[close_index].rd, ins[close_index].rt2) == (ins[head].rd, ins[head].rt2),
+                    "mismatched LR pair restore/deallocation")
+            record, start, tail = 0, head + 1, 2 + auth_tail
         else:
             require(record_access(ins[head], False) and ins[head].writeback and not ins[head].post_index and
                     record_access(ins[close_index], True) and ins[close_index].post_index and ins[close_index].immediate == size,
                     "unsupported combined frame layout")
             record, start, tail = 0, head + 1, 2 + auth_tail
-        reserved, saves, roles, fp_ready, mask = [(record, record + 16)], [], {}, False, 0
+        reserved, saves, roles, fp_ready, mask = [(record, record + 16)], [], {}, False, (1 << partner if lr_frame else 0)
         index = start
         while index < len(ins) - tail:
             i = ins[index]
             if fp_set(i, record):
+                require(not lr_frame, "LR pair frame must preserve FP")
                 require(not fp_ready, "duplicate FP setup")
                 fp_ready = True; roles[index] = (FP, 0, 0, [])
             elif i.form in ("loadstore_unsigned", "loadstore_immediate", "loadstore_pair") and not i.load and i.access_size == 8 and (
@@ -105,12 +124,12 @@ def _verify_layout(frames, leaves, root, pauth, reads=False):
             else:
                 break
             index += 1
-        require(fp_ready, "missing FP setup")
+        require(fp_ready or lr_frame, "missing FP setup")
         body, epilogue = index, len(ins) - tail - len(saves)
         require(body <= epilogue, "missing saved-register restores")
         for k, (offset, width, regs) in enumerate(reversed(saves)):
             i = ins[epilogue + k]
-            actual = access(i, record, True)
+            actual = access(i, record, not lr_frame)
             require(i.load and i.access_size == 8 and actual == (offset, width, regs), "mismatched saved-register restore")
 
         steps, flows, states, calls, read_words, fp_ready, restored = [], [], [], [], [], False, 0
@@ -121,7 +140,7 @@ def _verify_layout(frames, leaves, root, pauth, reads=False):
             if pauth and index == 0:
                 s["kind"] = SIGN; state.update(sp=1, fp=0, lr=3)
             elif index == head:
-                s.update(kind=ALLOC if split else OPEN, offset=0, size=0 if split else 16); state["owner"] = 1
+                s.update(kind=ALLOC if split else OPEN_LR if lr_frame else OPEN, offset=0, size=0 if split else 16); state["owner"] = 1
             elif split and index == head + 1:
                 s.update(kind=RECORD_SAVE, offset=record, size=16)
             elif index < body:
@@ -140,6 +159,7 @@ def _verify_layout(frames, leaves, root, pauth, reads=False):
                     require(all(entry + n * 4 == pc and body <= n <= epilogue for n, pc in zip(successors, targets)), "layout branch escapes body/epilogue entry")
                     s["kind"] = BRANCH; f["next"] = successors
                 elif reads and i.form in READ_FORMS and i.load and not i.writeback and not i.post_index:
+                    require(not lr_frame or i.form == "load_literal" or i.rn != 29, "LR pair frame excludes FP-based memory")
                     regs = [i.rd, i.rt2] if i.form == "loadstore_pair" else [i.rd]
                     require(all(r == 31 or r < 18 or mask & (1 << r) for r in regs), "checked read writes unsaved protected register")
                     if i.rn in (29, 31) and i.form in ("loadstore_unsigned", "loadstore_immediate", "loadstore_pair", "load_acquire_rcpc"):
@@ -149,7 +169,7 @@ def _verify_layout(frames, leaves, root, pauth, reads=False):
                                 "checked frame read overlaps reserved slots or frame bounds")
                     s["kind"] = READ
                 elif i.form in ("loadstore_unsigned", "loadstore_immediate", "loadstore_pair"):
-                    offset, width, regs = access(i, record, True)
+                    offset, width, regs = access(i, record, not lr_frame)
                     require(0 <= offset and offset + width <= size and all(offset + width <= lo or offset >= hi for lo, hi in reserved),
                             "local access overlaps reserved slots or frame bounds")
                     require(not i.load or all(r == 31 or r < 18 or mask & (1 << r) for r in regs), "load writes unsaved protected register")
@@ -165,7 +185,7 @@ def _verify_layout(frames, leaves, root, pauth, reads=False):
             elif split and index == close_index - 1:
                 s.update(kind=RECORD_RESTORE, offset=record, size=16); state.update(fp=0, lr=signed)
             elif index == close_index:
-                s["kind"] = DEALLOC if split else CLOSE; state.update(sp=1, fp=0, lr=signed, owner=2)
+                s["kind"] = DEALLOC if split else CLOSE_LR if lr_frame else CLOSE; state.update(sp=1, fp=0, lr=signed, owner=2)
             elif pauth and auth_tail and index == len(ins) - 2:
                 s["kind"] = AUTH; state.update(sp=1, fp=0, lr=1)
             else:
@@ -186,6 +206,9 @@ def _verify_layout(frames, leaves, root, pauth, reads=False):
             proofs[entry].update(policy="checked-read-pauth-stack-dag-v5", read_words=read_words,
                 checked_read_count=sum(s["kind"] == READ for s in steps),
                 runtime_read_preconditions="unreserved owned locals or explicit retained-image read ranges; alignment/permissions checked at runtime")
+        if lr_calls:
+            proofs[entry].update(policy="lr-pair-read-stack-dag-v6", layout="lr-pair" if lr_frame else proofs[entry]["layout"],
+                open_word=ins[head].word if lr_frame else 0, close_word=ins[close_index].word if lr_frame else 0)
     return verify_cfg_graphs(proofs, leaf_proofs, root)
 
 
@@ -201,7 +224,11 @@ def emit_read_stack_descriptor(p, name):
     return _emit_descriptor(p, name, True, True)
 
 
-def _emit_descriptor(p, name, pauth, reads=False):
+def emit_call_stack_descriptor(p, name):
+    return _emit_descriptor(p, name, True, True, True)
+
+
+def _emit_descriptor(p, name, pauth, reads=False, lr_calls=False):
     prefix = "oot_pauth_lift_" if pauth else "oot_lift_"
     require(re.fullmatch(prefix + r"[A-Za-z0-9_]+", name) is not None, "invalid layout identifier")
     suffix = name[len(prefix):]
@@ -214,24 +241,27 @@ def _emit_descriptor(p, name, pauth, reads=False):
         lines += [f"    {{{a}, {b}, {f['saved_a']}, {f['saved_b']}, {f['max_steps']}, UINT32_C(0x{f['writable_mask']:x})}},"]
     lines += ['};', f'static const OotStackLayoutStep oot_layout_states_{suffix}[] = {{']
     lines += [f"    {{{s['sp']}, {s['fp']}, {s['lr']}, {s['owner']}}}," for s in p['states']]
-    descriptor = "OotStackReadFunction" if reads else "OotStackPauthFunction" if pauth else "OotStackLayoutFunction"
+    descriptor = "OotStackCallFunction" if lr_calls else "OotStackReadFunction" if reads else "OotStackPauthFunction" if pauth else "OotStackLayoutFunction"
     lines += ['};']
     if pauth: lines += ['#if OOT_STACK_PAUTH_POLICY_VERSION != 4 || OOT_PAUTH_ABI_VERSION != 1', '#error Regenerate PAC descriptor', '#endif']
     if reads:
         lines += ['#if OOT_STACK_READ_POLICY_VERSION != 5', '#error Regenerate read descriptor', '#endif',
                   f'static const uint32_t oot_read_words_{suffix}[] = {{' + ', '.join(f'UINT32_C(0x{w:08x})' for w in p['read_words']) + '};']
+    if lr_calls: lines += ['#if OOT_STACK_CALL_POLICY_VERSION != 6', '#error Regenerate call descriptor', '#endif']
     lines += [f'static const {descriptor} oot_layout_info_{suffix} = {{']
+    if lr_calls: lines += ['    {']
     if reads: lines += ['    {']
     if pauth: lines += ['    {']
     lines += ['    {', '        {',
-        f"            UINT64_C(0x{p['base']:x}), {p['instruction_count']}, {p['max_retired_instructions']}, 2, {5 if reads else 4 if pauth else 3},",
+        f"            UINT64_C(0x{p['base']:x}), {p['instruction_count']}, {p['max_retired_instructions']}, 2, {6 if lr_calls else 5 if reads else 4 if pauth else 3},",
         f"            {p['frame_size']}, {p['max_depth']}, {'NULL' if pauth else name}, oot_layout_steps_{suffix}, {{{{",
         '                ' + ', '.join(f'0x{b:02x}' for b in bytes.fromhex(p['source_sha256'])), '            }}', '        },',
         f"        oot_layout_flow_{suffix}, UINT32_C(0x{p['saved_mask']:x}), 0", '    },',
         f"    oot_layout_states_{suffix}, {p['record_offset']}, 0"]
     if pauth: lines += ['    },', f"    {name}, UINT32_C(0x{p['sign_word']:08x}), UINT32_C(0x{p['auth_word']:08x})"]
     if reads: lines += ['    },', f'    oot_read_words_{suffix}']
+    if lr_calls: lines += ['    },', f"    UINT32_C(0x{p['open_word']:08x}), UINT32_C(0x{p['close_word']:08x})"]
     lines += ['};',
-        f'OOT_LIFT_EXPORT const {descriptor} *oot_stack_{"read" if reads else "pauth" if pauth else "layout"}_descriptor_{suffix}(void)',
+        f'OOT_LIFT_EXPORT const {descriptor} *oot_stack_{"call" if lr_calls else "read" if reads else "pauth" if pauth else "layout"}_descriptor_{suffix}(void)',
         '{', f'    return &oot_layout_info_{suffix};', '}', '']
     return '\n'.join(lines)

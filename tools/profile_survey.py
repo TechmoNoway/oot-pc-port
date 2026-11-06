@@ -13,7 +13,7 @@ from input_formats import require
 from leaf_verifier import verify_leaf
 from stack_cfg_verifier import verify_cfg_stack_functions
 from stack_layout_verifier import verify_layout_stack_functions
-from stack_layout_verifier import verify_pauth_stack_functions, verify_read_stack_functions
+from stack_layout_verifier import verify_pauth_stack_functions, verify_read_stack_functions, verify_call_stack_functions
 from pauth_lifter import decode_pauth_instruction, MODEL
 from stack_verifier import verify_stack_functions
 
@@ -158,7 +158,7 @@ def check_profile(profile, region, regions, leaf_codes):
     if profile == "leaf_caller": return verify_frame(region.data, region.entry, leaves), 1, len(leaves)
     verifier = {"linear_stack": verify_stack_functions, "cfg_stack": verify_cfg_stack_functions,
                 "fixed_layout": verify_layout_stack_functions, "pauth_stack": verify_pauth_stack_functions,
-                "checked_reads": verify_read_stack_functions}[profile]
+                "checked_reads": verify_read_stack_functions, "lr_calls": verify_call_stack_functions}[profile]
     # Most roots fail their own policy. Run the real root-only verifier first,
     # with actual verified leaf bytes; no fabricated callee bodies are supplied.
     try: return verifier({region.entry: region.data}, leaves, region.entry)[region.entry], 1, len(leaves)
@@ -180,13 +180,15 @@ def check_profile(profile, region, regions, leaf_codes):
     return proof, len(frames), len(leaves)
 
 
-def survey_modules(modules, sample_limit=16, max_words=256, progress=None, pauth=False, reads=False):
+def survey_modules(modules, sample_limit=16, max_words=256, progress=None, pauth=False, reads=False, lr_calls=False):
     require(type(sample_limit) is int and 0 <= sample_limit <= 4096, "survey sample limit must be 0-4096")
     require(type(max_words) is int and 1 <= max_words <= 256, "survey word limit must be 1-256")
     require(type(pauth) is bool, "PAC survey opt-in must be boolean")
     require(type(reads) is bool,"read survey opt-in must be boolean")
+    require(type(lr_calls) is bool,"LR call survey opt-in must be boolean")
+    reads = reads or lr_calls
     pauth = pauth or reads
-    profiles = ("pauth_stack","checked_reads") if reads else ("pauth_stack",) if pauth else PROFILES
+    profiles = ("checked_reads","lr_calls") if lr_calls else ("pauth_stack","checked_reads") if reads else ("pauth_stack",) if pauth else PROFILES
     syntax, regions, reports, module_reports = Syntax(), {}, [], {}
     for module in modules:
         windows = list(metadata_windows(module, max_words))
@@ -277,7 +279,7 @@ def survey_modules(modules, sample_limit=16, max_words=256, progress=None, pauth
     return {"schema_version": 1, "format": "arm64-function-profile-survey", "guest_code_executed": False,
         "translation_performed": False, "native_callbacks_registered": False, "function_identity_proven": False,
         "coverage_is_complete": False, "decoder": syntax.metadata,
-        "policies": {"pauth_stack":"pauth-layout-stack-dag-v4","checked_reads":"checked-read-pauth-stack-dag-v5"} if reads else {"pauth_stack": "pauth-layout-stack-dag-v4"} if pauth else dict(zip(PROFILES, POLICIES)),
+        "policies": {"checked_reads":"checked-read-pauth-stack-dag-v5","lr_calls":"lr-pair-read-stack-dag-v6"} if lr_calls else {"pauth_stack":"pauth-layout-stack-dag-v4","checked_reads":"checked-read-pauth-stack-dag-v5"} if reads else {"pauth_stack": "pauth-layout-stack-dag-v4"} if pauth else dict(zip(PROFILES, POLICIES)),
         "pauth_model": MODEL if pauth else None,
         "runtime_read_ranges_supplied": False,
         "read_survey_scope": "structural proof only; dynamic addresses/ranges/ownership/alignment checked by runtime; no read capabilities granted" if reads else None,

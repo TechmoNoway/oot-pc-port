@@ -8,6 +8,7 @@
 #define OOT_STACK_LAYOUT_POLICY_VERSION 3u
 #define OOT_STACK_PAUTH_POLICY_VERSION 4u
 #define OOT_STACK_READ_POLICY_VERSION 5u
+#define OOT_STACK_CALL_POLICY_VERSION 6u
 #define OOT_STACK_MAX_READ_RANGES 128u
 #define OOT_STACK_MAX_FUNCTIONS 32u
 #define OOT_STACK_MAX_WORDS 128u
@@ -18,7 +19,7 @@ enum OotStackKind { OOT_STACK_OPEN, OOT_STACK_FP, OOT_STACK_NORMAL, OOT_STACK_CA
     OOT_STACK_CLOSE, OOT_STACK_RETURN, OOT_STACK_LOAD, OOT_STACK_STORE,
     OOT_STACK_SAVE, OOT_STACK_RESTORE, OOT_STACK_BRANCH, OOT_STACK_ALLOC,
     OOT_STACK_RECORD_SAVE, OOT_STACK_RECORD_RESTORE, OOT_STACK_DEALLOC,
-    OOT_STACK_SIGN, OOT_STACK_AUTH, OOT_STACK_READ };
+    OOT_STACK_SIGN, OOT_STACK_AUTH, OOT_STACK_READ, OOT_STACK_OPEN_LR, OOT_STACK_CLOSE_LR };
 enum OotStackError { OOT_STACK_BAD_REGISTRY = 48, OOT_STACK_CHANGED = 49,
     OOT_STACK_BAD_MEMORY = 50, OOT_STACK_DEPTH = 51,
     OOT_STACK_BAD_READ_RANGE = 52, OOT_STACK_BAD_READ_EFFECT = 53 };
@@ -63,6 +64,12 @@ typedef struct OotStackReadFunction {
     OotStackPauthFunction pauth;
     const uint32_t *read_words; /* Exact opcode at READ steps; zero elsewhere. */
 } OotStackReadFunction;
+/* Policy 6 additionally permits pre-index LR/callee-save pairs without FP setup.
+ * Both words are zero for the existing FP layouts, exact opcodes otherwise. */
+typedef struct OotStackCallFunction {
+    OotStackReadFunction reads;
+    uint32_t open_word, close_word;
+} OotStackCallFunction;
 typedef struct OotStackDispatcher OotStackDispatcher;
 
 /* Separate single-threaded bounded DAG profile. Copies trusted compiled metadata,
@@ -92,6 +99,11 @@ OOT_MEMORY_API OotStackDispatcher *oot_stack_create_pauth(OotRuntimeImage *image
  * receive a read-only snapshot of exactly one checked load, never the full image. */
 OOT_MEMORY_API OotStackDispatcher *oot_stack_create_reads(OotRuntimeImage *image,
     const OotStackReadFunction *functions, size_t count, uint64_t root,
+    const OotLeafFunction *leaves, size_t leaf_count, const OotCodeHash *hashes,
+    const uint8_t body_hash[32], const uint64_t *returns, size_t return_count,
+    OotPauth *pauth, const OotReadRange *ranges, size_t range_count, uint32_t *error);
+OOT_MEMORY_API OotStackDispatcher *oot_stack_create_calls(OotRuntimeImage *image,
+    const OotStackCallFunction *functions, size_t count, uint64_t root,
     const OotLeafFunction *leaves, size_t leaf_count, const OotCodeHash *hashes,
     const uint8_t body_hash[32], const uint64_t *returns, size_t return_count,
     OotPauth *pauth, const OotReadRange *ranges, size_t range_count, uint32_t *error);

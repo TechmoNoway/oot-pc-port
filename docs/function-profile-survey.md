@@ -111,6 +111,14 @@ Policy 5's first rejections include 49,428 general policy failures, 45,727 size 
 
 Real production verifiers check unchanged words and actual transitive callee proofs. The report explicitly records that runtime read ranges were not supplied. All reports remain private under ignored `build/`; no game C, native callback registration, or game execution occurs.
 
+## LR-pair frame comparison
+
+`--lr-calls` uses the same PAC discovery and compares policy 5 with the separate [LR-pair policy 6](lr-pair-frames.md), including real mixed frame/callee closures. It grants no runtime ranges and leaves default, `--pauth`, and `--reads` behavior unchanged.
+
+The local 1.1.1 run retains the preceding source/text hashes and all discovery denominators. Both policies accept **1,688 structural candidates containing 13,519 words**. First unsupported combined-frame failures decrease from 1,307 to 774. Policy 6 then exposes additional later failures: call dependencies rise from 16,151 to 16,458 and memory-policy failures from 11,269 to 11,409. First failures can change across a whole closure; these differences cannot be counted as independently proven functions or acceptance gains.
+
+Synthetic survey tests accept a real LR-pair caller and FP/LR helper through this same production verifier and reject an unavailable callee. The game survey itself performs no translation, registration, or execution. Broader callee coverage and explicit write-effect contracts remain separate milestones.
+
 ## Verification
 
 Synthetic tests cover positive leaf and framed cases under all profiles, real transitive closures, unavailable callees, call cycles, metadata aliases/window boundaries, multiple returns, indirect boundaries, unreachable words, samples/limits, PAC-prefix rejection, source preservation, fresh-output checks, and tampered-input rejection. The full Python suite continues to run the native/reference profile tests; the survey itself remains static and does not compile or run candidates.

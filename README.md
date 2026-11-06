@@ -38,6 +38,8 @@ An opt-in [pointer authentication model](docs/pointer-authentication.md) impleme
 
 [Checked image reads](docs/checked-reads.md) add an opt-in policy 5/schema 6 with explicit readable image ranges, complete-access bounds and ownership checks, and private read-only operand snapshots. Native synthetic loads and nested PAC calls pass on MSVC/GCC. Its static survey accepts 1,688 structural candidates, subject to runtime pointer/range checks; no game callbacks are generated or executed.
 
+[LR-pair frames](docs/lr-pair-frames.md) add policy 6/schema 7 for signed LR saved with X19-X28 while preserving FP. Mixed calls into FP/LR frames and ordinary leaves pass native/reference tests on MSVC/GCC. The static accepted count remains 1,688; further callee and write-effect requirements still block new game candidates.
+
 The game is not playable yet. Process startup, broader instruction semantics, operating-system services, and graphics remain to be implemented.
 
 ## Development direction
