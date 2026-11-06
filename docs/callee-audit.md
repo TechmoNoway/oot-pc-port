@@ -157,3 +157,12 @@ PLT snapshot classes are 1,093 blocked metadata targets, 951 discovered policy-6
 ## Verification
 
 Thirteen synthetic tests cover real mixed closures, shared and transitive frontiers, repeated BL-site deduplication, unavailable targets, blocked metadata and unchanged boundaries, word/symbol limits, overlapping internal-label probes, successful probes that stay unregistered, dependencies between probes that remain unresolved, relocation-backed PLT snapshots and nonlocal symbols, lookalike-stub rejection, non-text/gap/unmapped targets, deterministic accounting, strict baseline comparisons, input integrity, fresh output, and CLI rollback. The complete regression suite remains applicable. No game callbacks are generated or executed during these checks.
+
+
+## Checked-memory callee frontier
+
+The separate [policy-8 memory survey](checked-memory.md) now reports upgraded real closures and a remaining callee frontier through `--memory`. Its shared policy-7 results match the fresh PLT report on source/text hashes, model/decoder/limits and complete per-module outcomes. The policy-6 audit remains unchanged and is still reproduced by the milestone runner.
+
+Policy 8 accepts 118 additional roots, currently isolated frames with no new inter-frame closure edges in the local game corpus. Of the roots previously failing memory policy, 1,250 now reach a missing-callee failure. The full new frontier has 17,822 dependency-blocked roots, 5,992 unique missing targets and 30,319 unique caller-region/target edges; root references overlap. Missing targets include 3,789 discovery-blocked metadata entries, 2,201 unapproved PLT stubs and two unregistered targets. Metadata first stops, original failure windows and linked PLT target snapshots remain diagnostic and never register a target or establish a live GOT guarantee.
+
+See the aggregate [profile results](function-profile-survey.md) and private `build/milestones/checked-memory-v3/memory.json`. All surveys use actual unchanged regions and production verifier/callee proofs. Native execution covers synthetic memory callees and factories only; no game callbacks, runtime read/write grants or execution are introduced.

@@ -1,6 +1,7 @@
 """Validate a complete milestone and collect private evidence; never publish or run game code."""
 
 import argparse
+from copy import deepcopy
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 import hashlib
@@ -60,6 +61,26 @@ def compare_profiles(before, after):
             "before": before["totals"], "after": after["totals"],
             "eligible_bridges_before": before["eligible_plt_leaf_bridges"],
             "eligible_bridges_after": after["eligible_plt_leaf_bridges"]}
+
+
+def compare_memory(plt, memory):
+    require(memory.get('runtime_write_ranges_supplied') is False, 'memory survey supplied runtime write capabilities')
+    require(memory.get('policies') == {'plt_leaf':'plt-leaf-stack-dag-v7','checked_memory':'checked-memory-stack-dag-v8'}, 'invalid memory policies')
+    require(isinstance(memory.get('memory_clusters'),dict) and memory['memory_clusters'].get('runtime_capabilities_granted') is False,
+            'missing static memory/callee cluster evidence')
+    # Compare the shared production policy and every module, on identical inputs.
+    normalized=[]
+    for source in (plt,memory):
+        r=deepcopy(source);r['policies']={'plt_leaf':'plt-leaf-stack-dag-v7'}
+        r['totals']['profiles']={'plt_leaf':r['totals']['profiles']['plt_leaf']}
+        for m in r['modules']:m['profiles']={'plt_leaf':m['profiles']['plt_leaf']}
+        normalized.append(r)
+    comparison=compare_profiles(*normalized)
+    require(comparison['before']==comparison['after'], 'memory survey changed shared policy outcomes')
+    a,b=({m['name']:m for m in r['modules']} for r in normalized)
+    require(all(a[n]['profiles']==b[n]['profiles'] for n in a), 'memory survey changed per-module policy outcomes')
+    return {'source_text_hashes_match':True, 'shared_policy_outcomes_match':True,
+            'profiles':memory['totals']['profiles'],'clusters':memory['memory_clusters']}
 
 
 class MilestoneRun:
@@ -151,6 +172,7 @@ def execute(config, output, native_only=False):
         require(isinstance(config.get(key), list) and config[key] and len(set(config[key])) == len(config[key]), "missing/duplicate milestone checks")
     require(all(re.fullmatch(r"test_[a-z0-9_*]+\.py", p) for p in config["gcc_tests"]), "invalid GCC test pattern")
     require(all(re.fullmatch(r"[a-z][a-z0-9-]*", p) for p in config["factory_reports"]), "invalid factory report name")
+    require(type(config.get('memory_survey',False)) is bool and type(config.get('preserve_baseline_outcomes',False)) is bool, 'invalid milestone scope flags')
     native = build_destination(ROOT/config["native_build"])
     cache = (native/"CMakeCache.txt").read_text(encoding="utf-8")
     require("CMAKE_GENERATOR:INTERNAL=Visual Studio" in cache, "configure a Visual Studio native build first")
@@ -169,6 +191,7 @@ def execute(config, output, native_only=False):
     env = os.environ.copy(); env["PATH"] = str(Path(gcc).parent)+os.pathsep+env.get("PATH", "")
     stages = ["native-configure", "native-build", "msvc-suite", "gcc-common"] + ["gcc-tests-"+str(i) for i in range(len(config["gcc_tests"]))]
     stages += ["native-evidence"] + ([] if native_only else ["survey-default", "survey-plt", "callee-audit", "comparison"]) + ["summary"]
+    if not native_only and config.get('memory_survey'): stages.insert(stages.index('comparison'),'survey-memory')
     run = MilestoneRun(output, config["name"], stages)
     run.manifest["scope"] = "synthetic native only" if native_only else "synthetic native and static private game analysis"
     run.manifest["config"] = config; run.save()
@@ -192,13 +215,19 @@ def execute(config, output, native_only=False):
             def survey(scope):
                 argv = py+["tools/survey_function_profiles.py", prepared, "--report", run.output/(scope+".json")]
                 if scope == "plt": argv += ["--plt"]
+                if scope == "memory": argv += ["--memory"]
                 run.command("survey-"+scope, argv, env)
-            with ThreadPoolExecutor(max_workers=2) as pool: list(pool.map(survey, ("default", "plt")))
+            with ThreadPoolExecutor(max_workers=2) as pool: list(pool.map(survey, ("default", "plt", "memory") if config.get('memory_survey') else ("default", "plt")))
             run.command("callee-audit", py+["tools/survey_callees.py", prepared, "--baseline", run.output/"plt.json", "--report", run.output/"callees.json"], env)
             def compare():
                 comparisons = {scope: compare_profiles(read_json(ROOT/config["baseline_"+scope]), read_json(run.output/(scope+".json"))) for scope in ("default", "plt")}
                 audit = read_json(run.output/"callees.json"); compare_baseline(audit, read_json(run.output/"plt.json"))
                 for scope, comparison in comparisons.items():
+                    if config.get('preserve_baseline_outcomes'):
+                        require(comparison['before']==comparison['after'], 'existing policy baseline outcomes changed')
+                        before,after=(read_json(p) for p in (ROOT/config['baseline_'+scope],run.output/(scope+'.json')))
+                        a,b=({m['name']:m for m in r['modules']} for r in (before,after))
+                        require(all(a[n]['profiles']==b[n]['profiles'] for n in a), 'existing per-module policy baseline outcomes changed')
                     require(not any(comparison["after"]["first_unsupported_mnemonics"].get(m, 0) for m in config.get("cleared_mnemonics", [])), f"selected instruction frontier remains in {scope}")
                 require(not any(audit["totals"]["frontier_first_unsupported_mnemonics"].get(m, 0) for m in config.get("cleared_mnemonics", [])), "selected callee frontier remains")
                 (run.output/"comparison.json").write_text(json.dumps(comparisons, indent=2)+"\n", encoding="utf-8")
@@ -206,11 +235,21 @@ def execute(config, output, native_only=False):
                     "after": {k: v["accepted_regions"] for k, v in c["after"]["profiles"].items()},
                     "discovered_before": c["before"]["complete_regions"], "discovered_after": c["after"]["complete_regions"]} for s, c in comparisons.items()}
                 summary["remaining_integer_frontier"] = audit["totals"]["frontier_first_unsupported_categories"].get("integer", 0)
+                if config.get('memory_survey'):
+                    evidence=compare_memory(read_json(run.output/'plt.json'),read_json(run.output/'memory.json'))
+                    (run.output/'memory-comparison.json').write_text(json.dumps(evidence,indent=2)+'\n',encoding='utf-8')
+                    summary['memory_profiles']={k:v['accepted_regions'] for k,v in evidence['profiles'].items()}
+                    summary['memory_clusters']={k:v for k,v in evidence['clusters'].items() if k not in ('samples','remaining_callee_frontier')}
+                    summary['memory_callee_frontier']={k:v for k,v in evidence['clusters']['remaining_callee_frontier'].items() if k!='samples'}
             run.action("comparison", compare)
         def publish_summary():
             (run.output/"summary.json").write_text(json.dumps(summary, indent=2)+"\n", encoding="utf-8")
             lines = ["# Milestone validation", "", f"Milestone: {config['name']}", "", f"Python tests: {summary['python_tests']}; CTest groups: {summary['ctest_groups']}; native comparisons per compiler: {summary['native_trials_per_compiler']}."]
             for scope, row in summary.get("profiles", {}).items(): lines += ["", f"{scope}: {row['before']} -> {row['after']} (overlapping structural candidates)."]
+            if 'memory_profiles' in summary:
+                clusters, frontier = summary['memory_clusters'], summary['memory_callee_frontier']
+                lines += ['', f"Memory policies: {summary['memory_profiles']}; newly accepted roots: {clusters['newly_accepted_roots']}; distinct upgraded frame edges: {clusters['unique_frame_call_edges']}.",
+                    '', f"Remaining callee frontier: {frontier['dependency_blocked_roots']} blocked roots, {frontier['unique_missing_targets']} unique missing targets, {frontier['unique_caller_target_edges']} distinct caller/target edges. Root references overlap."]
             lines += ["", "All executed code is synthetic. Static game analysis grants no runtime capabilities. See run.json for final status and per-stage logs."]
             (run.output/"summary.md").write_text("\n".join(lines)+"\n", encoding="utf-8")
         run.action("summary", publish_summary); run.finish()

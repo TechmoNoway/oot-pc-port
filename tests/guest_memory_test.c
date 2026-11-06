@@ -20,6 +20,12 @@ int main(void)
     unsigned width;
 
     CHECK(oot_memory_init(&memory, adjacent, 2));
+    CHECK(oot_memory_probe(&memory, adjacent[0].base + 8, 16, OOT_MEMORY_WRITE));
+    CHECK(first[8] == 0 && second[0] == 0);
+    CHECK(!oot_memory_probe(&memory, adjacent[0].base, 0, OOT_MEMORY_WRITE));
+    CHECK(memory.fault.reason == OOT_MEMORY_CONFIGURATION);
+    CHECK(!oot_memory_probe(&memory, adjacent[0].base, 17, OOT_MEMORY_WRITE));
+    CHECK(!oot_memory_probe(&memory, adjacent[0].base, 8, 3));
     for (width = 1; width <= 8; width *= 2) {
         CHECK(oot_memory_store(&memory, adjacent[0].base + 1, width, UINT64_C(0xfedcba9876543210)));
         CHECK(oot_memory_load(&memory, adjacent[0].base + 1, width, &value));
@@ -36,6 +42,10 @@ int main(void)
     adjacent[1].permissions = OOT_MEMORY_READ;
     CHECK(oot_memory_init(&memory, adjacent, 2));
     memcpy(snapshot, first, sizeof(first));
+    CHECK(!oot_memory_probe(&memory, adjacent[0].base + 13, 8, OOT_MEMORY_WRITE));
+    CHECK(memory.fault.reason == OOT_MEMORY_PERMISSION && memory.fault.failing_address == adjacent[1].base);
+    CHECK(memcmp(snapshot, first, sizeof(first)) == 0 && second[0] == 0x40);
+    CHECK(oot_memory_probe(&memory, adjacent[0].base + 13, 8, OOT_MEMORY_READ));
     CHECK(!oot_memory_store(&memory, adjacent[0].base + 13, 8, 0));
     CHECK(memory.fault.reason == OOT_MEMORY_PERMISSION && memory.fault.access == OOT_MEMORY_WRITE);
     CHECK(memory.fault.address == adjacent[0].base + 13 && memory.fault.failing_address == adjacent[1].base);
@@ -57,6 +67,8 @@ int main(void)
     CHECK(memory.fault.reason == OOT_MEMORY_PERMISSION && memory.fault.access == OOT_MEMORY_READ);
     CHECK(oot_memory_store(&memory, adjacent[1].base, 1, 0xaa));
     CHECK(memory.fault.reason == OOT_MEMORY_OK);
+    CHECK(oot_memory_probe(&memory, adjacent[1].base, 8, OOT_MEMORY_WRITE));
+    CHECK(!oot_memory_probe(&memory, adjacent[1].base, 8, OOT_MEMORY_READ));
     CHECK(second[0] == 0xaa);
 
     /* A region may contain UINT64_MAX; an access may not wrap to address zero. */
@@ -64,6 +76,8 @@ int main(void)
     CHECK(oot_memory_store(&memory, UINT64_MAX, 1, 0x80));
     CHECK(oot_memory_load(&memory, UINT64_MAX, 1, &value) && value == 0x80);
     memcpy(snapshot, first, sizeof(first));
+    CHECK(!oot_memory_probe(&memory, UINT64_MAX - 3, 8, OOT_MEMORY_WRITE));
+    CHECK(memory.fault.reason == OOT_MEMORY_ADDRESS_WRAP && memcmp(snapshot, first, sizeof(first)) == 0);
     CHECK(!oot_memory_store(&memory, UINT64_MAX - 3, 8, 0));
     CHECK(memory.fault.reason == OOT_MEMORY_ADDRESS_WRAP);
     CHECK(memcmp(snapshot, first, sizeof(first)) == 0);

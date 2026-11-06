@@ -23,6 +23,7 @@ from stack_layout_verifier import (emit_layout_stack_descriptor, verify_layout_s
                                    emit_read_stack_descriptor, verify_read_stack_functions,
                                    emit_call_stack_descriptor, verify_call_stack_functions,
                                    emit_plt_stack_descriptor, verify_plt_stack_functions)
+from stack_layout_verifier import verify_memory_stack_functions, emit_memory_stack_descriptor
 from arm64_analysis import plt_stubs, NONLOCAL
 from plt_verifier import verify_plt_stub, emit_plt_descriptor
 from pauth_lifter import emit_pauth_c, MODEL
@@ -53,9 +54,9 @@ def emit_factory(names, body_hash, returns, root_name=None):
     return "\n".join(lines + ["}", ""])
 
 
-def emit_stack_factory(frame_names, leaf_names, root, body_hash, returns, cfg=False, layout=False, pauth=False, reads=False, read_ranges=(), lr_calls=False, plt_names=()):
+def emit_stack_factory(frame_names, leaf_names, root, body_hash, returns, cfg=False, layout=False, pauth=False, reads=False, read_ranges=(), lr_calls=False, plt_names=(), writes=False, write_ranges=()):
     plt = bool(plt_names)
-    lr_calls = lr_calls or plt
+    lr_calls = lr_calls or plt or writes
     reads = reads or lr_calls
     pauth = pauth or reads
     names = frame_names + leaf_names + list(plt_names)
@@ -67,17 +68,23 @@ def emit_stack_factory(frame_names, leaf_names, root, body_hash, returns, cfg=Fa
     digest = bytes.fromhex(body_hash)
     require(len(digest) == 32, "invalid image SHA-256")
     descriptor = "OotStackCallFunction" if lr_calls else "OotStackReadFunction" if reads else "OotStackPauthFunction" if pauth else "OotStackLayoutFunction" if layout else "OotStackCfgFunction" if cfg else "OotStackFunction"
-    prefix = "plt_" if plt else "call_" if lr_calls else "read_" if reads else "pauth_" if pauth else "layout_" if layout else "cfg_" if cfg else ""
-    constructor = "_plt" if plt else "_calls" if lr_calls else "_reads" if reads else "_pauth" if pauth else "_layout" if layout else "_cfg" if cfg else ""
+    prefix = "memory_" if writes else "plt_" if plt else "call_" if lr_calls else "read_" if reads else "pauth_" if pauth else "layout_" if layout else "cfg_" if cfg else ""
+    constructor = "_memory" if writes else "_plt" if plt else "_calls" if lr_calls else "_reads" if reads else "_pauth" if pauth else "_layout" if layout else "_cfg" if cfg else ""
     lines = ['#include "stack_dispatch.h"',
         f'OOT_LIFT_EXPORT OotStackDispatcher *oot_create_bound_registry(OotRuntimeImage *image, {"OotPauth *pauth, " if pauth else ""}uint32_t *error)',
         '{', '    static const uint8_t body_hash[32] = {' + ', '.join(f'0x{b:02x}' for b in digest) + '};',
         '    static const uint64_t returns[] = {' + ', '.join(f'UINT64_C(0x{pc:x})' for pc in returns) + '};',
         f'    {descriptor} frames[{len(frame_names)}];']
     if reads:
-        require(0 < len(read_ranges) <= 128 and all(type(b) is int and type(s) is int and 0 <= b < 1 << 39 and 0 < s <= (1 << 39)-b for b,s in read_ranges) and
+        require((0 if writes else 1) <= len(read_ranges) <= 128 and all(type(b) is int and type(s) is int and 0 <= b < 1 << 39 and 0 < s <= (1 << 39)-b for b,s in read_ranges) and
                 all(a[0]+a[1] <= b[0] for a,b in zip(read_ranges,read_ranges[1:])), "invalid compiled read ranges")
-        lines += ['    static const OotReadRange ranges[] = {' + ', '.join(f'{{UINT64_C(0x{b:x}),UINT64_C(0x{s:x})}}' for b,s in read_ranges) + '};']
+        if read_ranges: lines += ['    static const OotReadRange ranges[] = {' + ', '.join(f'{{UINT64_C(0x{b:x}),UINT64_C(0x{s:x})}}' for b,s in read_ranges) + '};']
+    require(writes or not write_ranges, 'write grants require memory policy')
+    if writes:
+        require(len(write_ranges) <= 128 and all(type(b) is int and type(z) is int and 0 <= b < 1 << 39 and 0 < z <= (1 << 39)-b for b,z in write_ranges) and
+                all(a[0]+a[1] <= b[0] for a,b in zip(write_ranges,write_ranges[1:])), 'invalid compiled write ranges')
+        if write_ranges:
+            lines += ['    static const OotReadRange writes[] = {' + ', '.join(f'{{UINT64_C(0x{b:x}),UINT64_C(0x{z:x})}}' for b,z in write_ranges) + '};']
     if leaf_names:
         lines += [f'    OotLeafFunction leaves[{len(leaf_names)}];', f'    OotCodeHash hashes[{len(leaf_names)}];']
     if plt:
@@ -90,21 +97,22 @@ def emit_stack_factory(frame_names, leaf_names, root, body_hash, returns, cfg=Fa
         lines += [f'    leaves[{i}] = *oot_leaf_descriptor_{name}();', f'    hashes[{i}] = *oot_leaf_code_hash_{name}();']
     lines += [f'    return oot_stack_create{constructor}(image, frames, {len(frame_names)}, UINT64_C(0x{root:x}),',
         f'        {"leaves" if leaf_names else "NULL"}, {len(leaf_names)}, {"hashes" if leaf_names else "NULL"},',
-        f'        body_hash, returns, {len(returns)}, {"pauth, " if pauth else ""}{"ranges, " + str(len(read_ranges)) + ", " if reads else ""}{"plts, " + str(len(plt_names)) + ", " if plt else ""}error);', '}', '']
+        f'        body_hash, returns, {len(returns)}, {"pauth, " if pauth else ""}{("ranges, " if read_ranges else "NULL, ") + str(len(read_ranges)) + ", " if reads else ""}{"plts, " + str(len(plt_names)) + ", " if plt else "NULL, 0, " if writes else ""}{("writes, " if write_ranges else "NULL, ") + str(len(write_ranges)) + ", " if writes else ""}error);', '}', '']
     return '\n'.join(lines)
 
 
 def build_bundle(linker, config):
     require(isinstance(config, dict) and type(config.get("schema_version")) is int and
-            config["schema_version"] in (1, 2, 3, 4, 5, 6, 7, 8), "unsupported registry config")
-    plt_profile = config['schema_version']==8
-    call_profile = config["schema_version"] in (7,8)
-    read_profile = config["schema_version"] in (6,7,8)
-    pauth_profile = config["schema_version"] in (5,6,7,8)
+            config["schema_version"] in (1, 2, 3, 4, 5, 6, 7, 8, 9), "unsupported registry config")
+    write_profile = config['schema_version'] == 9
+    plt_profile = config['schema_version'] == 8 or write_profile and bool(config.get('plts'))
+    call_profile = config["schema_version"] in (7,8,9)
+    read_profile = config["schema_version"] in (6,7,8,9)
+    pauth_profile = config["schema_version"] in (5,6,7,8,9)
     require(not pauth_profile or config.get("pauth_model") == MODEL, "PAC schema requires explicit PAC model")
-    stack_profile = config["schema_version"] in (2, 3, 4, 5, 6, 7, 8)
-    cfg_profile = config["schema_version"] in (3, 4, 5, 6, 7, 8)
-    layout_profile = config["schema_version"] in (4, 5, 6, 7, 8)
+    stack_profile = config["schema_version"] in (2, 3, 4, 5, 6, 7, 8, 9)
+    cfg_profile = config["schema_version"] in (3, 4, 5, 6, 7, 8, 9)
+    layout_profile = config["schema_version"] in (4, 5, 6, 7, 8, 9)
     records = config.get("leaves")
     require(isinstance(records, list) and (0 if stack_profile else 1) <= len(records) <= 256,
             "invalid explicit leaf selection count")
@@ -166,7 +174,7 @@ def build_bundle(linker, config):
     read_records = []
     if read_profile:
         requested = config.get("read_ranges")
-        require(isinstance(requested,list) and 0 < len(requested) <= 128,"read schema requires explicit read ranges")
+        require(isinstance(requested,list) and (0 if write_profile else 1) <= len(requested) <= 128,"read schema requires explicit read ranges")
         for r in requested:
             require(isinstance(r,dict),"invalid read range")
             name,offset,size = r.get("module"),r.get("offset"),r.get("size")
@@ -178,6 +186,22 @@ def build_bundle(linker, config):
             read_records.append({"module":name,"offset":offset,"size":size,"base":base})
         read_records.sort(key=lambda r:r["base"])
         require(all(a["base"]+a["size"] <= b["base"] for a,b in zip(read_records,read_records[1:])),"read ranges overlap")
+    write_records = []
+    require(write_profile or not config.get('write_ranges'), 'write ranges require schema 9')
+    if write_profile:
+        requested = config.get('write_ranges')
+        require(isinstance(requested,list) and len(requested) <= 128, 'schema 9 requires explicit write ranges (may be empty)')
+        for r in requested:
+            require(isinstance(r,dict), 'invalid write range')
+            name,offset,size = r.get('module'),r.get('offset'),r.get('size')
+            require(isinstance(name,str) and name in modules and type(offset) is int and offset >= 0 and type(size) is int and size > 0, 'invalid write range selection')
+            base = modules[name].base + offset
+            require(any(row['owner']==name and row['kind']!='stack' and 'w' in row['permissions'] and
+                base >= row['base'] and base-row['base'] < row['size'] and size <= row['size']-(base-row['base'])
+                for row in image_report['regions']), 'write range must stay inside one retained writable image region')
+            write_records.append(dict(module=name,offset=offset,size=size,base=base))
+        write_records.sort(key=lambda r:r['base'])
+        require(all(a['base']+a['size'] <= b['base'] for a,b in zip(write_records,write_records[1:])), 'write ranges overlap')
     chunks = []
     for leaf in leaves:
         leaf["verification"] = verify_leaf(leaf["data"], leaf["entry"])
@@ -185,14 +209,14 @@ def build_bundle(linker, config):
         chunks += [emit_c(leaf["data"], leaf["entry"], function)[0], emit_leaf_descriptor(leaf["data"], leaf["entry"], function)]
     if stack_profile:
         verifier = verify_call_stack_functions if call_profile else verify_read_stack_functions if read_profile else verify_pauth_stack_functions if pauth_profile else verify_layout_stack_functions if layout_profile else verify_cfg_stack_functions if cfg_profile else verify_stack_functions
-        emitter = emit_plt_stack_descriptor if plt_profile else emit_call_stack_descriptor if call_profile else emit_read_stack_descriptor if read_profile else emit_pauth_stack_descriptor if pauth_profile else emit_layout_stack_descriptor if layout_profile else emit_cfg_stack_descriptor if cfg_profile else emit_stack_descriptor
+        emitter = emit_memory_stack_descriptor if write_profile else emit_plt_stack_descriptor if plt_profile else emit_call_stack_descriptor if call_profile else emit_read_stack_descriptor if read_profile else emit_pauth_stack_descriptor if pauth_profile else emit_layout_stack_descriptor if layout_profile else emit_cfg_stack_descriptor if cfg_profile else emit_stack_descriptor
         frame_codes={f['entry']:f['data'] for f in frames};leaf_codes={f['entry']:f['data'] for f in leaves}
         if plt_profile:
             for p in plts:
                 p['verification']=verify_plt_stub(p['data'],p['entry'],p['slot'],p['target'],leaf_codes,p['symbol'])
                 chunks += [emit_c(p['data'],p['entry'],'oot_lift_'+p['name'])[0],emit_plt_descriptor(p['verification'],'oot_lift_'+p['name'])]
-            proofs=verify_plt_stack_functions(frame_codes,leaf_codes,root['entry'],{p['entry']:p for p in plts})
-        else:proofs = verifier(frame_codes,leaf_codes,root["entry"])
+            proofs=(verify_memory_stack_functions if write_profile else verify_plt_stack_functions)(frame_codes,leaf_codes,root['entry'],{p['entry']:p for p in plts})
+        else:proofs = (verify_memory_stack_functions if write_profile else verifier)(frame_codes,leaf_codes,root["entry"])
         for frame in frames:
             frame["verification"] = proofs[frame["entry"]]
             function = ("oot_pauth_lift_" if pauth_profile else "oot_lift_") + frame["name"]
@@ -201,7 +225,7 @@ def build_bundle(linker, config):
         chunks += [emit_stack_factory([f["name"] for f in frames], [f["name"] for f in leaves],
             root["entry"], image_report["body_sha256"], returns, cfg=cfg_profile, layout=layout_profile, pauth=pauth_profile,
             reads=read_profile,read_ranges=[(r["base"],r["size"]) for r in read_records],lr_calls=call_profile,
-            plt_names=[p['name'] for p in plts])]
+            plt_names=[p['name'] for p in plts],writes=write_profile,write_ranges=[(r['base'],r['size']) for r in write_records])]
     elif root:
         callees = {leaf["entry"]: leaf["data"] for leaf in leaves}
         root["verification"] = verify_frame(root["data"], root["entry"], callees)
@@ -211,7 +235,7 @@ def build_bundle(linker, config):
         chunks += [emit_factory([r["name"] for r in leaves], image_report["body_sha256"], returns, root["name"] if root else None)]
     source = "\n".join(chunks)
     manifest = {"schema_version": config["schema_version"], "format": "bound-native-registry", "guest_code_executed": False,
-                "factory": "oot_create_bound_registry", "profile": "plt-leaf-stack-dag" if plt_profile else "lr-pair-read-stack-dag" if call_profile else "checked-read-pauth-stack-dag" if read_profile else "pauth-stack-dag" if pauth_profile else "layout-stack-dag" if layout_profile else "cfg-stack-dag" if cfg_profile else "stack-dag" if stack_profile else "frame" if root else "leaf",
+                "factory": "oot_create_bound_registry", "profile": "checked-memory-stack-dag" if write_profile else "plt-leaf-stack-dag" if plt_profile else "lr-pair-read-stack-dag" if call_profile else "checked-read-pauth-stack-dag" if read_profile else "pauth-stack-dag" if pauth_profile else "layout-stack-dag" if layout_profile else "cfg-stack-dag" if cfg_profile else "stack-dag" if stack_profile else "frame" if root else "leaf",
                 "registry_source_sha256": hashlib.sha256(source.encode()).hexdigest(), "return_sites": returns,
                 "image": image_report,
                 "leaves": [{k: v for k, v in r.items() if k != "data"} for r in leaves],
@@ -222,6 +246,7 @@ def build_bundle(linker, config):
         manifest.update(pauth_model=MODEL, pauth_abi_version=1, keys_embedded=False)
     if read_profile:
         manifest.update(read_ranges=read_records,read_addresses_checked_at_runtime=True)
+    if write_profile:manifest.update(write_ranges=write_records,write_addresses_checked_at_runtime=True)
     if plt_profile:manifest.update(plts=[{k:v for k,v in p.items() if k!='data'} for p in plts],runtime_got_targets_checked=True)
     return package, source, manifest
 

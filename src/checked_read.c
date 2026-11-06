@@ -1,6 +1,6 @@
 #include "checked_read.h"
 
-int oot_read_decode(uint32_t word, uint64_t pc, const OotArm64State *s, OotReadEffect *e)
+static int decode(uint32_t word, uint64_t pc, const OotArm64State *s, OotReadEffect *e, int store)
 {
     unsigned rn = (word >> 5) & 31, size = word >> 30, opc = (word >> 22) & 3;
     uint64_t offset = 0;
@@ -9,23 +9,24 @@ int oot_read_decode(uint32_t word, uint64_t pc, const OotArm64State *s, OotReadE
     e->sp_base = rn == 31; e->frame_base = rn == 31 || rn == 29;
     e->address = oot_arm64_read(s,rn,64,1);
     if ((word & UINT32_C(0x3ffffc00)) == UINT32_C(0x38bfc000)) {
+        if (store) return 0;
         e->element = 1u << size; e->width = size == 3 ? 64 : 32; e->rcpc = 1;
     } else if ((word & UINT32_C(0x3f000000)) == UINT32_C(0x18000000)) {
         unsigned literal = word >> 30;
-        if (literal == 3) return 0;
+        if (store || literal == 3) return 0;
         e->element = literal == 1 ? 8 : 4; e->width = literal ? 64 : 32;
         e->sign_extend = literal == 2; e->sp_base = e->frame_base = 0;
         e->address = pc + (oot_arm64_sign_extend((word >> 5) & 0x7ffff,19) << 2);
     } else if ((word & UINT32_C(0x3e000000)) == UINT32_C(0x28000000)) {
         unsigned kind = word >> 30;
-        if (((word >> 23) & 3) != 2 || !(word & (1u << 22)) || kind == 3) return 0;
+        if (((word >> 23) & 3) != 2 || !!(word & (1u << 22)) == store || kind == 3 || (store && kind == 1)) return 0;
         e->pair = 1; e->rt2 = (word >> 10) & 31;
-        if (e->rd == e->rt2) return 0;
+        if (!store && e->rd == e->rt2) return 0;
         e->element = kind == 2 ? 8 : 4; e->width = kind ? 64 : 32; e->sign_extend = kind == 1;
         offset = oot_arm64_sign_extend((word >> 15) & 127,7) * e->element;
     } else if ((word & UINT32_C(0x3f000000)) == UINT32_C(0x39000000) ||
                (word & UINT32_C(0x3f000000)) == UINT32_C(0x38000000)) {
-        if (!opc || (size == 3 && opc >= 2) || (size == 2 && opc == 3)) return 0;
+        if (store ? opc != 0 : (!opc || (size == 3 && opc >= 2) || (size == 2 && opc == 3))) return 0;
         e->element = 1u << size; e->width = size == 3 || opc == 2 ? 64 : 32; e->sign_extend = opc >= 2;
         if (word & (1u << 24)) offset = (uint64_t)((word >> 10) & 4095) << size;
         else if (word & (1u << 21)) {
@@ -40,6 +41,35 @@ int oot_read_decode(uint32_t word, uint64_t pc, const OotArm64State *s, OotReadE
     e->address += offset;
     e->size = e->element * (e->pair ? 2u : 1u);
     return 1;
+}
+
+int oot_read_decode(uint32_t word, uint64_t pc, const OotArm64State *s, OotReadEffect *e)
+{
+    return decode(word,pc,s,e,0);
+}
+
+int oot_write_decode(uint32_t word, uint64_t pc, const OotArm64State *s, OotReadEffect *e)
+{
+    return decode(word,pc,s,e,1);
+}
+
+void oot_write_expected(const OotReadEffect *e, const OotArm64State *s, uint8_t bytes[16], OotArm64State *expected)
+{
+    uint64_t first = oot_arm64_read(s,e->rd,64,0), second = oot_arm64_read(s,e->rt2,64,0);
+    unsigned i;
+    for (i = 0; i < e->element; ++i) {
+        bytes[i] = (uint8_t)(first >> (i*8));
+        if (e->pair) bytes[e->element+i] = (uint8_t)(second >> (i*8));
+    }
+    *expected = *s;
+    expected->pc += 4;
+}
+
+int oot_write_commit(OotGuestMemory *memory, const OotReadEffect *e, const OotArm64State *s)
+{
+    uint64_t first = oot_arm64_read(s,e->rd,64,0), second = oot_arm64_read(s,e->rt2,64,0);
+    return e->pair ? oot_memory_store_pair(memory,e->address,e->element,first,second) :
+        oot_memory_store(memory,e->address,e->element,first);
 }
 
 int oot_read_capture(OotGuestMemory *memory, const OotReadEffect *e, uint8_t bytes[16], OotArm64State *expected)

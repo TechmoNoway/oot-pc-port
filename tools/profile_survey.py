@@ -5,7 +5,7 @@ from dataclasses import dataclass
 import hashlib
 import struct
 
-from arm64_analysis import unwind_entries
+from arm64_analysis import unwind_entries, plt_stubs
 from arm64_decode import Decoder, family, flow_kind
 from arm64_lifter import UnsupportedInstruction, decode_instruction
 from frame_verifier import verify_frame
@@ -14,6 +14,7 @@ from leaf_verifier import verify_leaf
 from stack_cfg_verifier import verify_cfg_stack_functions
 from stack_layout_verifier import verify_layout_stack_functions
 from stack_layout_verifier import verify_pauth_stack_functions, verify_read_stack_functions, verify_call_stack_functions, verify_plt_stack_functions
+from stack_layout_verifier import verify_memory_stack_functions
 from plt_verifier import eligible_plts
 from pauth_lifter import decode_pauth_instruction, MODEL
 from stack_verifier import verify_stack_functions
@@ -149,7 +150,7 @@ def rejection(error):
 def proof_summary(proof):
     keys = ("policy", "instruction_count", "max_retired_instructions", "max_depth", "max_stack_bytes",
             "frame_size", "stack_bytes", "layout", "record_offset", "saved_registers", "source_sha256",
-            "checked_read_count", "runtime_read_preconditions")
+            "checked_read_count", "runtime_read_preconditions", "checked_write_count", "runtime_write_preconditions")
     return {k: proof[k] for k in keys if k in proof}
 
 
@@ -158,7 +159,7 @@ def check_profile(profile, region, regions, leaf_codes, plts=None):
     leaves = {pc: leaf_codes[pc] for pc in region.calls if pc in leaf_codes}
     selected_plts={}
     def add_plt(target):
-        if profile=='plt_leaf' and plts is not None and target in plts:
+        if profile in ('plt_leaf','checked_memory') and plts is not None and target in plts:
             selected_plts[target]=plts[target]
             leaves[plts[target]['target']]=leaf_codes[plts[target]['target']]
             return True
@@ -168,7 +169,8 @@ def check_profile(profile, region, regions, leaf_codes, plts=None):
     verifier = {"linear_stack": verify_stack_functions, "cfg_stack": verify_cfg_stack_functions,
                 "fixed_layout": verify_layout_stack_functions, "pauth_stack": verify_pauth_stack_functions,
                 "checked_reads": verify_read_stack_functions, "lr_calls": verify_call_stack_functions,
-                "plt_leaf":lambda f,l,r:verify_plt_stack_functions(f,l,r,selected_plts)}[profile]
+                "plt_leaf":lambda f,l,r:verify_plt_stack_functions(f,l,r,selected_plts),
+                "checked_memory":lambda f,l,r:verify_memory_stack_functions(f,l,r,selected_plts)}[profile]
     # Most roots fail their own policy. Run the real root-only verifier first,
     # with actual verified leaf bytes; no fabricated callee bodies are supplied.
     try: return verifier({region.entry: region.data}, leaves, region.entry)[region.entry], 1, len(leaves)
@@ -192,18 +194,100 @@ def check_profile(profile, region, regions, leaf_codes, plts=None):
     return proof, len(frames), len(leaves)
 
 
-def survey_modules(modules, sample_limit=16, max_words=256, progress=None, pauth=False, reads=False, lr_calls=False, plt=False):
+def memory_clusters(regions, leaves, bridges, outcomes, sample_limit, failures, stubs):
+    """Count real upgraded closures, without treating overlapping roots as functions."""
+    old, new = outcomes['plt_leaf'], outcomes['checked_memory']
+    upgraded = {e for e in regions if new[e][0] and not old[e][0]}
+    unique, edges, reasons = set(), set(), Counter()
+    samples = []
+    for root in sorted(upgraded):
+        reasons[old[root][1]] += 1
+        pending, seen = [root], set()
+        while pending:
+            e = pending.pop()
+            if e in seen: continue
+            seen.add(e)
+            for t in regions[e].calls:
+                if t in leaves or t in bridges: continue
+                require(t in regions, 'accepted memory closure contains unknown callee')
+                edges.add((e,t));pending.append(t)
+        unique.update(seen)
+        if len(samples) < sample_limit:
+            samples.append(dict(entry=root, module=regions[root].module.name, frame_entries=sorted(seen),
+                prior_reason=old[root][1], prior_detail=old[root][2], verification=new[root][0]))
+    adjacency = {e:set() for e in unique}
+    for a,b in edges: adjacency[a].add(b);adjacency[b].add(a)
+    remaining, sizes = set(unique), Counter()
+    while remaining:
+        pending=[remaining.pop()];size=0
+        while pending:
+            e=pending.pop();size+=1
+            for t in adjacency[e] & remaining: remaining.remove(t);pending.append(t)
+        sizes[str(size)] += 1
+    transitions = Counter()
+    frontier_callers, frontier_roots = defaultdict(set), defaultdict(set)
+    for root in regions:
+        if old[root][1] == 'memory_policy':
+            transitions['accepted' if new[root][0] else new[root][1]] += 1
+        if new[root][1] != 'call_dependency': continue
+        pending, seen, missing = [root], set(), set()
+        while pending:
+            e = pending.pop()
+            if e in seen: continue
+            seen.add(e)
+            require(len(seen) <= 32, 'memory audit closure exceeds production limit')
+            for t in regions[e].calls:
+                if t in leaves or t in bridges: continue
+                if t in regions: pending.append(t)
+                else: missing.add(t);frontier_callers[t].add(e)
+        require(missing, 'production dependency failure has no missing target')
+        for t in missing: frontier_roots[t].add(root)
+    kinds, stops, unsupported, plt_targets = Counter(), Counter(), Counter(), Counter()
+    frontier_samples = []
+    for t in sorted(frontier_roots, key=lambda e:(-len(frontier_roots[e]),e)):
+        failure = failures.get(t)
+        kind = 'plt_stub' if t in stubs else 'discovery_blocked_metadata' if failure else 'unregistered_target'
+        kinds[kind] += 1
+        snapshot = None
+        if t in stubs:
+            target = int(stubs[t]['resolved_address'],16)
+            target_kind = 'verified_register_leaf' if target in leaves else 'discovered_region' if target in regions else 'discovery_blocked_metadata' if target in failures else 'unregistered_target'
+            plt_targets[target_kind] += 1
+            snapshot = dict(target=target,kind=target_kind,discovery_failure=failures.get(target),runtime_got_binding_checked=False)
+        if failure:
+            stops[failure['reason']] += 1
+            if 'mnemonic' in failure: unsupported[failure['mnemonic']] += 1
+        if len(frontier_samples) < sample_limit:
+            frontier_samples.append(dict(target=t,kind=kind,discovery_failure=failure,plt_snapshot=snapshot,
+                caller_region_count=len(frontier_callers[t]),blocked_root_references=len(frontier_roots[t]),
+                callable_proof=False))
+    return dict(newly_accepted_roots=len(upgraded), prior_reasons=dict(reasons),
+        former_memory_rejection_transitions=dict(transitions),
+        remaining_callee_frontier=dict(dependency_blocked_roots=sum(v[1]=='call_dependency' for v in new.values()),
+            unique_missing_targets=len(frontier_roots), unique_caller_target_edges=sum(map(len,frontier_callers.values())),
+            target_kinds=dict(kinds), plt_snapshot_target_kinds=dict(plt_targets), discovery_stops=dict(stops), first_unsupported_mnemonics=dict(unsupported.most_common()),
+            samples=frontier_samples,samples_truncated=len(frontier_roots)>len(frontier_samples),
+            root_references_overlap=True,diagnostic_only=True),
+        unique_frames_in_upgraded_closures=len(unique), unique_frame_call_edges=len(edges),
+        connected_component_sizes=dict(sizes), samples=samples, samples_truncated=len(upgraded)>len(samples),
+        counts_overlap_across_roots=True, runtime_capabilities_granted=False)
+
+
+def survey_modules(modules, sample_limit=16, max_words=256, progress=None, pauth=False, reads=False, lr_calls=False, plt=False, memory=False):
     require(type(sample_limit) is int and 0 <= sample_limit <= 4096, "survey sample limit must be 0-4096")
     require(type(max_words) is int and 1 <= max_words <= 256, "survey word limit must be 1-256")
     require(type(pauth) is bool, "PAC survey opt-in must be boolean")
     require(type(reads) is bool,"read survey opt-in must be boolean")
     require(type(lr_calls) is bool,"LR call survey opt-in must be boolean")
     require(type(plt) is bool,'PLT survey opt-in must be boolean')
+    require(type(memory) is bool, "memory survey opt-in must be boolean")
+    plt = plt or memory
     lr_calls = lr_calls or plt
     reads = reads or lr_calls
     pauth = pauth or reads
-    profiles = ('lr_calls','plt_leaf') if plt else ("checked_reads","lr_calls") if lr_calls else ("pauth_stack","checked_reads") if reads else ("pauth_stack",) if pauth else PROFILES
+    profiles = ('plt_leaf','checked_memory') if memory else ('lr_calls','plt_leaf') if plt else ("checked_reads","lr_calls") if lr_calls else ("pauth_stack","checked_reads") if reads else ("pauth_stack",) if pauth else PROFILES
     syntax, regions, reports, module_reports = Syntax(), {}, [], {}
+    memory_failures = {}
     for module in modules:
         windows = list(metadata_windows(module, max_words))
         require(len(windows) <= 2000000, "excessive survey metadata entries")
@@ -216,6 +300,9 @@ def survey_modules(modules, sample_limit=16, max_words=256, progress=None, pauth
             if prefix["allocation_bytes"] is not None: frame_sizes[str(prefix["allocation_bytes"])] += 1
             region, failure = discover(module, offset, end, sources, syntax, pauth)
             if failure:
+                if memory:
+                    memory_failures[module.base+offset] = dict(failure, module=module.name, entry_offset=offset,
+                        window_bytes=end-offset, metadata_sources=sources, limiting_evidence=limits)
                 counts[failure["reason"]] += 1
                 if "mnemonic" in failure: mnemonics[failure["mnemonic"]] += 1; categories[failure["category"]] += 1
                 if len(samples) < sample_limit: samples.append({"entry_offset": offset, "metadata_sources": sources, "window_bytes": end - offset,
@@ -239,7 +326,10 @@ def survey_modules(modules, sample_limit=16, max_words=256, progress=None, pauth
             leaf_codes[entry] = region.data
             outcomes["register_leaf"][entry] = (proof_summary(proof), None, None)
     bridges=eligible_plts(modules,leaf_codes) if plt else {}
+    memory_stubs={m.base+off:p for m in modules for off,p in plt_stubs(m).items()} if memory else {}
+    memory_outcomes = {}
     for name in profiles:
+        memory_outcomes[name] = {}
         by_module = {m.name: {"accepted_regions": 0, "accepted_instruction_words": 0, "rejected": Counter(), "details": Counter(),
             "accepted_samples": [], "rejected_samples": []} for m in modules}
         for index, (entry, region) in enumerate(regions.items()):
@@ -250,6 +340,7 @@ def survey_modules(modules, sample_limit=16, max_words=256, progress=None, pauth
                     verified, closure_frames, closure_leaves = check_profile(name, region, regions, leaf_codes,bridges)
                     proof = proof_summary(verified)
                 except ValueError as error: category, detail = rejection(error)
+            if memory: memory_outcomes[name][entry] = (proof, category, detail)
             row = by_module[region.module.name]
             if proof:
                 row["accepted_regions"] += 1; row["accepted_instruction_words"] += proof["instruction_count"]
@@ -294,10 +385,12 @@ def survey_modules(modules, sample_limit=16, max_words=256, progress=None, pauth
     return {"schema_version": 1, "format": "arm64-function-profile-survey", "guest_code_executed": False,
         "translation_performed": False, "native_callbacks_registered": False, "function_identity_proven": False,
         "coverage_is_complete": False, "decoder": syntax.metadata,
-        "policies": {'lr_calls':'lr-pair-read-stack-dag-v6','plt_leaf':'plt-leaf-stack-dag-v7'} if plt else {"checked_reads":"checked-read-pauth-stack-dag-v5","lr_calls":"lr-pair-read-stack-dag-v6"} if lr_calls else {"pauth_stack":"pauth-layout-stack-dag-v4","checked_reads":"checked-read-pauth-stack-dag-v5"} if reads else {"pauth_stack": "pauth-layout-stack-dag-v4"} if pauth else dict(zip(PROFILES, POLICIES)),
+        "policies": {"plt_leaf":"plt-leaf-stack-dag-v7", "checked_memory":"checked-memory-stack-dag-v8"} if memory else {'lr_calls':'lr-pair-read-stack-dag-v6','plt_leaf':'plt-leaf-stack-dag-v7'} if plt else {"checked_reads":"checked-read-pauth-stack-dag-v5","lr_calls":"lr-pair-read-stack-dag-v6"} if lr_calls else {"pauth_stack":"pauth-layout-stack-dag-v4","checked_reads":"checked-read-pauth-stack-dag-v5"} if reads else {"pauth_stack": "pauth-layout-stack-dag-v4"} if pauth else dict(zip(PROFILES, POLICIES)),
         'eligible_plt_leaf_bridges':len(bridges),'runtime_got_targets_checked':False,
         "pauth_model": MODEL if pauth else None,
         "runtime_read_ranges_supplied": False,
+        "runtime_write_ranges_supplied": False,
+        "memory_clusters": memory_clusters(regions, leaf_codes, bridges, memory_outcomes, sample_limit, memory_failures, memory_stubs) if memory else None,
         "read_survey_scope": "structural proof only; dynamic addresses/ranges/ownership/alignment checked by runtime; no read capabilities granted" if reads else None,
         "method": {"seeds": ["module_entry", "unwind_table", "defined_function_symbol"], "max_words": max_words,
             "region_boundary": "minimum of next metadata entry, symbol size, exact text end, word limit",

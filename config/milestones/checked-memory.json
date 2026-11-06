@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "name": "checked-memory",
+  "native_build": "build/cmake",
+  "prepared": "build/prepared/oot111",
+  "baseline_default": "build/milestones/integer-frontier-v1/default.json",
+  "baseline_plt": "build/milestones/integer-frontier-v1/plt.json",
+  "gcc_tests": [
+    "test_checked_memory.py"
+  ],
+  "factory_reports": [
+    "checked-memory",
+    "checked-memory-factory"
+  ],
+  "memory_survey": true,
+  "preserve_baseline_outcomes": true
+}

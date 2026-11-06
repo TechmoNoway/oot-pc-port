@@ -34,6 +34,8 @@ The [native image bridge](runtime-images.md) can now own these regions and their
 
 ## Validation
 
+The separate [checked-memory policy 8/schema 9](checked-memory.md) adds write-only operand staging and independent retained-image write capabilities while preserving every preceding profile. `oot_memory_probe` provides a serialized, nonmutating 1-16-byte permission preflight for exactly one read or write access kind. It clears/sets the view's fault record, leaves backing bytes unchanged and is not a reservation; actual commit validates again. Dispatcher writes compare the complete expected state and operand before the real whole scalar/pair commit. Saved slots and all ancestor stack bytes remain excluded.
+
 The CTest `guest_memory_self_test` validates the backend independently of instruction decoding: widths, byte order, unaligned access, adjacent allocations, permissions, gaps, address limits, invalid tables, and failure without mutation. It runs in Release builds with explicit checks, rather than disabled C assertions.
 
 The [lifter validation suite](arm64-lifter.md) compiles synthetic ARM64-to-C output using MSVC or GCC and compares all integer state and every byte of every mapped data region with Unicorn ARM64. It also compares selected access faults, verifies that failed loads preserve their old destination, checks writeback/PC/retirement, and exercises resuming after a missing page is mapped. Generated source, binaries, and reports stay under `build/`.

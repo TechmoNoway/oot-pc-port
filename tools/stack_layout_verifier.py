@@ -14,6 +14,7 @@ from pauth_lifter import decode_pauth_block, MODEL
 ALLOC, RECORD_SAVE, RECORD_RESTORE, DEALLOC = 11, 12, 13, 14
 SIGN, AUTH, READ = 15, 16, 17
 OPEN_LR, CLOSE_LR = 18, 19
+WRITE = 20
 READ_FORMS = frozenset(("loadstore_unsigned", "loadstore_immediate", "loadstore_register", "load_literal", "loadstore_pair", "load_acquire_rcpc"))
 
 
@@ -59,13 +60,21 @@ def verify_plt_stack_functions(frames,leaves,root,plts):
     return _verify_layout(frames,leaves,root,True,True,True,terminal)
 
 
+def verify_memory_stack_functions(frames, leaves, root, plts=None):
+    from plt_verifier import verify_plt_stub
+    plts = {} if plts is None else plts
+    require(len(plts) <= 256, 'too many PLT bridges')
+    terminal = {e: verify_plt_stub(p['data'], e, p['slot'], p['target'], leaves, p['symbol']) for e,p in plts.items()}
+    return _verify_layout(frames, leaves, root, True, True, True, terminal, writes=True)
+
+
 def lr_pair(i, load):
     return (i.form == "loadstore_pair" and i.access_size == 8 and i.rn == 31 and i.load == load and
             i.writeback and i.post_index == load and
             ((i.rd == 30 and 19 <= i.rt2 <= 28) or (i.rt2 == 30 and 19 <= i.rd <= 28)))
 
 
-def _verify_layout(frames, leaves, root, pauth, reads=False, lr_calls=False, plts=None):
+def _verify_layout(frames, leaves, root, pauth, reads=False, lr_calls=False, plts=None, writes=False):
     require(0 < len(frames) <= MAX_FUNCTIONS and len(leaves) <= 256 and root in frames, "invalid layout registry/root")
     ranges = sorted((entry, entry + len(code)) for entry, code in [*frames.items(), *leaves.items()])
     if plts is not None:ranges=sorted(ranges+[(entry,entry+16) for entry in plts])
@@ -121,7 +130,7 @@ def _verify_layout(frames, leaves, root, pauth, reads=False, lr_calls=False, plt
                 require(not lr_frame, "LR pair frame must preserve FP")
                 require(not fp_ready, "duplicate FP setup")
                 fp_ready = True; roles[index] = (FP, 0, 0, [])
-            elif i.form in ("loadstore_unsigned", "loadstore_immediate", "loadstore_pair") and not i.load and i.access_size == 8 and (
+            elif i.form in ("loadstore_unsigned", "loadstore_immediate", "loadstore_pair") and not i.load and i.access_size == 8 and (not writes or i.rn in (29,31)) and (
                     19 <= i.rd <= 28 and (i.form != "loadstore_pair" or 19 <= i.rt2 <= 28)):
                 offset, width, regs = access(i, record, fp_ready)
                 require(offset >= 0 and offset % 8 == 0 and offset + width <= size and
@@ -167,16 +176,16 @@ def _verify_layout(frames, leaves, root, pauth, reads=False, lr_calls=False, plt
                     successors = [(pc - entry) // 4 for pc in targets]
                     require(all(entry + n * 4 == pc and body <= n <= epilogue for n, pc in zip(successors, targets)), "layout branch escapes body/epilogue entry")
                     s["kind"] = BRANCH; f["next"] = successors
-                elif reads and i.form in READ_FORMS and i.load and not i.writeback and not i.post_index:
+                elif reads and i.form in READ_FORMS and (i.load or writes) and not i.writeback and not i.post_index:
                     require(not lr_frame or i.form == "load_literal" or i.rn != 29, "LR pair frame excludes FP-based memory")
                     regs = [i.rd, i.rt2] if i.form == "loadstore_pair" else [i.rd]
-                    require(all(r == 31 or r < 18 or mask & (1 << r) for r in regs), "checked read writes unsaved protected register")
+                    require(not i.load or all(r == 31 or r < 18 or mask & (1 << r) for r in regs), "checked read writes unsaved protected register")
                     if i.rn in (29, 31) and i.form in ("loadstore_unsigned", "loadstore_immediate", "loadstore_pair", "load_acquire_rcpc"):
                         offset = i.immediate + (record if i.rn == 29 else 0)
                         width = i.access_size * len(regs)
                         require(0 <= offset and offset + width <= size and all(offset + width <= lo or offset >= hi for lo,hi in reserved),
                                 "checked frame read overlaps reserved slots or frame bounds")
-                    s["kind"] = READ
+                    s["kind"] = READ if i.load else WRITE
                 elif i.form in ("loadstore_unsigned", "loadstore_immediate", "loadstore_pair"):
                     offset, width, regs = access(i, record, not lr_frame)
                     require(0 <= offset and offset + width <= size and all(offset + width <= lo or offset >= hi for lo, hi in reserved),
@@ -200,7 +209,7 @@ def _verify_layout(frames, leaves, root, pauth, reads=False, lr_calls=False, plt
             else:
                 s["kind"] = RETURN; f["next"] = []; state.update(sp=1, fp=0, lr=signed if pauth and not auth_tail else 1)
             steps.append(s); flows.append(f); states.append(state)
-            read_words.append(i.word if s["kind"] == READ else 0)
+            read_words.append(i.word if s["kind"] in (READ, WRITE) else 0)
         proofs[entry] = {"schema_version": 1, "policy": "fixed-layout-stack-dag-v3", "base": entry,
             "instruction_count": len(ins), "byte_count": len(data), "frame_size": size, "record_offset": record,
             "layout": "split" if split else "combined", "saved_mask": mask, "locals_begin": 0,
@@ -219,6 +228,9 @@ def _verify_layout(frames, leaves, root, pauth, reads=False, lr_calls=False, plt
             proofs[entry].update(policy="lr-pair-read-stack-dag-v6", layout="lr-pair" if lr_frame else proofs[entry]["layout"],
                 open_word=ins[head].word if lr_frame else 0, close_word=ins[close_index].word if lr_frame else 0)
         if plts is not None:proofs[entry].update(policy='plt-leaf-stack-dag-v7')
+        if writes:
+            proofs[entry].update(policy='checked-memory-stack-dag-v8', checked_write_count=sum(s['kind'] == WRITE for s in steps),
+                runtime_write_preconditions='unreserved owned locals or explicit retained-image write ranges; whole-operand staged effects checked before commit')
     return verify_cfg_graphs(proofs, leaf_proofs, root)
 
 
@@ -242,7 +254,11 @@ def emit_plt_stack_descriptor(p,name):
     return _emit_descriptor(p,name,True,True,True,True)
 
 
-def _emit_descriptor(p, name, pauth, reads=False, lr_calls=False, plt=False):
+def emit_memory_stack_descriptor(p, name):
+    return _emit_descriptor(p, name, True, True, True, writes=True)
+
+
+def _emit_descriptor(p, name, pauth, reads=False, lr_calls=False, plt=False, writes=False):
     prefix = "oot_pauth_lift_" if pauth else "oot_lift_"
     require(re.fullmatch(prefix + r"[A-Za-z0-9_]+", name) is not None, "invalid layout identifier")
     suffix = name[len(prefix):]
@@ -263,12 +279,13 @@ def _emit_descriptor(p, name, pauth, reads=False, lr_calls=False, plt=False):
                   f'static const uint32_t oot_read_words_{suffix}[] = {{' + ', '.join(f'UINT32_C(0x{w:08x})' for w in p['read_words']) + '};']
     if lr_calls: lines += ['#if OOT_STACK_CALL_POLICY_VERSION != 6', '#error Regenerate call descriptor', '#endif']
     if plt:lines+=['#if OOT_STACK_PLT_POLICY_VERSION != 7','#error Regenerate PLT frame descriptor','#endif']
+    if writes: lines += ['#if OOT_STACK_MEMORY_POLICY_VERSION != 8', '#error Regenerate memory descriptor', '#endif']
     lines += [f'static const {descriptor} oot_layout_info_{suffix} = {{']
     if lr_calls: lines += ['    {']
     if reads: lines += ['    {']
     if pauth: lines += ['    {']
     lines += ['    {', '        {',
-        f"            UINT64_C(0x{p['base']:x}), {p['instruction_count']}, {p['max_retired_instructions']}, 2, {7 if plt else 6 if lr_calls else 5 if reads else 4 if pauth else 3},",
+        f"            UINT64_C(0x{p['base']:x}), {p['instruction_count']}, {p['max_retired_instructions']}, 2, {8 if writes else 7 if plt else 6 if lr_calls else 5 if reads else 4 if pauth else 3},",
         f"            {p['frame_size']}, {p['max_depth']}, {'NULL' if pauth else name}, oot_layout_steps_{suffix}, {{{{",
         '                ' + ', '.join(f'0x{b:02x}' for b in bytes.fromhex(p['source_sha256'])), '            }}', '        },',
         f"        oot_layout_flow_{suffix}, UINT32_C(0x{p['saved_mask']:x}), 0", '    },',
@@ -277,6 +294,6 @@ def _emit_descriptor(p, name, pauth, reads=False, lr_calls=False, plt=False):
     if reads: lines += ['    },', f'    oot_read_words_{suffix}']
     if lr_calls: lines += ['    },', f"    UINT32_C(0x{p['open_word']:08x}), UINT32_C(0x{p['close_word']:08x})"]
     lines += ['};',
-        f'OOT_LIFT_EXPORT const {descriptor} *oot_stack_{"plt" if plt else "call" if lr_calls else "read" if reads else "pauth" if pauth else "layout"}_descriptor_{suffix}(void)',
+        f'OOT_LIFT_EXPORT const {descriptor} *oot_stack_{"memory" if writes else "plt" if plt else "call" if lr_calls else "read" if reads else "pauth" if pauth else "layout"}_descriptor_{suffix}(void)',
         '{', f'    return &oot_layout_info_{suffix};', '}', '']
     return '\n'.join(lines)

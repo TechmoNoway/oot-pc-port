@@ -85,6 +85,16 @@ static int check(OotGuestMemory *memory, uint64_t address, unsigned size, unsign
     return 1;
 }
 
+int oot_memory_probe(OotGuestMemory *memory, uint64_t address, unsigned size, unsigned access)
+{
+    int ok;
+    AcquireSRWLockExclusive(&transfer_lock);
+    ok = access == OOT_MEMORY_READ || access == OOT_MEMORY_WRITE ? check(memory,address,size,access) :
+        fail(memory,address,size,access,OOT_MEMORY_CONFIGURATION,address);
+    ReleaseSRWLockExclusive(&transfer_lock);
+    return ok;
+}
+
 static uint64_t read_bytes(OotGuestMemory *memory, uint64_t address, unsigned size)
 {
     unsigned index;

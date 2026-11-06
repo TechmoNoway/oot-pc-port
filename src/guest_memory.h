@@ -51,6 +51,9 @@ typedef struct OotGuestMemory {
 
 OOT_MEMORY_API int oot_memory_init(OotGuestMemory *memory, const OotGuestRegion *regions, size_t count);
 OOT_MEMORY_API void oot_memory_clear_fault(OotGuestMemory *memory);
+/* Nonmutating whole-transfer preflight, 1-16 bytes, one data access kind.
+ * This is not a reservation; the transfer checks again at commit. */
+OOT_MEMORY_API int oot_memory_probe(OotGuestMemory *memory, uint64_t address, unsigned size, unsigned access);
 /* Little-endian scalar transfers of 1, 2, 4, or 8 bytes. Unaligned is allowed.
  * Every byte is checked before mutation; failures leave output/backing unchanged.
  * This deterministic fault policy is not a model of partial hardware stores. */

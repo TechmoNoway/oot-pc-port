@@ -255,6 +255,29 @@ Two additional SDK ordinary leaves bring the total declared ordinary-leaf words 
 
 Policy-6 call-dependency failures fall from 16,680 to 16,604 while memory-policy failures rise from 12,156 to 12,231; policy-7 call dependencies fall from 16,611 to 16,535 while memory-policy failures rise from 12,189 to 12,264. These are later first failures across changed discovered sets, not independent acceptance gains. [The callee audit](callee-audit.md) matches the fresh policy-6 baseline. No game C, callback registration/execution, runtime read ranges or live GOT guarantees are produced.
 
+## Checked-memory milestone
+
+The [policy-8/schema-9 milestone](checked-memory.md) adds explicit whole-operand checked stores, independent read/write ranges, and a production `--memory` survey comparing policy 7 with policy 8. `config/milestones/checked-memory.json` requires unchanged preceding default/PLT totals and per-module profile outcomes, then matches the shared policy-7 proof results and all source/text/decoder/model/limit identities across the fresh PLT and memory reports. Its full evidence is private under `build/milestones/checked-memory-v3/`.
+
+| Measurement | Policy 7 | New policy 8 |
+| --- | ---: | ---: |
+| Metadata entry candidates | 284,396 | 284,396 |
+| PAC-enabled discovered regions | 135,571 | 135,571 |
+| Accepted structural root regions | 1,710 | 1,828 |
+| Accepted root instruction words | 13,763 | 16,201 |
+| Main accepted roots | 1,686 | 1,782 |
+| SDK accepted roots | 24 | 46 |
+| First memory-policy rejections | 12,264 | 6,880 |
+| First call-dependency rejections | 16,535 | 17,822 |
+
+All earlier default and policy-6/7 results remain unchanged, including 40,188 ordinary leaves and the eligible catalog of 434 exact PLT-to-ordinary-leaf bridges. New policy 8 accepts 118 roots absent from policy 7: 115 previously failed memory policy and three previously failed instruction policy. The distinct upgraded frame union is 118, with zero inter-frame edges: all 118 new closures currently stand alone. The synthetic tests demonstrate mixed multi-frame memory callees and PLT execution; these static game results do not demonstrate newly closed multi-frame game chains.
+
+The large first-memory-failure reduction does not equal accepted functions. Many roots proceed to previously hidden callee/frame/size/cycle requirements; the new callee report preserves these later first failures, unique missing-target counts, caller-region/target edges and overlapping blocked-root references. Detailed targets and metadata failures remain private. The survey supplies no read/write ranges, live GOT guarantees, game C, callbacks or execution.
+
+Of the 12,264 policy-7 roots whose first failure was memory policy, 6,879 retain a memory first failure under policy 8, 1,250 proceed to call-dependency failure, 3,759 to other PAC/policy requirements, and 115 become accepted; the remainder reach size, frame/save/register, bounds or cycle checks. These transitions describe first-failure movement for the same roots, not independent function proofs.
+
+The policy-8 missing-callee frontier contains 17,822 dependency-blocked roots, 5,992 distinct missing targets and 30,319 distinct caller-region/target edges. Targets comprise 3,789 metadata entries blocked during discovery, 2,201 unapproved PLT stubs and two unregistered targets. Blocked metadata first stops are 1,327 indirect calls, 1,123 window boundaries, 1,096 unsupported encodings and 243 indirect jumps. PLT annotations describe linked snapshots only: 1,023 point at discovered regions and 1,178 at discovery-blocked metadata. Counts differ from the unchanged policy-6 audit because policy 8 reaches additional call requirements. Metadata failure samples preserve original window size, sources and limiting evidence, including failures behind PLT snapshots.
+
 ## Verification
 
 Synthetic tests cover positive leaf and framed cases under all profiles, real transitive closures, unavailable callees, call cycles, metadata aliases/window boundaries, multiple returns, indirect boundaries, unreachable words, samples/limits, PAC-prefix rejection, source preservation, fresh-output checks, and tampered-input rejection. The full Python suite continues to run the native/reference profile tests; the survey itself remains static and does not compile or run candidates.
