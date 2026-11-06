@@ -8,7 +8,7 @@ The decoder requires `(word & 0xff600000) == 0x9b200000`: sf=1, op54=00 and the 
 
 The emitter reads both multiplicands at width 32, applies sign extension for signed forms, and captures the full 64-bit accumulator before writing the destination. Every intermediate is `uint64_t`; modular unsigned multiplication of sign-extended sources produces the required signed product bits without signed C overflow or implementation-defined narrowing. Unsigned sources are zero-extended. Upper X source bits do not participate, while the accumulator's upper bits do. All source/destination aliases use their pre-instruction values. Each instruction advances PC by four and retires once; a zero budget retires nothing.
 
-`multiply_long` is an explicitly admitted verifier value form. Existing destination restrictions remain in force: ordinary leaves preserve X18-X30/SP, and framed functions can modify callee-save destinations only in their declared saved phase. No memory capability, control-flow edge, indirect target, PAC behavior, ABI or descriptor layout changes. SMULH/UMULH and vector widening multiplication remain unsupported and are not decoded as these forms.
+`multiply_long` is an explicitly admitted verifier value form. Existing destination restrictions remain in force: ordinary leaves preserve X18-X30/SP, and framed functions can modify callee-save destinations only in their declared saved phase. No memory capability, control-flow edge, indirect target, PAC behavior, ABI or descriptor layout changes. The later [high-multiply milestone](high-multiply.md) implements SMULH/UMULH through a separate form and helper; vector widening multiplication remains unsupported.
 
 ## Synthetic native evidence
 

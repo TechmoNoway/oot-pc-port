@@ -209,6 +209,31 @@ The 31 additional ordinary leaf candidates increase declared words from 102,509 
 
 None of the implemented one-source mnemonics remains as a first unsupported discovery stop. Policy-6 call-dependency failures fall from 16,692 to 16,669, while memory-policy failures rise from 11,989 to 12,118. Policy-7 call-dependency failures fall from 16,624 to 16,600 and memory-policy failures rise from 12,021 to 12,151. Such first-failure shifts across a larger discovered set are diagnostic, not independently proven functions. All proofs use the real verifier and callee bytes. No game C, callbacks, execution or runtime ranges/GOT guarantees are produced; the refreshed [callee audit](callee-audit.md) matches this policy-6 baseline.
 
+## After high multiplication
+
+The [UMULH/SMULH milestone](high-multiply.md) adds exact full-X high products, including all ignored Ra encodings. Original module source/text hashes, syntax-decoder settings, model, limits, policies and the 284,396 metadata-entry denominator match the preceding one-source survey. No word is rewritten to normalize Ra.
+
+```powershell
+.venv\Scripts\python.exe -B tools/survey_function_profiles.py build/prepared/oot111 `
+  --report build/function-profiles/oot111-default-after-high-multiply-v1.json
+.venv\Scripts\python.exe -B tools/survey_function_profiles.py build/prepared/oot111 `
+  --plt --report build/function-profiles/oot111-plt-after-high-multiply-v1.json
+```
+
+| Measurement | After bit operations | After high multiply |
+| --- | ---: | ---: |
+| Default discovered regions | 60,976 | 61,107 |
+| Default accepted ordinary leaves | 40,175 | 40,186 |
+| PAC-enabled discovered regions | 135,020 | 135,390 |
+| PAC-enabled discovery blockers | 149,376 | 149,006 |
+| Eligible global PLT-to-leaf catalog | 430 | 433 |
+| Policy-6 accepted structural regions | 1,688 | 1,688 |
+| Policy-7 accepted structural regions | 1,710 | 1,710 |
+
+The 11 additional ordinary leaf candidates increase declared words from 103,046 to 103,392. Module accepted counts are rtld 5, main 38,557, subsdk0 38 and SDK 1,586; older default framed profiles still accept none. Policy-6/7 accepted root words remain 13,519/13,763 with unchanged module counts. More discovered regions and eligible bridges do not by themselves satisfy a framed closure.
+
+No UMULH/SMULH first-unsupported stop remains. Newly reached code still fails later checks: policy-6 call dependencies rise from 16,669 to 16,680 and memory-policy failures from 12,118 to 12,156; policy-7 call dependencies rise from 16,600 to 16,611 and memory-policy failures from 12,151 to 12,189. The refreshed [callee audit](callee-audit.md) reproduces the new policy-6 baseline. Real original-byte/verifier/callee proofs remain required, with no runtime ranges, live GOT guarantees, game translation, callbacks or execution supplied by these static measurements.
+
 ## Verification
 
 Synthetic tests cover positive leaf and framed cases under all profiles, real transitive closures, unavailable callees, call cycles, metadata aliases/window boundaries, multiple returns, indirect boundaries, unreachable words, samples/limits, PAC-prefix rejection, source preservation, fresh-output checks, and tampered-input rejection. The full Python suite continues to run the native/reference profile tests; the survey itself remains static and does not compile or run candidates.

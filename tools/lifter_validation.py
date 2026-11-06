@@ -25,6 +25,7 @@ from ordered_programs import ordered_programs
 from conditional_programs import conditional_programs
 from multiply_programs import multiply_programs
 from bit_programs import bit_programs
+from high_multiply_programs import high_multiply_programs
 
 ROOT = Path(__file__).resolve().parent.parent
 SEED = 0x0CA41234
@@ -150,7 +151,7 @@ def synthetic_programs():
                             [Trial(index, [0] * 31, 0, 0, budget)
                              for index in (-1, 1) for budget in (0, 1)]))
     return (programs + memory_programs() + pair_programs() + integer_programs() + leaf_programs() +
-            ordered_programs() + conditional_programs() + multiply_programs() + bit_programs())
+            ordered_programs() + conditional_programs() + multiply_programs() + bit_programs() + high_multiply_programs())
 
 
 def find_cmake():

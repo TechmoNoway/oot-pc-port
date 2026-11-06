@@ -101,7 +101,7 @@ class MultiplyLongTests(unittest.TestCase):
                 for bit in (31, 30, 29, 22):
                     with self.subTest(signed=signed, sub=sub, bit=bit), self.assertRaises(UnsupportedInstruction):
                         decode_instruction(multiply_long(signed, sub, 0, 1, 2, 3) ^ (1 << bit), 0x1000)
-        for word in (0x9B427C20, 0x9BC27C20):  # SMULH/UMULH remain unsupported.
+        for word in (0x9B42FC20, 0x9BC2FC20):  # High-multiply o0=1 remains unsupported.
             with self.assertRaises(UnsupportedInstruction): decode_instruction(word, 0x1000)
         self.assertEqual(decode_instruction(0x9B020C20, 0x1000).form, "multiply_add")
 
@@ -150,15 +150,19 @@ class MultiplyLongTests(unittest.TestCase):
 
 @unittest.skipUnless(os.name == "nt" and importlib.util.find_spec("unicorn"), "native Windows/reference required")
 class NativeMultiplyLongTests(unittest.TestCase):
+    bundle_fixture = staticmethod(bundle_fixture)
+    expected_call = staticmethod(expected_call)
+    report_name = "multiply"
+
     def test_schema_eight_saved_registers_aliases_flags_and_every_prefix(self):
         self.assertEqual(version("unicorn"), "2.1.4")
         sources, fixtures = [], []
         for explicit in (False, True):
-            linker, config, programs = bundle_fixture(explicit)
+            linker, config, programs = self.bundle_fixture(explicit)
             blob, source, manifest = build_bundle(linker, config)
             if explicit:
                 source = source.replace("oot_create_bound_registry", "oot_create_long1")
-                for name in ("long_root", "long_child", "long_leaf", "long_stub"):
+                for name in [r['name'] for kind in ('frames', 'leaves', 'plts') for r in config[kind]]:
                     source = source.replace(name, name+"1")
             sources.append(source); fixtures.append((blob, manifest, programs))
         mode = os.environ.get("OOT_LIFTER_COMPILER", "cmake")
@@ -167,7 +171,7 @@ class NativeMultiplyLongTests(unittest.TestCase):
         rng, whole, prefixes = random.Random(0x10A64CA1), 0, 0
         try:
             for index, (blob, manifest, programs) in enumerate(fixtures):
-                path = Path(build["directory"]) / f"multiply{index}.ootmem"; path.write_bytes(blob)
+                path = Path(build["directory"]) / f"{self.report_name}{index}.ootmem"; path.write_bytes(blob)
                 message, error, report = create_string_buffer(192), c_uint32(), Report()
                 image = lib.oot_runtime_open(os.fsencode(path), message, len(message)); self.assertTrue(image, message.value)
                 factory = lib.oot_create_long1 if index else lib.oot_create_bound_registry
@@ -184,7 +188,7 @@ class NativeMultiplyLongTests(unittest.TestCase):
                             s = State(); s.x[:] = [rng.getrandbits(64) for _ in range(31)]
                             s.x[0], s.x[1], s.x[2], s.x[3] = value, value ^ 0xFFFFFFFF, value ^ (1 << 63), value
                             s.pc, s.sp, s.x[30], s.nzcv = manifest["root"]["entry"], manifest["image"]["initial_sp"], EXIT, flags << 28
-                            expected, protected = expected_call(s.x, s.nzcv), s.x[19]
+                            expected, protected = self.expected_call(s.x, s.nzcv), s.x[19]
                             states, stacks = ref.trace(s); memset(stack, 0, STACK_SIZE)
                             self.assertEqual(lib.oot_stack_begin(dispatcher, byref(s), EXIT, byref(report)), 0)
                             for n in range(len(states)):
@@ -201,8 +205,8 @@ class NativeMultiplyLongTests(unittest.TestCase):
                             self.assertEqual((s.x[0], s.x[19]), (expected, protected)); whole += 1
                 finally: lib.oot_stack_destroy(dispatcher)
         finally: lib.oot_pauth_destroy(context)
-        self.assertEqual(whole, 256)
-        report_path = ROOT / f"build/lifter-validation/{mode}-multiply-dispatch-report.json"
+        self.assertEqual((whole, prefixes), (256, 7168))
+        report_path = ROOT / f"build/lifter-validation/{mode}-{self.report_name}-dispatch-report.json"
         report_path.write_text(json.dumps({"whole_call_cases": whole, "prefix_checks": prefixes, "synthetic_only": True,
             "game_code_executed": False, "native_build": build}, indent=2)+"\n", encoding="utf-8")
 

@@ -118,6 +118,24 @@ static inline uint64_t oot_arm64_leading(uint64_t value, unsigned width,
     return sign_bits ? count - 1 : count;
 }
 
+/* Four exact 32x32 products; middle needs at most 34 bits. No 128-bit type. */
+static inline uint64_t oot_arm64_mul_high(uint64_t left, uint64_t right,
+                                        unsigned signed_product)
+{
+    uint64_t mask = UINT64_C(0xffffffff);
+    uint64_t lo = (left & mask) * (right & mask);
+    uint64_t cross_a = (left >> 32) * (right & mask);
+    uint64_t cross_b = (left & mask) * (right >> 32);
+    uint64_t middle = (lo >> 32) + (cross_a & mask) + (cross_b & mask);
+    uint64_t high = (left >> 32) * (right >> 32) +
+                    (cross_a >> 32) + (cross_b >> 32) + (middle >> 32);
+    if (signed_product) {
+        if (left >> 63) high -= right;
+        if (right >> 63) high -= left;
+    }
+    return high;
+}
+
 static inline uint64_t oot_arm64_addsub(OotArm64State *s, uint64_t left,
                                        uint64_t right, unsigned width,
                                        unsigned subtract, unsigned set_flags)

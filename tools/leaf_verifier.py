@@ -13,7 +13,7 @@ VALUE_FORMS = frozenset(("move_wide", "addsub_immediate", "addsub_shifted", "add
     "addsub_carry", "logical_shifted", "logical_immediate", "bitfield", "conditional_select",
     "conditional_compare_register", "conditional_compare_immediate",
     "pc_relative", "variable_shift", "multiply_add", "multiply_long", "divide",
-    "bit_reverse", "byte_reverse", "count_leading"))
+    "bit_reverse", "byte_reverse", "count_leading", "multiply_high"))
 
 
 def leaf_edges(ins, base, end):
