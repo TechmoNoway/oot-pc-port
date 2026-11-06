@@ -94,7 +94,22 @@ Both surveys are static: no generated C, native callback registration, or game e
 
 The [aligned RCpc load model](ordered-loads.md) now implements no-offset LDAPR/B/H with a conservative serialized backend. Fresh surveys retain all source and linked-text hashes and the 284,396 metadata-entry denominator. Default discovery reaches 58,663 bounded regions. PAC discovery reaches **127,551**, compared with 115,164 before RCpc; 156,845 candidates remain discovery-blocked. No LDAPR/B/H first-unsupported frontier remains. The remaining PAC first unsupported categories are load/store (18,058), integer (16,020), SIMD/FP (5,759), ordered/atomic (5,144), system (1,248), other control flow (1,224), supervisor calls (64), and pointer authentication (6).
 
-Acceptance remains 40,038 leaf candidates and 1,686 PAC framed candidates. Existing verifier profiles still reject the new memory form: raw semantic support does not broaden their permitted address effects. Discovery success also does not prove runtime alignment or valid pointer values. The next integration step is a separately specified verified-read policy for addresses beyond current frame-local storage. No game callbacks were generated or run.
+Acceptance remains 40,038 leaf candidates and 1,686 PAC framed candidates. Existing verifier profiles still reject the new memory form: raw semantic support does not broaden their permitted address effects. Discovery success also does not prove runtime alignment or valid pointer values. The separate checked-read integration below adds its own runtime obligations. No game callbacks were generated or run.
+
+## Separate checked-read policy survey
+
+`--reads` enables PAC discovery and evaluates both the unchanged policy 4 and the new [checked-read policy 5](checked-reads.md). It does not supply runtime read capabilities. Accepted regions have a structural proof with dynamic address, permission, ownership, and alignment obligations, rather than proof that every possible pointer is readable.
+
+```powershell
+.venv\Scripts\python.exe -B tools/survey_function_profiles.py build/prepared/oot111 `
+  --reads --report build/function-profiles/oot111-checked-reads-v5.json
+```
+
+The local 1.1.1 run retains the preceding RCpc survey's exact source and linked-text hashes, 284,396 metadata entries, 127,551 discovered regions, and 156,845 discovery blockers. The same pass accepts 1,686 policy-4 candidates (13,494 words) and **1,688 policy-5 structural candidates (13,519 words)**. Policy 5 accepts 1,686 regions in main and two in sdk. Counts overlap and must not be added. Older policies keep their own memory rules; default behavior is unchanged.
+
+Policy 5's first rejections include 49,428 general policy failures, 45,727 size limits, 16,151 unavailable call dependencies, and 11,269 memory-policy failures. These categories describe the first failure of a whole candidate/closure check; reductions in one category may expose another, so they are not independent coverage gains. Further layouts, missing callee coverage, loops, indirect targets, and instruction semantics remain separate work.
+
+Real production verifiers check unchanged words and actual transitive callee proofs. The report explicitly records that runtime read ranges were not supplied. All reports remain private under ignored `build/`; no game C, native callback registration, or game execution occurs.
 
 ## Verification
 

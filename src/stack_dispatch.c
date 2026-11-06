@@ -1,4 +1,5 @@
 #include "stack_dispatch.h"
+#include "checked_read.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -11,6 +12,7 @@ typedef struct OwnedFunction {
     uint32_t saved_mask, locals_begin, record_offset;
     OotPauthRun pauth_run;
     uint32_t sign_word, auth_word;
+    uint32_t read_words[OOT_STACK_MAX_WORDS];
 } OwnedFunction;
 typedef struct Activation {
     size_t function;
@@ -29,6 +31,8 @@ struct OotStackDispatcher {
     uint64_t returns[256], total, expected_return;
     uint8_t body_hash[32];
     size_t count, root, depth, return_count;
+    OotReadRange read_ranges[OOT_STACK_MAX_READ_RANGES];
+    size_t read_count;
     unsigned phase, executing, leaf_active, fault;
 };
 
@@ -164,7 +168,7 @@ static int validate_offset_layout(OwnedFunction *o)
     uint16_t pending[OOT_STACK_MAX_WORDS] = {0};
     uint8_t visited[OOT_STACK_MAX_WORDS] = {1};
     uint32_t mask = 0, restored = 0;
-    unsigned pac = f->policy_version == OOT_STACK_PAUTH_POLICY_VERSION;
+    unsigned pac = f->policy_version >= OOT_STACK_PAUTH_POLICY_VERSION;
     unsigned prefix = pac ? 1 : 0, explicit_auth = pac && (o->auth_word == 0xd50323bf || o->auth_word == 0xd50323ff);
     unsigned signed_lr = pac ? 3 : 1, fp_ready = 0, split = f->steps[prefix].kind == OOT_STACK_ALLOC;
     size_t close_index = f->instruction_count - 2 - explicit_auth;
@@ -216,7 +220,16 @@ static int validate_offset_layout(OwnedFunction *o)
             (s->offset != o->record_offset || s->size != 16)) return 0;
         if (i >= body && i < epilogue) {
             if (s->kind != OOT_STACK_NORMAL && s->kind != OOT_STACK_CALL && s->kind != OOT_STACK_BRANCH &&
-                s->kind != OOT_STACK_LOAD && s->kind != OOT_STACK_STORE) return 0;
+                s->kind != OOT_STACK_LOAD && s->kind != OOT_STACK_STORE &&
+                !(s->kind == OOT_STACK_READ && f->policy_version == OOT_STACK_READ_POLICY_VERSION)) return 0;
+            if (s->kind == OOT_STACK_READ) {
+                OotReadEffect e;
+                OotArm64State empty = {0};
+                uint32_t bits;
+                if (!oot_read_decode(o->read_words[i],f->entry+i*4,&empty,&e)) return 0;
+                bits = (e.rd == 31 ? 0 : UINT32_C(1) << e.rd) | (e.pair && e.rt2 != 31 ? UINT32_C(1) << e.rt2 : 0);
+                if (bits & ~(mask | UINT32_C(0x3ffff))) return 0;
+            }
             if (!layout_state(o, i, 0, 1, s->kind == OOT_STACK_CALL ? 2 : 0, 0)) return 0;
             if (s->kind == OOT_STACK_LOAD || s->kind == OOT_STACK_STORE)
                 for (j = s->offset; j < s->offset + s->size; ++j) if (o->reserved_bytes[j]) return 0;
@@ -235,6 +248,7 @@ static int validate_offset_layout(OwnedFunction *o)
         else if (split && i == close_index - 1) { if (!layout_state(o, i, 0, 0, signed_lr, 0)) return 0; }
         if (flow->writable_mask != writable || flow->max_steps == 0 || flow->max_steps > OOT_STACK_MAX_STEPS ||
             ((s->kind != OOT_STACK_SAVE && s->kind != OOT_STACK_RESTORE) && (flow->saved_a != UINT16_MAX || flow->saved_b != UINT16_MAX))) return 0;
+        if (s->kind != OOT_STACK_READ && o->read_words[i]) return 0;
         if (s->kind == OOT_STACK_RETURN) {
             if (flow->next_a != UINT16_MAX || flow->next_b != UINT16_MAX) return 0;
         } else if (flow->next_a >= f->instruction_count || flow->next_b >= f->instruction_count) return 0;
@@ -258,7 +272,8 @@ static OotStackDispatcher *create_registry(OotRuntimeImage *image,
     const OotLeafFunction *leaves, size_t leaf_count, const OotCodeHash *hashes,
     const uint8_t body_hash[32], const uint64_t *returns, size_t return_count, uint32_t *error,
     const OotStackCfgFunction *cfg, const OotStackLayoutFunction *layout,
-    const OotStackPauthFunction *pac, OotPauth *pauth)
+    const OotStackPauthFunction *pac, OotPauth *pauth, const OotStackReadFunction *reads,
+    const OotReadRange *ranges, size_t range_count)
 {
     OotStackDispatcher *d;
     uint64_t sites[256 + OOT_STACK_MAX_FUNCTIONS * OOT_STACK_MAX_WORDS];
@@ -269,7 +284,8 @@ static OotStackDispatcher *create_registry(OotRuntimeImage *image,
     if (image == NULL || functions == NULL || count == 0 || count > OOT_STACK_MAX_FUNCTIONS ||
         leaf_count > OOT_LEAF_MAX_FUNCTIONS || (leaf_count && (leaves == NULL || hashes == NULL)) ||
         body_hash == NULL || returns == NULL || return_count == 0 || return_count > 256 ||
-        (pac && oot_pauth_model(pauth) != OOT_PAUTH_QARMA5_VA39)) return NULL;
+        (pac && oot_pauth_model(pauth) != OOT_PAUTH_QARMA5_VA39) ||
+        (reads && (!ranges || !range_count || range_count > OOT_STACK_MAX_READ_RANGES))) return NULL;
     d = calloc(1, sizeof(*d));
     if (d == NULL) { if (error != NULL) *error = OOT_LEAF_ALLOCATION_FAILED; return NULL; }
     if (error != NULL) *error = OOT_STACK_BAD_REGISTRY;
@@ -280,7 +296,7 @@ static OotStackDispatcher *create_registry(OotRuntimeImage *image,
             f->entry > UINT64_MAX - (uint64_t)f->instruction_count * 4 ||
             (pac ? (f->run != NULL || pac[i].run == NULL) : f->run == NULL) || f->steps == NULL ||
             (pac && (!canonical_pointer(f->entry) || !canonical_pointer(f->entry + (uint64_t)f->instruction_count * 4 - 1))) ||
-            f->abi_version != OOT_LIFT_ABI_VERSION || f->policy_version != (pac ? OOT_STACK_PAUTH_POLICY_VERSION : layout != NULL ? OOT_STACK_LAYOUT_POLICY_VERSION :
+            f->abi_version != OOT_LIFT_ABI_VERSION || f->policy_version != (reads ? OOT_STACK_READ_POLICY_VERSION : pac ? OOT_STACK_PAUTH_POLICY_VERSION : layout != NULL ? OOT_STACK_LAYOUT_POLICY_VERSION :
                 cfg != NULL ? OOT_STACK_CFG_POLICY_VERSION : OOT_STACK_POLICY_VERSION) ||
             f->frame_size < 16 || f->frame_size > OOT_STACK_MAX_FRAME || f->frame_size % 16 ||
             (i && f->entry < functions[i - 1].entry + (uint64_t)functions[i - 1].instruction_count * 4)) goto failure;
@@ -289,6 +305,10 @@ static OotStackDispatcher *create_registry(OotRuntimeImage *image,
             d->functions[i].pauth_run = pac[i].run;
             d->functions[i].sign_word = pac[i].sign_word;
             d->functions[i].auth_word = pac[i].auth_word;
+        }
+        if (reads) {
+            if (!reads[i].read_words) goto failure;
+            memcpy(d->functions[i].read_words,reads[i].read_words,f->instruction_count*sizeof(uint32_t));
         }
         memcpy(d->functions[i].steps, f->steps, f->instruction_count * sizeof(*f->steps));
         d->functions[i].info.steps = d->functions[i].steps;
@@ -412,6 +432,27 @@ static OotStackDispatcher *create_registry(OotRuntimeImage *image,
     for (i = 0; i < count; ++i) {
         unsigned reason = code_match(d, i);
         if (reason) { if (error != NULL) *error = reason; goto failure; }
+        if (reads) for (j = 0; j < functions[i].instruction_count; ++j) if (d->functions[i].read_words[j]) {
+            uint64_t word;
+            if (!oot_memory_load(oot_runtime_memory(image),functions[i].entry+j*4,4,&word) || word != d->functions[i].read_words[j]) goto failure;
+        }
+    }
+    if (reads) {
+        const OotGuestMemory *m = oot_runtime_memory(image);
+        for (i = 0; i < range_count; ++i) {
+            const OotReadRange *r = &ranges[i];
+            int found = 0;
+            if (!r->size || r->base >= oot_runtime_stack_base(image) || r->size > oot_runtime_stack_base(image)-r->base ||
+                (i && (r->base < ranges[i-1].base || r->base-ranges[i-1].base < ranges[i-1].size))) goto failure;
+            for (j = 0; j < m->count; ++j) {
+                const OotGuestRegion *region = &m->regions[j];
+                if ((region->permissions & OOT_MEMORY_READ) && r->base >= region->base &&
+                    r->base-region->base < region->size && r->size <= region->size-(r->base-region->base)) found = 1;
+            }
+            if (!found) goto failure;
+            d->read_ranges[i] = *r;
+        }
+        d->read_count = range_count;
     }
     if (error != NULL) *error = 0;
     return d;
@@ -425,7 +466,7 @@ OotStackDispatcher *oot_stack_create(OotRuntimeImage *image,
     const OotLeafFunction *leaves, size_t leaf_count, const OotCodeHash *hashes,
     const uint8_t body_hash[32], const uint64_t *returns, size_t return_count, uint32_t *error)
 {
-    return create_registry(image, functions, count, root, leaves, leaf_count, hashes, body_hash, returns, return_count, error, NULL, NULL, NULL, NULL);
+    return create_registry(image, functions, count, root, leaves, leaf_count, hashes, body_hash, returns, return_count, error, NULL, NULL, NULL, NULL, NULL, NULL, 0);
 }
 
 OotStackDispatcher *oot_stack_create_cfg(OotRuntimeImage *image,
@@ -438,7 +479,7 @@ OotStackDispatcher *oot_stack_create_cfg(OotRuntimeImage *image,
     if (error != NULL) *error = OOT_LEAF_BAD_ARGUMENT;
     if (functions == NULL || count == 0 || count > OOT_STACK_MAX_FUNCTIONS) return NULL;
     for (i = 0; i < count; ++i) common[i] = functions[i].info;
-    return create_registry(image, common, count, root, leaves, leaf_count, hashes, body_hash, returns, return_count, error, functions, NULL, NULL, NULL);
+    return create_registry(image, common, count, root, leaves, leaf_count, hashes, body_hash, returns, return_count, error, functions, NULL, NULL, NULL, NULL, NULL, 0);
 }
 
 OotStackDispatcher *oot_stack_create_layout(OotRuntimeImage *image,
@@ -452,7 +493,7 @@ OotStackDispatcher *oot_stack_create_layout(OotRuntimeImage *image,
     if (error != NULL) *error = OOT_LEAF_BAD_ARGUMENT;
     if (functions == NULL || count == 0 || count > OOT_STACK_MAX_FUNCTIONS) return NULL;
     for (i = 0; i < count; ++i) { cfg[i] = functions[i].cfg; common[i] = cfg[i].info; }
-    return create_registry(image, common, count, root, leaves, leaf_count, hashes, body_hash, returns, return_count, error, cfg, functions, NULL, NULL);
+    return create_registry(image, common, count, root, leaves, leaf_count, hashes, body_hash, returns, return_count, error, cfg, functions, NULL, NULL, NULL, NULL, 0);
 }
 
 OotStackDispatcher *oot_stack_create_pauth(OotRuntimeImage *image,
@@ -468,7 +509,25 @@ OotStackDispatcher *oot_stack_create_pauth(OotRuntimeImage *image,
     if (!functions || !count || count > OOT_STACK_MAX_FUNCTIONS) return NULL;
     for (i = 0; i < count; ++i) { layout[i] = functions[i].layout; cfg[i] = layout[i].cfg; common[i] = cfg[i].info; }
     return create_registry(image, common, count, root, leaves, leaf_count, hashes, body_hash, returns, return_count,
-                           error, cfg, layout, functions, pauth);
+                           error, cfg, layout, functions, pauth, NULL, NULL, 0);
+}
+
+OotStackDispatcher *oot_stack_create_reads(OotRuntimeImage *image,
+    const OotStackReadFunction *functions, size_t count, uint64_t root,
+    const OotLeafFunction *leaves, size_t leaf_count, const OotCodeHash *hashes,
+    const uint8_t body_hash[32], const uint64_t *returns, size_t return_count,
+    OotPauth *pauth, const OotReadRange *ranges, size_t range_count, uint32_t *error)
+{
+    OotStackFunction common[OOT_STACK_MAX_FUNCTIONS];
+    OotStackCfgFunction cfg[OOT_STACK_MAX_FUNCTIONS];
+    OotStackLayoutFunction layout[OOT_STACK_MAX_FUNCTIONS];
+    OotStackPauthFunction pac[OOT_STACK_MAX_FUNCTIONS];
+    size_t i;
+    if (error) *error = OOT_LEAF_BAD_ARGUMENT;
+    if (!functions || !count || count > OOT_STACK_MAX_FUNCTIONS) return NULL;
+    for (i=0;i<count;++i) { pac[i]=functions[i].pauth; layout[i]=pac[i].layout; cfg[i]=layout[i].cfg; common[i]=cfg[i].info; }
+    return create_registry(image,common,count,root,leaves,leaf_count,hashes,body_hash,returns,return_count,error,
+                           cfg,layout,pac,pauth,functions,ranges,range_count);
 }
 
 static int same_state(const OotArm64State *a, const OotArm64State *b)
@@ -553,6 +612,26 @@ static unsigned check_owners(OotStackDispatcher *d, int check_code)
     return 0;
 }
 
+static int read_allowed(const OotStackDispatcher *d, const Activation *a, const OotReadEffect *e)
+{
+    const OwnedFunction *f = &d->functions[a->function];
+    uint64_t low = oot_runtime_stack_base(d->image), high = oot_runtime_stack_pointer(d->image);
+    size_t i;
+    if (!e->size || e->size - 1 > UINT64_MAX-e->address) return 0;
+    if (e->address >= a->base && e->address-a->base < f->info.frame_size &&
+        e->size <= f->info.frame_size-(e->address-a->base)) {
+        if (!a->owns) return 0;
+        for (i=0;i<e->size;++i) if (f->reserved_bytes[(size_t)(e->address-a->base)+i]) return 0;
+        return 1;
+    }
+    if (e->frame_base || (e->address < high && e->address+e->size-1 >= low)) return 0;
+    for (i=0;i<d->read_count;++i) {
+        const OotReadRange *r = &d->read_ranges[i];
+        if (e->address >= r->base && e->address-r->base < r->size && e->size <= r->size-(e->address-r->base)) return 1;
+    }
+    return 0;
+}
+
 int oot_stack_run(OotStackDispatcher *d, OotArm64State *s, uint64_t budget, OotLeafReport *out)
 {
     uint64_t retired = 0;
@@ -596,6 +675,9 @@ int oot_stack_run(OotStackDispatcher *d, OotArm64State *s, uint64_t budget, OotL
             const OotStackStep *step = &f->steps[index];
             OotGuestRegion region = {a->base, f->frame_size, shadow, 3};
             OotGuestMemory window;
+            OotReadEffect read_effect = {0};
+            OotArm64State expected_read = working;
+            uint8_t read_bytes[16] = {0}, captured[16] = {0};
             uint64_t executed = UINT64_MAX;
             int status;
             kind = step->kind;
@@ -613,6 +695,16 @@ int oot_stack_run(OotStackDispatcher *d, OotArm64State *s, uint64_t budget, OotL
                     if (!reason && (d->depth == OOT_STACK_MAX_DEPTH || !fits(d, target, working.sp))) reason = OOT_STACK_DEPTH;
                     if (reason) return result(d, s, out, OOT_LEAF_REJECTED, reason, retired);
                 }
+            }
+            if (kind == OOT_STACK_READ) {
+                if (!oot_read_decode(d->functions[a->function].read_words[index],working.pc,&working,&read_effect))
+                    return result(d,s,out,OOT_LEAF_REJECTED,OOT_STACK_BAD_REGISTRY,retired);
+                if (!read_allowed(d,a,&read_effect))
+                    return result(d,s,out,OOT_LEAF_REJECTED,OOT_STACK_BAD_READ_RANGE,retired);
+                if (!oot_read_capture(oot_runtime_memory(d->image),&read_effect,read_bytes,&expected_read))
+                    return result(d,s,out,OOT_LEAF_REJECTED,OOT_STACK_BAD_MEMORY,retired);
+                memcpy(captured,read_bytes,read_effect.size);
+                region = (OotGuestRegion){read_effect.address,read_effect.size,read_bytes,OOT_MEMORY_READ};
             }
             (void)oot_memory_init(&window, &region, 1);
             if (kind == OOT_STACK_SIGN || kind == OOT_STACK_AUTH ||
@@ -639,6 +731,10 @@ int oot_stack_run(OotStackDispatcher *d, OotArm64State *s, uint64_t budget, OotL
             else if (kind == OOT_STACK_BRANCH ? (working.pc != f->entry + (uint64_t)flow->next_a * 4 &&
                 working.pc != f->entry + (uint64_t)flow->next_b * 4) : working.pc != next) reason = OOT_LEAF_BAD_EDGE;
             else if (window.fault.reason != OOT_MEMORY_OK) reason = OOT_STACK_BAD_MEMORY;
+            else if (kind == OOT_STACK_READ && (!same_state(&working,&expected_read) ||
+                memcmp(read_bytes,captured,read_effect.size) || window.regions != &region || window.count != 1 || window.valid != 1 ||
+                region.base != read_effect.address || region.size != read_effect.size ||
+                region.data != read_bytes || region.permissions != OOT_MEMORY_READ)) reason = OOT_STACK_BAD_READ_EFFECT;
         }
         for (i = 18; !reason && i <= 28; ++i)
             if (!(writable & (UINT32_C(1) << i)) && working.x[i] != a->initial.x[i]) reason = OOT_LEAF_PROTECTED_REGISTER;

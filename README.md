@@ -36,10 +36,12 @@ An opt-in [pointer authentication model](docs/pointer-authentication.md) impleme
 
 [RCpc ordered loads](docs/ordered-loads.md) support no-offset LDAPR/B/H through a backend that serializes scalar, pair, and acquire transfers. Value/fault comparisons, raw PAC frames, and native inter-thread publication tests pass on MSVC/GCC. The supported alignment and shared-memory ownership rules are explicit; function profiles retain their existing memory permissions.
 
+[Checked image reads](docs/checked-reads.md) add an opt-in policy 5/schema 6 with explicit readable image ranges, complete-access bounds and ownership checks, and private read-only operand snapshots. Native synthetic loads and nested PAC calls pass on MSVC/GCC. Its static survey accepts 1,688 structural candidates, subject to runtime pointer/range checks; no game callbacks are generated or executed.
+
 The game is not playable yet. Process startup, broader instruction semantics, operating-system services, and graphics remain to be implemented.
 
 ## Development direction
 
-The next milestones are verified memory reads beyond the current frame, remaining ordered/atomic semantics, wider call support, further frame layouts and loop verification, process startup and operating-system services, and graphics. See [docs/architecture.md](docs/architecture.md).
+The next milestones are wider call support, further frame layouts and loop verification, remaining instruction and ordered/atomic semantics, process startup and operating-system services, and graphics. See [docs/architecture.md](docs/architecture.md).
 
 Game containers, keys, extracted files, generated game code, saves, shader caches, and compiled executables stay outside version control. Build output belongs under `build/`; future generated output belongs under `generated/`.
