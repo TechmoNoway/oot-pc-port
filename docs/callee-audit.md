@@ -104,6 +104,26 @@ Blocked metadata entries stop at indirect calls (1,183), unsupported encodings (
 
 The frontier's 2,117 PLT snapshots point to blocked metadata entries (1,107), discovered policy-6-rejected regions (919) and verified ordinary leaves (91). The larger global eligible bridge catalog has 423 entries. Separately, the real policy-7 closure survey accepts 1,710 structural candidates, seven more than before this instruction milestone. Both unseeded probes still fail policy checks. The audit emits no C, registers no callbacks, grants no live capabilities and executes no game code; full reports remain ignored under `build/`.
 
+## Refreshed audit after reversal and leading counts
+
+```powershell
+.venv\Scripts\python.exe -B tools/survey_callees.py build/prepared/oot111 `
+  --baseline build/function-profiles/oot111-plt-after-bit-ops-v1.json `
+  --report build/function-profiles/oot111-callee-after-bit-ops-v1.json
+```
+
+The fresh audit matches this policy-6 baseline on original source/text hashes, decoder/model/limits, discovery counts and per-module/global outcomes. It reaches 135,020 semantic regions and retains 1,688 accepted policy-6 candidates. The dependency frontier contains **16,669 blocked roots, 5,562 distinct missing targets and 28,817 distinct caller-region/target edges**, compared with 16,692/5,620/28,913 before the one-source milestone. These overlapping dependency measurements are not predicted acceptance gains; policy 7 remains at 1,710 accepted structural regions.
+
+| Primary target class | Targets |
+| --- | ---: |
+| Metadata entry blocked during discovery | 3,435 |
+| Relocation-backed PLT stub | 2,125 |
+| Unseeded text target | 2 |
+
+Blocked metadata entries stop at indirect calls (1,184), unsupported encodings (1,046), window boundaries (977) and indirect jumps (228). No implemented reversal or leading-count mnemonic remains as a first unsupported frontier. Leading remaining stops include LDR forms (161), LDADD (104), FMOV (98), STR forms (87) and STP forms (78). Of 68 integer first stops, UMULH (20) and SMULH (3) motivate the next register-only arithmetic milestone; CRC32 and EXTR/ROR forms remain separate gaps. No promise of 23 accepted functions follows from those high-multiply target counts.
+
+The 2,125 frontier PLT snapshots resolve to blocked metadata (1,098), discovered policy-6-rejected regions (936) and verified ordinary leaves (91). The separate global eligible catalog contains 430 bridges. Both unseeded probes remain rejected and unregistered. All original-byte probes stay diagnostic; no runtime ranges or GOT guarantees, game C, native callbacks or game execution are produced. Detailed reports remain ignored under `build/`.
+
 ## Verification
 
 Thirteen synthetic tests cover real mixed closures, shared and transitive frontiers, repeated BL-site deduplication, unavailable targets, blocked metadata and unchanged boundaries, word/symbol limits, overlapping internal-label probes, successful probes that stay unregistered, dependencies between probes that remain unresolved, relocation-backed PLT snapshots and nonlocal symbols, lookalike-stub rejection, non-text/gap/unmapped targets, deterministic accounting, strict baseline comparisons, input integrity, fresh output, and CLI rollback. The complete regression suite remains applicable. No game callbacks are generated or executed during these checks.

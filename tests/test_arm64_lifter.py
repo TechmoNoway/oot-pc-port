@@ -239,9 +239,9 @@ class NativeDifferentialTests(unittest.TestCase):
         self.assertGreater(report["memory_trial_count"], 5000)
         self.assertGreater(report["reference_fault_trial_count"], 100)
         self.assertIn("retry_after_mapping", report["memory_policy_checks"])
-        self.assertEqual(report["verified_synthetic_leaf_count"], 10)
-        self.assertEqual(report["independent_flag_trials"], 70048)
-        self.assertEqual(report["independent_register_trials"], 23552)
+        self.assertEqual(report["verified_synthetic_leaf_count"], 12)
+        self.assertEqual(report["independent_flag_trials"], 98574)
+        self.assertEqual(report["independent_register_trials"], 50296)
         self.assertGreaterEqual(report["whole_leaf_result_trials"], 768)
         self.assertTrue(path.is_file())
 

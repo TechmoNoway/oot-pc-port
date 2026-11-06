@@ -18,7 +18,8 @@ FORMS = ("move_wide", "addsub_immediate", "addsub_shifted", "logical_shifted",
          "test_branch", "branch_register", "nop", "loadstore_unsigned", "loadstore_immediate",
          "loadstore_register", "load_literal", "loadstore_pair", "logical_immediate", "bitfield",
          "conditional_select", "conditional_compare_register", "conditional_compare_immediate",
-         "addsub_extended", "variable_shift", "multiply_add", "multiply_long", "divide", "addsub_carry", "load_acquire_rcpc")
+         "addsub_extended", "variable_shift", "multiply_add", "multiply_long", "divide", "addsub_carry", "load_acquire_rcpc",
+         "bit_reverse", "byte_reverse", "count_leading")
 MEMORY_FORMS = frozenset(("loadstore_unsigned", "loadstore_immediate", "loadstore_register", "load_literal", "loadstore_pair", "load_acquire_rcpc"))
 
 
@@ -91,6 +92,16 @@ def decode_instruction(word, pc):
 
     if word == 0xD503201F:
         return ins("nop")
+    one_source = word & 0x7FFFFC00
+    if one_source in (0x5AC00000, 0x5AC00400, 0x5AC00800, 0x5AC00C00, 0x5AC01000, 0x5AC01400):
+        operation = (word >> 10) & 7
+        if operation == 3 and width == 32:
+            reject("reserved 64-bit reversal container in W encoding")
+        if operation == 0:
+            return ins("bit_reverse", width=width, rd=rd, rn=rn)
+        if operation <= 3:
+            return ins("byte_reverse", width=width, rd=rd, rn=rn, amount=8 << operation)
+        return ins("count_leading", width=width, rd=rd, rn=rn, operation=operation - 4)
     if word & 0x3FFFFC00 == 0x38BFC000:
         size = word >> 30
         return ins("load_acquire_rcpc", rd=rd, rn=rn, access_size=1 << size,
@@ -344,6 +355,12 @@ def body(ins):
         lines.extend([f"uint64_t r = oot_arm64_condition(s->nzcv, {ins.condition}) ? {read(rn)} : ({other});", write("r")])
     elif ins.form == "variable_shift":
         lines.append(write(f"oot_arm64_shift({read(rn)}, {ins.shift}, (unsigned)({read(rm)} & {width - 1}), {width})"))
+    elif ins.form == "bit_reverse":
+        lines.append(write(f"oot_arm64_rbit({read(rn)}, {width})"))
+    elif ins.form == "byte_reverse":
+        lines.append(write(f"oot_arm64_reverse_bytes({read(rn)}, {width}, {ins.amount})"))
+    elif ins.form == "count_leading":
+        lines.append(write(f"oot_arm64_leading({read(rn)}, {width}, {ins.operation})"))
     elif ins.form == "multiply_add":
         operator = "-" if ins.operation else "+"
         lines.append(write(f"{read(ins.ra)} {operator} ({read(rn)} * {read(rm)})"))

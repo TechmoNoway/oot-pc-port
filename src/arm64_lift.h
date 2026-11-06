@@ -78,6 +78,46 @@ static inline uint32_t oot_arm64_nz(uint64_t value, unsigned width)
            (value == 0 ? UINT32_C(0x40000000) : 0);
 }
 
+/* Exact one-source encodings guarantee W/X widths and valid byte containers. */
+static inline uint64_t oot_arm64_rbit(uint64_t value, unsigned width)
+{
+    uint64_t result = 0;
+    unsigned i;
+    for (i = 0; i < width; ++i) {
+        result = (result << 1) | (value & 1);
+        value >>= 1;
+    }
+    return result;
+}
+
+static inline uint64_t oot_arm64_reverse_bytes(uint64_t value, unsigned width,
+                                              unsigned container)
+{
+    uint64_t result = 0;
+    unsigned base, byte;
+    for (base = 0; base < width; base += container)
+        for (byte = 0; byte < container; byte += 8)
+            result |= ((value >> (base + byte)) & UINT64_C(0xff)) <<
+                      (base + container - 8 - byte);
+    return result;
+}
+
+static inline uint64_t oot_arm64_leading(uint64_t value, unsigned width,
+                                       unsigned sign_bits)
+{
+    uint64_t bit = UINT64_C(1) << (width - 1), mask = oot_arm64_mask(width);
+    unsigned count = 0;
+    value &= mask;
+    if (sign_bits && (value & bit))
+        value = ~value & mask;
+    while (bit && !(value & bit)) {
+        ++count;
+        bit >>= 1;
+    }
+    /* A normalized sign-bit operand always has at least one leading zero. */
+    return sign_bits ? count - 1 : count;
+}
+
 static inline uint64_t oot_arm64_addsub(OotArm64State *s, uint64_t left,
                                        uint64_t right, unsigned width,
                                        unsigned subtract, unsigned set_flags)

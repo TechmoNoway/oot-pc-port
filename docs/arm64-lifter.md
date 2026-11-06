@@ -19,6 +19,7 @@ This milestone translates bounded raw ARM64 instruction ranges to C17. Synthetic
 | Variable shift | LSLV, LSRV, ASRV, RORV with masked shift counts |
 | Multiply/divide | MADD, MSUB, MUL, MNEG, UDIV, SDIV in W/X widths |
 | Widening multiply | SMADDL/SMSUBL/UMADDL/UMSUBL, W multiplicands with X accumulator/destination, multiply/negate aliases |
+| Reversal and leading counts | RBIT, REV16, REV32/REV, CLZ/CLS; exact scalar W/X variants with preserved NZCV |
 | PC-relative addresses | ADR and ADRP with signed displacements |
 | Direct control flow | B, BL, B.cond, CBZ, CBNZ, TBZ, TBNZ |
 | Indirect control flow | BR, BLR, RET with explicit guest PC and link-register updates |
@@ -31,7 +32,7 @@ This milestone translates bounded raw ARM64 instruction ranges to C17. Synthetic
 
 Aliases such as CMP, CMN, TST, and register MOV inherit their underlying encoding semantics. W-register writes zero the upper X bits. Flag-setting arithmetic computes N/Z/C/V with unsigned operations; logical flag writes clear C/V. Shifts avoid signed C overflow, implementation-defined signed right shifts, and shifts by the operand width. Reserved encodings and unsupported forms fail before source emission.
 
-EXTR, bit-reversal/counting forms, high multiply, non-temporal/tagged pairs, unprivileged transfers, prefetch, other ordered memory forms, system registers, SVC, pointer authentication, atomics/exclusives, SIMD/FP, and setjmp/longjmp services are not implemented. Constrained-unpredictable base/transfer overlap with writeback and identical pair-load destinations are rejected. Repeated pair-store sources are allowed. Recognizing a BR/BLR encoding does not discover its possible destinations or supply a callable native target.
+EXTR, high multiply, other one-source integer forms, non-temporal/tagged pairs, unprivileged transfers, prefetch, other ordered memory forms, system registers, SVC, pointer authentication, atomics/exclusives, SIMD/FP, and setjmp/longjmp services are not implemented. Constrained-unpredictable base/transfer overlap with writeback and identical pair-load destinations are rejected. Repeated pair-store sources are allowed. Recognizing a BR/BLR encoding does not discover its possible destinations or supply a callable native target.
 
 The [RCpc ordered-load model](ordered-loads.md) specifies alignment, shared-backing ownership, the conservative ordering contract, and separate value/fault/concurrency validation. It does not broaden existing function-verifier memory policies.
 
@@ -109,6 +110,8 @@ The extended integer milestone passes 72,764 native/reference comparisons across
 The [conditional-compare milestone](conditional-compare.md) extends the current combined suite to 123,627 comparisons across 35 programs on MSVC/GCC, with 47,456 independent flag checks and eight complete artificial leaves. Actual schema-8 PAC/PLT factories add 256 whole calls and 6,912 individual instruction prefixes per compiler. Existing memory permissions and ABI layouts are unchanged.
 
 The later [widening-multiply milestone](long-multiply.md) brings the combined suite to 146,219 comparisons across 38 programs and ten verified artificial leaves on MSVC/GCC. W multiplicands, X accumulation/destination, signed/unsigned arithmetic, aliases and unchanged NZCV have independent mathematical checks. Its actual schema-8 PAC/PLT factories add 256 whole calls and 7,168 individual instruction prefixes per compiler. High multiply and SIMD widening arithmetic remain separate work.
+
+The [reversal/leading-count milestone](bit-operations.md) adds scalar RBIT/REV16/REV32/REV/CLZ/CLS and brings the combined suite to 174,745 comparisons across 42 programs and twelve artificial leaves on MSVC/GCC. String/byte expectations, walking bits, every count boundary and W upper-bit clearing supplement reference execution. Four actual schema-8 bundles add 512 calls and 15,872 instruction prefixes per compiler, including saved W19 destinations and full X19 restoration. Flags, memory permissions and ABI layouts remain unchanged.
 
 The [native image bridge](runtime-images.md) supplies mapped linked bytes and a guarded synthetic stack. Verified-leaf emission supplies CFG descriptors and exact source-byte hash getters for the [controlled dispatcher](leaf-dispatch.md). [Hash-bound registry preparation](bound-dispatch.md) freezes a matching snapshot and compiled factory and supports a separate linear framed-caller profile. Broader function profiles, remaining instruction forms, and process/runtime services are still required before executing game functions.
 
