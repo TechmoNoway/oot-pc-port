@@ -133,6 +133,32 @@ The local 1.1.1 catalog contains 386 eligible bridges, including all 72 in the e
 
 First call-dependency failures decrease from 16,458 to 16,405. Of the 53 regions advancing past that first category, only 15 become accepted: memory-policy failures increase from 11,409 to 11,437 and bounds/registry failures from 162 to 172. Runtime GOT checks remain obligations, and the report explicitly records that it has not performed them or supplied runtime read ranges. No game C, callbacks or execution are produced by the survey.
 
+## After conditional comparisons
+
+The [CCMP/CCMN milestone](conditional-compare.md) adds exact flag-only register/immediate semantics to the existing value forms, without changing profile permissions, limits, models, descriptor versions or callee requirements. Fresh default and `--plt` surveys retain all module source and linked-text hashes, metadata entries and syntax-decoder settings. Discovery traverses the new instructions rather than stripping them or treating them as hints.
+
+```powershell
+.venv\Scripts\python.exe -B tools/survey_function_profiles.py build/prepared/oot111 `
+  --report build/function-profiles/oot111-default-after-ccmp-v1.json
+.venv\Scripts\python.exe -B tools/survey_function_profiles.py build/prepared/oot111 `
+  --plt --report build/function-profiles/oot111-plt-after-ccmp-v1.json
+```
+
+| Measurement | Before CCMP/CCMN | After |
+| --- | ---: | ---: |
+| Metadata entry candidates | 284,396 | 284,396 |
+| Default discovered regions | 58,663 | 59,525 |
+| Default accepted ordinary leaves | 40,038 | 40,098 |
+| PAC-enabled discovered regions | 127,551 | 130,808 |
+| PAC-enabled discovery blockers | 156,845 | 153,588 |
+| Eligible global PLT-to-leaf catalog | 386 | 404 |
+| Policy-6 accepted structural regions | 1,688 | 1,688 |
+| Policy-7 accepted structural regions | 1,703 | 1,703 |
+
+The 60 additional ordinary leaf candidates bring their declared word count from 100,995 to 101,737. Older default framed policies still accept none. Policy 6 retains 13,519 accepted root words and policy 7 retains 13,645, with unchanged module accepted counts. No CCMP/CCMN first-unsupported frontier remains in either survey; the preceding PAC discovery had 6,778 CCMP and 251 CCMN first stops. These are early-stop diagnostics, not total instruction counts.
+
+Discovering more regions also exposes more later failures: policy-6 call dependencies rise from 16,458 to 16,578 and memory-policy failures from 11,409 to 11,636; policy-7 call dependencies rise from 16,405 to 16,522 and memory-policy failures from 11,437 to 11,666. The larger bridge catalog does not imply that any additional framed closure now meets all requirements. The refreshed [callee audit](callee-audit.md) matches the new policy-6 baseline and identifies remaining blockers. All measurements remain static, with no game translation, callback registration, execution or supplied runtime ranges/GOT guarantees.
+
 ## Verification
 
 Synthetic tests cover positive leaf and framed cases under all profiles, real transitive closures, unavailable callees, call cycles, metadata aliases/window boundaries, multiple returns, indirect boundaries, unreachable words, samples/limits, PAC-prefix rejection, source preservation, fresh-output checks, and tampered-input rejection. The full Python suite continues to run the native/reference profile tests; the survey itself remains static and does not compile or run candidates.

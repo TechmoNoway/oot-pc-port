@@ -26,9 +26,9 @@ PLT recognition reuses the existing exact ADRP/LDR/ADD/BR pattern and relocation
 
 Reports contain original-byte hashes, private addresses, symbol names, all frontier/root references, bounded samples, and aggregate counts. They contain no generated game C or serialized native pointers. The audit supplies no runtime read ranges, registers no callbacks, and executes no guest code.
 
-## Local 1.1.1 result
+## Local 1.1.1 result before conditional comparisons
 
-The fresh audit matches the policy-6 baseline on all module source/text hashes and aggregate outcomes:
+The pre-CCMP/CCMN audit matches its policy-6 baseline on all module source/text hashes and aggregate outcomes:
 
 | Measurement | Count |
 | --- | ---: |
@@ -63,6 +63,26 @@ The 1,973 PLT stubs reference 1,880 distinct linked snapshot addresses. Their on
 This points to two concrete implementation areas: an explicit verified PLT tail-transfer boundary, initially restricted to already verified register-only leaves, and missing instruction families such as conditional compare. Adding more entry seeds alone would address little of this measured frontier. The 72 leaf-directed stubs are candidates for a future bounded bridge, not a promise that 72 functions or any fixed number of roots will become accepted. Exact stub/GOT/target checks, instruction budgets, retained ownership, and synthetic native/reference validation must precede such an extension.
 
 The later [policy-7 PLT milestone](plt-dispatch.md) implements this bounded transfer contract and verifies all 72 original frontier stubs. Its separate static survey accepts 1,703 candidates, up 15. This historical audit remains a policy-6 baseline; its snapshot annotations still grant no runtime dispatch permissions.
+
+## Refreshed audit after CCMP/CCMN
+
+```powershell
+.venv\Scripts\python.exe -B tools/survey_callees.py build/prepared/oot111 `
+  --baseline build/function-profiles/oot111-plt-after-ccmp-v1.json `
+  --report build/function-profiles/oot111-callee-after-ccmp-v1.json
+```
+
+The refreshed original-byte audit matches the new survey's policy-6 outcomes, discovery counts, module source/text hashes, decoder, limits and PAC model. Discovery now reaches 130,808 regions, while accepted policy-6 regions remain 1,688. There are 16,578 dependency-blocked roots, **5,519 distinct missing targets** and 28,545 frontier caller-region/target edges. Broader discovery accounts for changes to this frontier; these counts are not acceptance predictions.
+
+| Primary target class | Targets |
+| --- | ---: |
+| Metadata entry blocked during discovery | 3,454 |
+| Relocation-backed PLT stub | 2,063 |
+| Unseeded text target | 2 |
+
+The blocked metadata entries stop at unsupported encodings (1,369), indirect calls (1,037), window boundaries (839) and indirect jumps (209). CCMP and CCMN no longer appear as first unsupported mnemonics. Remaining leading stops include LDR forms (143), UMADDL (134), SMADDL (126) and FMOV (99). UMULL (52) and SMULL (44) are long-multiply aliases, bringing that combined instruction frontier to **356 distinct targets**. Long multiply/add/subtract is the next integer-semantics milestone; addressing, memory effects and broader calls still need separate work.
+
+The 2,063 frontier PLT stubs have linked snapshots pointing to blocked metadata entries (1,124), discovered but policy-6-rejected regions (855), and verified ordinary leaves (84). This is separate from the global 404-entry eligible bridge catalog and from policy-7 acceptance, which remains 1,703. Both unseeded probes remain policy-rejected and unregistered. No game callbacks are generated or executed, and no runtime capabilities are granted.
 
 ## Verification
 

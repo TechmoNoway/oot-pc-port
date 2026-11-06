@@ -17,7 +17,8 @@ FORMS = ("move_wide", "addsub_immediate", "addsub_shifted", "logical_shifted",
          "pc_relative", "branch_immediate", "branch_condition", "compare_branch",
          "test_branch", "branch_register", "nop", "loadstore_unsigned", "loadstore_immediate",
          "loadstore_register", "load_literal", "loadstore_pair", "logical_immediate", "bitfield",
-         "conditional_select", "addsub_extended", "variable_shift", "multiply_add", "divide", "addsub_carry", "load_acquire_rcpc")
+         "conditional_select", "conditional_compare_register", "conditional_compare_immediate",
+         "addsub_extended", "variable_shift", "multiply_add", "divide", "addsub_carry", "load_acquire_rcpc")
 MEMORY_FORMS = frozenset(("loadstore_unsigned", "loadstore_immediate", "loadstore_register", "load_literal", "loadstore_pair", "load_acquire_rcpc"))
 
 
@@ -57,6 +58,7 @@ class Instruction:
     top_mask: int = 0
     condition: int = 0
     ra: int = 0
+    nzcv: int = 0
 
 
 def bit_masks(n, imms, immr, width, logical):
@@ -107,6 +109,13 @@ def decode_instruction(word, pc):
     if word & 0x3FE00800 == 0x1A800000:
         return ins("conditional_select", width=width, rd=rd, rn=rn, rm=rm,
                    condition=(word >> 12) & 15, operation=(((word >> 30) & 1) << 1) | ((word >> 10) & 1))
+    if word & 0x3FE00410 == 0x3A400000:
+        immediate = bool(word & (1 << 11))
+        # The low nibble is fallback NZCV, never a destination register.
+        return ins("conditional_compare_immediate" if immediate else "conditional_compare_register",
+                   width=width, rd=31, rn=rn, rm=0 if immediate else rm,
+                   immediate=rm if immediate else 0, operation=(word >> 30) & 1,
+                   flags=True, condition=(word >> 12) & 15, nzcv=word & 15)
     if word & 0x1FE00000 == 0x0B200000:
         amount = (word >> 10) & 7
         if amount > 4:
@@ -304,6 +313,11 @@ def body(ins):
     elif ins.form == "addsub_carry":
         lines.extend([f"uint64_t a = {read(rn)};", f"uint64_t b = {read(rm)};",
                       f"uint64_t r = oot_arm64_carry(s, a, b, {width}, {ins.operation}, {int(ins.flags)});", write("r")])
+    elif ins.form in ("conditional_compare_register", "conditional_compare_immediate"):
+        right = constant(ins.immediate) if ins.form == "conditional_compare_immediate" else read(rm)
+        lines.extend([f"if (oot_arm64_condition(s->nzcv, {ins.condition})) {{",
+                      f"    (void)oot_arm64_addsub(s, {read(rn)}, {right}, {width}, {ins.operation}, 1);",
+                      "} else {", f"    s->nzcv = UINT32_C(0x{ins.nzcv << 28:08x});", "}"])
     elif ins.form == "logical_immediate":
         operator = ("&", "|", "^", "&")[ins.operation]
         lines.append(f"uint64_t r = {read(rn)} {operator} {constant(ins.mask)};")

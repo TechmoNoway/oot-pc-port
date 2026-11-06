@@ -22,6 +22,7 @@ from leaf_validation import leaf_programs
 from leaf_verifier import emit_leaf_descriptor, verify_leaf
 from frame_verifier import emit_frame_descriptor, verify_frame
 from ordered_programs import ordered_programs
+from conditional_programs import conditional_programs
 
 ROOT = Path(__file__).resolve().parent.parent
 SEED = 0x0CA41234
@@ -146,7 +147,8 @@ def synthetic_programs():
     programs.append(Program("outside_entry", [0xD503201F],
                             [Trial(index, [0] * 31, 0, 0, budget)
                              for index in (-1, 1) for budget in (0, 1)]))
-    return programs + memory_programs() + pair_programs() + integer_programs() + leaf_programs() + ordered_programs()
+    return (programs + memory_programs() + pair_programs() + integer_programs() + leaf_programs() +
+            ordered_programs() + conditional_programs())
 
 
 def find_cmake():
@@ -271,6 +273,9 @@ def validate_program(library, program):
         expected_status = int(expected[2] in pcs)
         count = c_uint64(U64)
         status = native(byref(state), None, trial.budget, byref(count))
+        if trial.expected_nzcv is not None:
+            require(state.nzcv == expected[3] == trial.expected_nzcv,
+                    f"independent flag result mismatch: {program.name} {case_index}")
         if trial.expected_x is not None:
             require(program.leaf and status == 0 and all(state.x[r] == v for r, v in trial.expected_x.items()),
                     f"complete leaf mathematical result mismatch: {program.name} {case_index}")
@@ -298,6 +303,7 @@ def run_validation(mode="cmake"):
               "memory_trial_count": sum(len(p.trials) for p in programs if p.memory),
               "verified_synthetic_leaf_count": sum(p.leaf for p in programs),
               "whole_leaf_result_trials": sum(t.expected_x is not None for p in programs if p.leaf for t in p.trials),
+              "independent_flag_trials": sum(t.expected_nzcv is not None for p in programs for t in p.trials),
               "memory_policy_checks": memory_policy,
               "reference_fault_trial_count": sum(t.expected_fault is not None for p in programs if p.memory for t in p.trials),
               "fault_policy": "preflight whole scalar access; cross-boundary store atomicity is a project policy, not hardware equivalence",

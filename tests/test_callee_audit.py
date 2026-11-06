@@ -58,7 +58,7 @@ class CalleeAuditTests(unittest.TestCase):
         self.assertTrue(r['baseline_comparison']['policy_outcomes_match'])
 
     def test_metadata_unsupported_indirect_and_window_failures_are_not_reprobed(self):
-        for code,reason in ((bytes.fromhex('000041fa'),'unsupported_encoding'),(NOP.to_bytes(4,'little'),'window_boundary'),
+        for code,reason in ((bytes.fromhex('2010c0da'),'unsupported_encoding'),(NOP.to_bytes(4,'little'),'window_boundary'),
                             (0xD61F0000.to_bytes(4,'little'),'indirect_jump')):
             m=shared_fixture({0xc4:RET},code);r=audit_callees([m]);row=r['targets'][0]
             self.assertEqual(row['kind'],'discovery_blocked_metadata_entry');self.assertEqual(row['metadata']['failure']['reason'],reason)

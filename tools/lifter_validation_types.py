@@ -1,7 +1,7 @@
 """Native validation ABI and synthetic program descriptions."""
 
 from ctypes import POINTER, Structure, c_size_t, c_uint8, c_uint32, c_uint64
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import struct
 
 BASE = 0x1000000
@@ -38,6 +38,7 @@ class Trial:
     nzcv: int
     budget: int = 1
     expected_x: dict | None = None
+    expected_nzcv: int | None = field(default=None, kw_only=True)
 
 
 @dataclass(frozen=True)

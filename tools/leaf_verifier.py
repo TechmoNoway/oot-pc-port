@@ -11,6 +11,7 @@ MAX_LEAF_WORDS = 256
 POLICY = "acyclic-register-leaf-v1"
 VALUE_FORMS = frozenset(("move_wide", "addsub_immediate", "addsub_shifted", "addsub_extended",
     "addsub_carry", "logical_shifted", "logical_immediate", "bitfield", "conditional_select",
+    "conditional_compare_register", "conditional_compare_immediate",
     "pc_relative", "variable_shift", "multiply_add", "divide"))
 
 

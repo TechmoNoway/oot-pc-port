@@ -15,6 +15,7 @@ This milestone translates bounded raw ARM64 instruction ranges to C17. Synthetic
 | Extended arithmetic | ADD/ADDS/SUB/SUBS with unsigned/signed byte, halfword, word, X extensions and shifts 0-4 |
 | Carry arithmetic | ADC, ADCS, SBC, SBCS |
 | Conditional select | CSEL, CSINC, CSINV, CSNEG and their aliases, all condition codes |
+| Conditional compare | CCMP/CCMN register and unsigned imm5, W/X widths, all conditions and fallback NZCV |
 | Variable shift | LSLV, LSRV, ASRV, RORV with masked shift counts |
 | Multiply/divide | MADD, MSUB, MUL, MNEG, UDIV, SDIV in W/X widths |
 | PC-relative addresses | ADR and ADRP with signed displacements |
@@ -29,7 +30,7 @@ This milestone translates bounded raw ARM64 instruction ranges to C17. Synthetic
 
 Aliases such as CMP, CMN, TST, and register MOV inherit their underlying encoding semantics. W-register writes zero the upper X bits. Flag-setting arithmetic computes N/Z/C/V with unsigned operations; logical flag writes clear C/V. Shifts avoid signed C overflow, implementation-defined signed right shifts, and shifts by the operand width. Reserved encodings and unsupported forms fail before source emission.
 
-Conditional compare, EXTR, bit-reversal/counting forms, long/high multiply, non-temporal/tagged pairs, unprivileged transfers, prefetch, other ordered memory forms, system registers, SVC, pointer authentication, atomics/exclusives, SIMD/FP, and setjmp/longjmp services are not implemented. Constrained-unpredictable base/transfer overlap with writeback and identical pair-load destinations are rejected. Repeated pair-store sources are allowed. Recognizing a BR/BLR encoding does not discover its possible destinations or supply a callable native target.
+EXTR, bit-reversal/counting forms, long/high multiply, non-temporal/tagged pairs, unprivileged transfers, prefetch, other ordered memory forms, system registers, SVC, pointer authentication, atomics/exclusives, SIMD/FP, and setjmp/longjmp services are not implemented. Constrained-unpredictable base/transfer overlap with writeback and identical pair-load destinations are rejected. Repeated pair-store sources are allowed. Recognizing a BR/BLR encoding does not discover its possible destinations or supply a callable native target.
 
 The [RCpc ordered-load model](ordered-loads.md) specifies alignment, shared-backing ownership, the conservative ordering contract, and separate value/fault/concurrency validation. It does not broaden existing function-verifier memory policies.
 
@@ -103,6 +104,8 @@ Paired-transfer validation covers W/X widths, LDPSW sign extension, positive/neg
 The paired-transfer milestone extends the suite to 26,168 comparisons across 20 synthetic programs, including native stack frames and 163 reference access-fault cases. Both MSVC and GCC also pass the separate native image-bridge tests.
 
 The extended integer milestone passes 72,764 native/reference comparisons across 27 synthetic programs, including six [verified leaf functions](leaf-verification.md) with 768 independent mathematical result checks. The leaf tests also exercise zero/partial budgets. These are entirely artificial programs; game candidates are only analyzed statically.
+
+The [conditional-compare milestone](conditional-compare.md) extends the current combined suite to 123,627 comparisons across 35 programs on MSVC/GCC, with 47,456 independent flag checks and eight complete artificial leaves. Actual schema-8 PAC/PLT factories add 256 whole calls and 6,912 individual instruction prefixes per compiler. Existing memory permissions and ABI layouts are unchanged.
 
 The [native image bridge](runtime-images.md) supplies mapped linked bytes and a guarded synthetic stack. Verified-leaf emission supplies CFG descriptors and exact source-byte hash getters for the [controlled dispatcher](leaf-dispatch.md). [Hash-bound registry preparation](bound-dispatch.md) freezes a matching snapshot and compiled factory and supports a separate linear framed-caller profile. Broader function profiles, remaining instruction forms, and process/runtime services are still required before executing game functions.
 
