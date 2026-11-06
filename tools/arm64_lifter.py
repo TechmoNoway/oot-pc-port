@@ -18,7 +18,7 @@ FORMS = ("move_wide", "addsub_immediate", "addsub_shifted", "logical_shifted",
          "test_branch", "branch_register", "nop", "loadstore_unsigned", "loadstore_immediate",
          "loadstore_register", "load_literal", "loadstore_pair", "logical_immediate", "bitfield",
          "conditional_select", "conditional_compare_register", "conditional_compare_immediate",
-         "addsub_extended", "variable_shift", "multiply_add", "divide", "addsub_carry", "load_acquire_rcpc")
+         "addsub_extended", "variable_shift", "multiply_add", "multiply_long", "divide", "addsub_carry", "load_acquire_rcpc")
 MEMORY_FORMS = frozenset(("loadstore_unsigned", "loadstore_immediate", "loadstore_register", "load_literal", "loadstore_pair", "load_acquire_rcpc"))
 
 
@@ -128,6 +128,9 @@ def decode_instruction(word, pc):
     if word & 0x7FE00000 == 0x1B000000:
         return ins("multiply_add", width=width, rd=rd, rn=rn, rm=rm, ra=(word >> 10) & 31,
                    operation=(word >> 15) & 1)
+    if word & 0xFF600000 == 0x9B200000:
+        return ins("multiply_long", width=64, rd=rd, rn=rn, rm=rm, ra=(word >> 10) & 31,
+                   operation=(word >> 15) & 1, sign_extend=not bool(word & (1 << 23)))
     opcode = word & 0x7FE0FC00
     if opcode in (0x1AC02000, 0x1AC02400, 0x1AC02800, 0x1AC02C00):
         return ins("variable_shift", width=width, rd=rd, rn=rn, rm=rm, shift=(word >> 10) & 3)
@@ -344,6 +347,14 @@ def body(ins):
     elif ins.form == "multiply_add":
         operator = "-" if ins.operation else "+"
         lines.append(write(f"{read(ins.ra)} {operator} ({read(rn)} * {read(rm)})"))
+    elif ins.form == "multiply_long":
+        left, right = (f"oot_arm64_read(s, {reg}, 32, 0)" for reg in (rn, rm))
+        if ins.sign_extend:
+            left, right = (f"oot_arm64_sign_extend({value}, 32)" for value in (left, right))
+        operator = "-" if ins.operation else "+"
+        # Unsigned 64-bit arithmetic implements the signed result modulo 2^64.
+        lines.extend([f"uint64_t a = {left};", f"uint64_t b = {right};",
+                      f"uint64_t accumulator = {read(ins.ra)};", write(f"accumulator {operator} (a * b)")])
     elif ins.form == "divide":
         lines.append(write(f"oot_arm64_divide({read(rn)}, {read(rm)}, {width}, {ins.operation})"))
     elif ins.form == "logical_shifted":

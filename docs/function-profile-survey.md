@@ -159,6 +159,31 @@ The 60 additional ordinary leaf candidates bring their declared word count from 
 
 Discovering more regions also exposes more later failures: policy-6 call dependencies rise from 16,458 to 16,578 and memory-policy failures from 11,409 to 11,636; policy-7 call dependencies rise from 16,405 to 16,522 and memory-policy failures from 11,437 to 11,666. The larger bridge catalog does not imply that any additional framed closure now meets all requirements. The refreshed [callee audit](callee-audit.md) matches the new policy-6 baseline and identifies remaining blockers. All measurements remain static, with no game translation, callback registration, execution or supplied runtime ranges/GOT guarantees.
 
+## After widening multiplication
+
+The [long-multiply milestone](long-multiply.md) adds exact SMADDL/SMSUBL/UMADDL/UMSUBL semantics and their multiply/negate aliases. Fresh original-byte surveys retain all module source/text hashes, syntax-decoder settings, limits, models, policies and the 284,396 metadata-entry denominator.
+
+```powershell
+.venv\Scripts\python.exe -B tools/survey_function_profiles.py build/prepared/oot111 `
+  --report build/function-profiles/oot111-default-after-long-multiply-v1.json
+.venv\Scripts\python.exe -B tools/survey_function_profiles.py build/prepared/oot111 `
+  --plt --report build/function-profiles/oot111-plt-after-long-multiply-v1.json
+```
+
+| Measurement | After CCMP/CCMN | After long multiply |
+| --- | ---: | ---: |
+| Default discovered regions | 59,525 | 60,537 |
+| Default accepted ordinary leaves | 40,098 | 40,144 |
+| PAC-enabled discovered regions | 130,808 | 133,760 |
+| PAC-enabled discovery blockers | 153,588 | 150,636 |
+| Eligible global PLT-to-leaf catalog | 404 | 423 |
+| Policy-6 accepted structural regions | 1,688 | 1,688 |
+| Policy-7 accepted structural regions | 1,703 | 1,710 |
+
+The 46 additional ordinary leaves bring their declared word count to 102,509, from 101,737. Default accepted leaves are rtld 5, main 38,546, subsdk0 32 and SDK 1,561; older default framed policies still accept none. Policy 6 retains 13,519 accepted root words. Policy 7 reaches **13,763 root words**: main retains 1,686 accepted regions and SDK rises from 17 to 24. These seven additional regions have real production closure proofs; an increase in discovered regions or eligible stubs alone is not an acceptance result.
+
+No newly supported long-multiply mnemonic or alias remains as a first unsupported discovery stop. Later barriers are still exposed: policy-6 call dependencies rise from 16,578 to 16,692 and memory-policy failures from 11,636 to 11,989; policy-7 call dependencies rise from 16,522 to 16,624 and memory-policy failures from 11,666 to 12,021. Wider discovery changes those denominators and first failures. The [callee audit](callee-audit.md) reproduces the new policy-6 baseline. Surveys grant no runtime read ranges/live GOT guarantees and generate/register/execute no game callbacks. Full reports remain private under `build/function-profiles/`.
+
 ## Verification
 
 Synthetic tests cover positive leaf and framed cases under all profiles, real transitive closures, unavailable callees, call cycles, metadata aliases/window boundaries, multiple returns, indirect boundaries, unreachable words, samples/limits, PAC-prefix rejection, source preservation, fresh-output checks, and tampered-input rejection. The full Python suite continues to run the native/reference profile tests; the survey itself remains static and does not compile or run candidates.

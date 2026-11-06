@@ -30,7 +30,7 @@ A bounded [ARM64 C lifter](docs/arm64-lifter.md) translates selected integer ope
 
 [Fixed frame layouts](docs/stack-layouts.md) add separate SUB/ADD stack allocation, offset FP/LR records, sparse save slots, delayed FP setup, and negative FP-relative locals. Synthetic mixed-layout calls and a full 16-frame stack boundary match ARM64 reference execution.
 
-A [static profile survey](docs/function-profile-survey.md) measures the actual verifiers against metadata-rooted private game regions without translation or execution. The current default local 1.1.1 survey accepts 40,098 leaf candidates; its older framed policies remain blocked.
+A [static profile survey](docs/function-profile-survey.md) measures the actual verifiers against metadata-rooted private game regions without translation or execution. The current default local 1.1.1 survey accepts 40,144 leaf candidates; its older framed policies remain blocked.
 
 An opt-in [pointer authentication model](docs/pointer-authentication.md) implements QARMA5 signing, authentication, and authenticated returns for a specified 39-bit address configuration. A separate [PAC-aware dispatcher](docs/pauth-stack-dispatch.md) retains keys across yields, tracks signed frame records, and validates approved returns through policy 4/schema 5. Native synthetic tests pass on MSVC and GCC. A separate static survey accepts 1,686 PAC framed candidates; game code remains unexecuted.
 
@@ -40,11 +40,13 @@ An opt-in [pointer authentication model](docs/pointer-authentication.md) impleme
 
 [LR-pair frames](docs/lr-pair-frames.md) add policy 6/schema 7 for signed LR saved with X19-X28 while preserving FP. Mixed calls into FP/LR frames and ordinary leaves pass native/reference tests on MSVC/GCC. The static accepted count remains 1,688; further callee and write-effect requirements still block new game candidates.
 
-A [callee dependency audit](docs/callee-audit.md) now traces 16,578 dependency-blocked policy-6 roots to 5,519 distinct missing targets on the same verified inputs. Most are blocked metadata entries or PLT stubs; only two lack metadata. Diagnostic probes and linked GOT snapshots do not grant dispatch permissions or increase the accepted count.
+A [callee dependency audit](docs/callee-audit.md) now traces 16,692 dependency-blocked policy-6 roots to 5,620 distinct missing targets on the same verified inputs. Most are blocked metadata entries or PLT stubs; only two lack metadata. Diagnostic probes and linked GOT snapshots do not grant dispatch permissions or increase the accepted count.
 
-[Checked PLT dispatch](docs/plt-dispatch.md) adds policy 7/schema 8 for exact relocation-backed stubs targeting registered ordinary leaves. All four original instructions retain their state effects and budget accounting; current GOT and code hashes are checked across yields. Synthetic native tests pass on MSVC/GCC. Its static survey accepts 1,703 structural candidates, up 15, with game callbacks remaining ungenerated and unexecuted.
+[Checked PLT dispatch](docs/plt-dispatch.md) adds policy 7/schema 8 for exact relocation-backed stubs targeting registered ordinary leaves. All four original instructions retain their state effects and budget accounting; current GOT and code hashes are checked across yields. Synthetic native tests pass on MSVC/GCC. Its initial static survey accepted 1,703 structural candidates, up 15, with game callbacks remaining ungenerated and unexecuted.
 
-[Conditional comparisons](docs/conditional-compare.md) add CCMP/CCMN register/immediate semantics in both widths, with independent NZCV checks and synthetic PAC/PLT call prefixes on MSVC/GCC. Fresh static discovery reaches 130,808 regions with PAC enabled; ordinary leaf acceptance rises by 60 while policy-6/7 acceptance remains 1,688/1,703. Existing memory permissions and ABI layouts are unchanged.
+[Conditional comparisons](docs/conditional-compare.md) add CCMP/CCMN register/immediate semantics in both widths, with independent NZCV checks and synthetic PAC/PLT call prefixes on MSVC/GCC. At this milestone, static discovery reached 130,808 regions with PAC enabled; ordinary leaf acceptance rose by 60 while policy-6/7 acceptance remained 1,688/1,703.
+
+[Widening multiplication](docs/long-multiply.md) adds signed/unsigned multiply-add/subtract and multiply/negate aliases with W sources and X accumulation. Independent arithmetic and actual PAC/PLT factory prefixes pass on MSVC/GCC. Current static discovery reaches 133,760 PAC-enabled regions, with 40,144 ordinary leaf and 1,710 policy-7 structural candidates. Existing memory permissions and ABI layouts are unchanged.
 
 The game is not playable yet. Process startup, broader instruction semantics, operating-system services, and graphics remain to be implemented.
 

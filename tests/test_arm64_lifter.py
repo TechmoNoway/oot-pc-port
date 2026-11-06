@@ -186,7 +186,7 @@ class ExtendedIntegerDecoderTests(unittest.TestCase):
 
     def test_reserved_masks_and_unimplemented_integer_extensions_rejected(self):
         for word in (0x12400020, 0x9240FC20, 0x13400020, 0x9300FC20, 0xF3400020,
-                     0x0B221420, 0xBA820020, 0x9B220C20, 0x9AC20020):
+                     0x0B221420, 0xBA820020, 0x9B427C20, 0x9AC20020):
             with self.subTest(word=hex(word)), self.assertRaises(UnsupportedInstruction):
                 decode_instruction(word, BASE)
 
@@ -239,8 +239,9 @@ class NativeDifferentialTests(unittest.TestCase):
         self.assertGreater(report["memory_trial_count"], 5000)
         self.assertGreater(report["reference_fault_trial_count"], 100)
         self.assertIn("retry_after_mapping", report["memory_policy_checks"])
-        self.assertEqual(report["verified_synthetic_leaf_count"], 8)
-        self.assertEqual(report["independent_flag_trials"], 47456)
+        self.assertEqual(report["verified_synthetic_leaf_count"], 10)
+        self.assertEqual(report["independent_flag_trials"], 70048)
+        self.assertEqual(report["independent_register_trials"], 23552)
         self.assertGreaterEqual(report["whole_leaf_result_trials"], 768)
         self.assertTrue(path.is_file())
 

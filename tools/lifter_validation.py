@@ -23,6 +23,7 @@ from leaf_verifier import emit_leaf_descriptor, verify_leaf
 from frame_verifier import emit_frame_descriptor, verify_frame
 from ordered_programs import ordered_programs
 from conditional_programs import conditional_programs
+from multiply_programs import multiply_programs
 
 ROOT = Path(__file__).resolve().parent.parent
 SEED = 0x0CA41234
@@ -148,7 +149,7 @@ def synthetic_programs():
                             [Trial(index, [0] * 31, 0, 0, budget)
                              for index in (-1, 1) for budget in (0, 1)]))
     return (programs + memory_programs() + pair_programs() + integer_programs() + leaf_programs() +
-            ordered_programs() + conditional_programs())
+            ordered_programs() + conditional_programs() + multiply_programs())
 
 
 def find_cmake():
@@ -277,8 +278,9 @@ def validate_program(library, program):
             require(state.nzcv == expected[3] == trial.expected_nzcv,
                     f"independent flag result mismatch: {program.name} {case_index}")
         if trial.expected_x is not None:
-            require(program.leaf and status == 0 and all(state.x[r] == v for r, v in trial.expected_x.items()),
-                    f"complete leaf mathematical result mismatch: {program.name} {case_index}")
+            require((not program.leaf or status == 0) and
+                    all(state.x[r] == expected[0][r] == v for r, v in trial.expected_x.items()),
+                    f"independent register result mismatch: {program.name} {case_index}")
         if state.values() != expected or status != expected_status or count.value != steps[0]:
             raise AssertionError(json.dumps({"program": program.name, "case": case_index,
                 "word": f"0x{program.words[trial.index]:08x}" if 0 <= trial.index < len(program.words) else None,
@@ -303,6 +305,7 @@ def run_validation(mode="cmake"):
               "memory_trial_count": sum(len(p.trials) for p in programs if p.memory),
               "verified_synthetic_leaf_count": sum(p.leaf for p in programs),
               "whole_leaf_result_trials": sum(t.expected_x is not None for p in programs if p.leaf for t in p.trials),
+              "independent_register_trials": sum(t.expected_x is not None for p in programs for t in p.trials),
               "independent_flag_trials": sum(t.expected_nzcv is not None for p in programs for t in p.trials),
               "memory_policy_checks": memory_policy,
               "reference_fault_trial_count": sum(t.expected_fault is not None for p in programs if p.memory for t in p.trials),
