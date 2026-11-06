@@ -119,6 +119,12 @@ The local 1.1.1 run retains the preceding source/text hashes and all discovery d
 
 Synthetic survey tests accept a real LR-pair caller and FP/LR helper through this same production verifier and reject an unavailable callee. The game survey itself performs no translation, registration, or execution. Broader callee coverage and explicit write-effect contracts remain separate milestones.
 
+## Dependency-frontier audit
+
+The separate [callee audit](callee-audit.md) reproduces these policy-6 results and traces all missing targets in the existing closures of 16,458 roots whose final first rejection is `call_dependency`. It finds 5,463 distinct frontier targets: 3,488 discovery-blocked metadata entries, 1,973 relocation-backed PLT stubs, and two unseeded text targets. It records both direct callers and transitive root references, without treating those overlapping references as predicted acceptance gains.
+
+Bounded original-byte probes remain diagnostic and never satisfy other dependencies. PLT annotations record the linked GOT snapshot only. Seventy-two frontier PLT stubs resolve to existing verified register-only leaves, but an explicit verified transfer contract is still required before dispatch. The accepted count stays 1,688 and no game C or native callbacks are generated.
+
 ## Verification
 
 Synthetic tests cover positive leaf and framed cases under all profiles, real transitive closures, unavailable callees, call cycles, metadata aliases/window boundaries, multiple returns, indirect boundaries, unreachable words, samples/limits, PAC-prefix rejection, source preservation, fresh-output checks, and tampered-input rejection. The full Python suite continues to run the native/reference profile tests; the survey itself remains static and does not compile or run candidates.

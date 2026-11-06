@@ -40,6 +40,8 @@ An opt-in [pointer authentication model](docs/pointer-authentication.md) impleme
 
 [LR-pair frames](docs/lr-pair-frames.md) add policy 6/schema 7 for signed LR saved with X19-X28 while preserving FP. Mixed calls into FP/LR frames and ordinary leaves pass native/reference tests on MSVC/GCC. The static accepted count remains 1,688; further callee and write-effect requirements still block new game candidates.
 
+A [callee dependency audit](docs/callee-audit.md) traces 16,458 dependency-blocked roots to 5,463 distinct missing targets on the same verified inputs. Most are blocked metadata entries or PLT stubs; only two lack metadata. Diagnostic probes and linked GOT snapshots do not grant dispatch permissions or increase the accepted count.
+
 The game is not playable yet. Process startup, broader instruction semantics, operating-system services, and graphics remain to be implemented.
 
 ## Development direction
