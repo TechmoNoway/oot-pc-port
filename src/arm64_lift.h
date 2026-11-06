@@ -136,6 +136,29 @@ static inline uint64_t oot_arm64_mul_high(uint64_t left, uint64_t right,
     return high;
 }
 
+static inline uint64_t oot_arm64_extract(uint64_t high, uint64_t low,
+                                       unsigned width, unsigned amount)
+{
+    /* The decoder proves amount < width; never evaluate a shift by 64. */
+    if (amount == 0) return low & oot_arm64_mask(width);
+    return ((low >> amount) | (high << (width - amount))) & oot_arm64_mask(width);
+}
+
+static inline uint64_t oot_arm64_crc32(uint64_t accumulator, uint64_t value,
+                                     unsigned bits, unsigned castagnoli)
+{
+    uint32_t crc = (uint32_t)accumulator;
+    uint32_t poly = castagnoli ? UINT32_C(0x82f63b78) : UINT32_C(0xedb88320);
+    unsigned i;
+    for (i = 0; i < bits; ++i) {
+        unsigned feedback = (unsigned)((crc ^ value) & 1);
+        crc >>= 1;
+        if (feedback) crc ^= poly;
+        value >>= 1;
+    }
+    return crc;
+}
+
 static inline uint64_t oot_arm64_addsub(OotArm64State *s, uint64_t left,
                                        uint64_t right, unsigned width,
                                        unsigned subtract, unsigned set_flags)

@@ -234,6 +234,27 @@ The 11 additional ordinary leaf candidates increase declared words from 103,046 
 
 No UMULH/SMULH first-unsupported stop remains. Newly reached code still fails later checks: policy-6 call dependencies rise from 16,669 to 16,680 and memory-policy failures from 12,118 to 12,156; policy-7 call dependencies rise from 16,600 to 16,611 and memory-policy failures from 12,151 to 12,189. The refreshed [callee audit](callee-audit.md) reproduces the new policy-6 baseline. Real original-byte/verifier/callee proofs remain required, with no runtime ranges, live GOT guarantees, game translation, callbacks or execution supplied by these static measurements.
 
+## Combined integer-frontier milestone
+
+Reporting now groups complete capabilities through the [milestone workflow](development-workflow.md), rather than requiring a delivery boundary for each small instruction family. The EXTR/ROR and CRC32/CRC32C cohort is validated by one run of `tools/run_milestone.py` using `config/milestones/integer-frontier.json`. Its final `build/milestones/integer-frontier-v1/run.json` reports passed stages and an unchanged source-code fingerprint. All native, survey, comparison and audit evidence is retained in that private run directory.
+
+The pipeline matches the preceding high-multiply reports on module source/text hashes, decoder, model, policies, limits and 284,396 metadata entries. Every selected extraction/CRC mnemonic is absent from both new first-unsupported discovery histograms and the callee frontier. Reports retain the original words and real production callee proofs.
+
+| Measurement | Before milestone | After milestone |
+| --- | ---: | ---: |
+| Default discovered regions | 61,107 | 61,193 |
+| Default accepted ordinary leaves | 40,186 | 40,188 |
+| PAC-enabled discovered regions | 135,390 | 135,571 |
+| PAC-enabled discovery blockers | 149,006 | 148,825 |
+| Eligible global PLT-to-leaf catalog | 433 | 434 |
+| Policy-6 accepted structural regions | 1,688 | 1,688 |
+| Policy-7 accepted structural regions | 1,710 | 1,710 |
+| Integer first stops in callee frontier | 46 | 0 |
+
+Two additional SDK ordinary leaves bring the total declared ordinary-leaf words from 103,392 to 103,504. Module counts are rtld 5, main 38,557, subsdk0 38 and SDK 1,588. Older default framed profiles still accept none. Accepted policy-6/7 root words remain 13,519/13,763 and module accepted counts are unchanged. Clearing this measured integer cohort does not establish complete integer instruction coverage or new framed closures.
+
+Policy-6 call-dependency failures fall from 16,680 to 16,604 while memory-policy failures rise from 12,156 to 12,231; policy-7 call dependencies fall from 16,611 to 16,535 while memory-policy failures rise from 12,189 to 12,264. These are later first failures across changed discovered sets, not independent acceptance gains. [The callee audit](callee-audit.md) matches the fresh policy-6 baseline. No game C, callback registration/execution, runtime read ranges or live GOT guarantees are produced.
+
 ## Verification
 
 Synthetic tests cover positive leaf and framed cases under all profiles, real transitive closures, unavailable callees, call cycles, metadata aliases/window boundaries, multiple returns, indirect boundaries, unreachable words, samples/limits, PAC-prefix rejection, source preservation, fresh-output checks, and tampered-input rejection. The full Python suite continues to run the native/reference profile tests; the survey itself remains static and does not compile or run candidates.

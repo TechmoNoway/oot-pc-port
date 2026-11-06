@@ -19,7 +19,7 @@ FORMS = ("move_wide", "addsub_immediate", "addsub_shifted", "logical_shifted",
          "loadstore_register", "load_literal", "loadstore_pair", "logical_immediate", "bitfield",
          "conditional_select", "conditional_compare_register", "conditional_compare_immediate",
          "addsub_extended", "variable_shift", "multiply_add", "multiply_long", "divide", "addsub_carry", "load_acquire_rcpc",
-         "bit_reverse", "byte_reverse", "count_leading", "multiply_high")
+         "bit_reverse", "byte_reverse", "count_leading", "multiply_high", "extract_register", "crc32")
 MEMORY_FORMS = frozenset(("loadstore_unsigned", "loadstore_immediate", "loadstore_register", "load_literal", "loadstore_pair", "load_acquire_rcpc"))
 
 
@@ -92,6 +92,17 @@ def decode_instruction(word, pc):
 
     if word == 0xD503201F:
         return ins("nop")
+    if word & 0x7FA00000 == 0x13800000:
+        amount = (word >> 10) & 63
+        if ((word >> 22) & 1) != (width == 64) or amount >= width:
+            reject("reserved EXTR width/N or bit position")
+        return ins("extract_register", width=width, rd=rd, rn=rn, rm=rm, amount=amount)
+    if word & 0x7FE0E000 == 0x1AC04000:
+        size = (word >> 10) & 3
+        if (width == 64) != (size == 3):
+            reject("reserved CRC32 width/size combination")
+        return ins("crc32", width=32, rd=rd, rn=rn, rm=rm, access_size=1 << size,
+                   operation=(word >> 12) & 1)
     one_source = word & 0x7FFFFC00
     if one_source in (0x5AC00000, 0x5AC00400, 0x5AC00800, 0x5AC00C00, 0x5AC01000, 0x5AC01400):
         operation = (word >> 10) & 7
@@ -378,6 +389,11 @@ def body(ins):
                       f"uint64_t accumulator = {read(ins.ra)};", write(f"accumulator {operator} (a * b)")])
     elif ins.form == "multiply_high":
         lines.append(write(f"oot_arm64_mul_high({read(rn)}, {read(rm)}, {int(ins.sign_extend)})"))
+    elif ins.form == "extract_register":
+        lines.append(write(f"oot_arm64_extract({read(rn)}, {read(rm)}, {width}, {ins.amount})"))
+    elif ins.form == "crc32":
+        data_width = 64 if ins.access_size == 8 else 32
+        lines.append(write(f"oot_arm64_crc32({read(rn)}, oot_arm64_read(s, {rm}, {data_width}, 0), {ins.access_size * 8}, {ins.operation})"))
     elif ins.form == "divide":
         lines.append(write(f"oot_arm64_divide({read(rn)}, {read(rm)}, {width}, {ins.operation})"))
     elif ins.form == "logical_shifted":

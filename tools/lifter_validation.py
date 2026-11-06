@@ -26,6 +26,7 @@ from conditional_programs import conditional_programs
 from multiply_programs import multiply_programs
 from bit_programs import bit_programs
 from high_multiply_programs import high_multiply_programs
+from integer_frontier_programs import frontier_programs
 
 ROOT = Path(__file__).resolve().parent.parent
 SEED = 0x0CA41234
@@ -151,7 +152,7 @@ def synthetic_programs():
                             [Trial(index, [0] * 31, 0, 0, budget)
                              for index in (-1, 1) for budget in (0, 1)]))
     return (programs + memory_programs() + pair_programs() + integer_programs() + leaf_programs() +
-            ordered_programs() + conditional_programs() + multiply_programs() + bit_programs() + high_multiply_programs())
+            ordered_programs() + conditional_programs() + multiply_programs() + bit_programs() + high_multiply_programs() + frontier_programs())
 
 
 def find_cmake():
@@ -239,6 +240,9 @@ def validate_program(library, program):
     except ImportError as error:
         raise InputError("install tools/requirements-lifter.txt for differential validation") from error
     machine = Uc(UC_ARCH_ARM64, UC_MODE_ARM)
+    if any(i.form == "crc32" for i in decode_block(program.data, program.base)):
+        machine.ctl_set_cpu_model(registers.UC_CPU_ARM64_MAX)
+        require((machine.cpr_read(3, 0, 0, 6, 0) >> 16) & 15 >= 1, "CRC32 reference feature is disabled")
     mapping_base = (program.base & ~0xFFF) - 0x1000
     machine.mem_map(mapping_base, 0x102000)
     machine.mem_map(0, 0x1000)

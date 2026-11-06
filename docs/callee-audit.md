@@ -144,6 +144,16 @@ Blocked metadata entries stop at indirect calls (1,188), unsupported encodings (
 
 The 2,132 frontier PLT snapshots resolve to blocked metadata (1,092), discovered policy-6-rejected regions (949) and verified ordinary leaves (91). The separate global eligible catalog contains 433 bridges. Both unseeded probes remain rejected and unregistered. No original words, including ignored Ra fields, are normalized. Reports grant no runtime ranges or GOT guarantees and generate/register/execute no game callbacks; detailed reports remain private under `build/`.
 
+## Combined integer-frontier milestone
+
+The [complete milestone runner](development-workflow.md) writes the new private audit to `build/milestones/integer-frontier-v1/callees.json` and checks it against that run's fresh PLT survey. Source/text identities, decoder/model/limits, discovery and all per-module/global policy-6 outcomes match. The same run proves all selected EXTR/ROR and CRC32 variants with synthetic MSVC/GCC evidence.
+
+The fresh frontier contains **16,604 dependency-blocked roots, 5,532 distinct targets and 28,619 distinct caller-region/target edges**, compared with 16,680/5,558/28,848 before the combined milestone. Current primary classes are 3,395 discovery-blocked metadata entries, 2,135 relocation-backed PLT stubs and two unseeded text targets. Both unseeded probes remain policy-rejected and unregistered.
+
+The measured integer first-unsupported cohort falls from **46 targets to zero**. This is a first-failure frontier result, not a claim that all integer code or those entire functions are runnable. Blocked metadata now stops at indirect calls (1,190), window boundaries (994), unsupported encodings (982) and indirect jumps (229). Unsupported categories are load/store (399), ordered/atomic (292), SIMD/FP (196), system (47), control flow (40) and supervisor calls (8). Leading mnemonics include LDR forms (159), LDADD (104), FMOV (98), STR forms (87) and STP forms (78), motivating a larger memory/callee-effects cohort next.
+
+PLT snapshot classes are 1,093 blocked metadata targets, 951 discovered policy-6-rejected regions and 91 verified ordinary leaves. The global eligible catalog grows to 434 while policy-7 acceptance remains 1,710. The audit keeps original bytes, probes remain diagnostic, and no runtime capabilities, game translation, registered game callbacks or guest execution are supplied. Detailed addresses and reports remain private under the milestone output directory.
+
 ## Verification
 
 Thirteen synthetic tests cover real mixed closures, shared and transitive frontiers, repeated BL-site deduplication, unavailable targets, blocked metadata and unchanged boundaries, word/symbol limits, overlapping internal-label probes, successful probes that stay unregistered, dependencies between probes that remain unresolved, relocation-backed PLT snapshots and nonlocal symbols, lookalike-stub rejection, non-text/gap/unmapped targets, deterministic accounting, strict baseline comparisons, input integrity, fresh output, and CLI rollback. The complete regression suite remains applicable. No game callbacks are generated or executed during these checks.

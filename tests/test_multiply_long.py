@@ -153,6 +153,7 @@ class NativeMultiplyLongTests(unittest.TestCase):
     bundle_fixture = staticmethod(bundle_fixture)
     expected_call = staticmethod(expected_call)
     report_name = "multiply"
+    expected_prefixes = 7168
 
     def test_schema_eight_saved_registers_aliases_flags_and_every_prefix(self):
         self.assertEqual(version("unicorn"), "2.1.4")
@@ -205,7 +206,7 @@ class NativeMultiplyLongTests(unittest.TestCase):
                             self.assertEqual((s.x[0], s.x[19]), (expected, protected)); whole += 1
                 finally: lib.oot_stack_destroy(dispatcher)
         finally: lib.oot_pauth_destroy(context)
-        self.assertEqual((whole, prefixes), (256, 7168))
+        self.assertEqual((whole, prefixes), (256, self.expected_prefixes))
         report_path = ROOT / f"build/lifter-validation/{mode}-{self.report_name}-dispatch-report.json"
         report_path.write_text(json.dumps({"whole_call_cases": whole, "prefix_checks": prefixes, "synthetic_only": True,
             "game_code_executed": False, "native_build": build}, indent=2)+"\n", encoding="utf-8")

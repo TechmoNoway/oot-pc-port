@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "name": "integer-frontier",
+  "native_build": "build/cmake",
+  "prepared": "build/prepared/oot111",
+  "baseline_default": "build/function-profiles/oot111-default-after-high-multiply-v1.json",
+  "baseline_plt": "build/function-profiles/oot111-plt-after-high-multiply-v1.json",
+  "gcc_tests": ["test_integer_frontier.py", "test_multiply_long.py"],
+  "factory_reports": ["integer-frontier", "multiply"],
+  "cleared_mnemonics": ["extr", "ror", "crc32b", "crc32h", "crc32w", "crc32x", "crc32cb", "crc32ch", "crc32cw", "crc32cx"]
+}
