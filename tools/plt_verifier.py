@@ -13,13 +13,22 @@ POLICY='plt-leaf-stack-dag-v7'
 
 
 def verify_plt_stub(data,entry,slot,target,leaves,symbol):
+    return _verify_plt_stub(data,entry,slot,target,leaves,symbol,verify_leaf,False)
+
+
+def verify_memory_plt_stub(data,entry,slot,target,leaves,symbol,memory_entries):
+    from memory_leaf_verifier import verify_memory_leaf
+    return _verify_plt_stub(data,entry,slot,target,leaves,symbol,verify_memory_leaf if target in memory_entries else verify_leaf,True)
+
+
+def _verify_plt_stub(data,entry,slot,target,leaves,symbol,verifier,memory):
     require(len(data)==16 and type(entry) is int and entry % 4==0 and 0 <= entry < (1<<39)-15,
             'invalid PLT text span')
     require(type(slot) is int and slot % 8==0 and 0 <= slot < (1<<39)-7,'invalid PLT GOT slot')
     require(type(target) is int and 0 <= target < (1<<39) and target % 4==0,'invalid PLT leaf target')
     require(isinstance(symbol,str) and symbol and symbol not in NONLOCAL,'PLT nonlocal/service continuation is outside this policy')
     require(target in leaves,'PLT target must be an actual verified register-only leaf')
-    leaf=verify_leaf(leaves[target],target)
+    leaf=verifier(leaves[target],target)
     adrp,load,add,branch=struct.unpack('<4I',data)
     require(adrp & 0x9f00001f==0x90000010 and load & 0xffc003ff==0xf9400211 and
             add & 0xffc003ff==0x91000210 and branch==0xd61f0220,'unsupported PLT instruction pattern')
@@ -30,7 +39,7 @@ def verify_plt_stub(data,entry,slot,target,leaves,symbol):
     page=((entry & ~4095)+delta*4096)&U64
     require((page+low)&U64==slot,'PLT instructions do not address the declared GOT slot')
     require(not (entry < target+len(leaves[target]) and target < entry+16),'PLT and leaf code overlap')
-    return {'policy':'exact-plt-register-leaf-v1','base':entry,'byte_count':16,'instruction_count':4,
+    return {'policy':'exact-plt-memory-leaf-v2' if memory else 'exact-plt-register-leaf-v1','base':entry,'byte_count':16,'instruction_count':4,
         'got_slot':slot,'target':target,'symbol':symbol,'page':page,'words':list(struct.unpack('<4I',data)),
         'source_sha256':hashlib.sha256(data).hexdigest(),'target_source_sha256':leaf['source_sha256'],
         'max_retired_instructions':4+leaf['max_retired_instructions'],'guest_code_executed':False,
@@ -59,3 +68,15 @@ def emit_plt_descriptor(proof,name):
         '    {{'+', '.join(f'0x{b:02x}' for b in bytes.fromhex(proof['source_sha256']))+'}}',
         '};',f'OOT_LIFT_EXPORT const OotPltFunction *oot_plt_descriptor_{suffix}(void)',
         '{',f'    return &oot_plt_info_{suffix};','}',''])
+
+
+def eligible_memory_plts(modules,leaves,memory_leaves):
+    result={};combined=leaves | memory_leaves
+    for m in modules:
+        for off,stub in plt_stubs(m).items():
+            target=int(stub['resolved_address'],16)
+            if target not in combined or stub['symbol'] in NONLOCAL:continue
+            entry=m.base+off;slot=m.base+stub['got_offset'];data=bytes(m.image[off:off+16])
+            proof=verify_memory_plt_stub(data,entry,slot,target,combined,stub['symbol'],memory_leaves)
+            result[entry]=dict(data=data,slot=slot,target=target,symbol=stub['symbol'],proof=proof)
+    return result

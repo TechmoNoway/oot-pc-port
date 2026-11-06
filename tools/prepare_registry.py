@@ -13,6 +13,9 @@ from arm64_lifter import emit_c
 from frame_verifier import emit_frame_descriptor, verify_frame
 from input_formats import require
 from leaf_verifier import emit_leaf_descriptor, verify_leaf
+from memory_leaf_verifier import emit_memory_leaf_descriptor, verify_memory_leaf
+from stack_layout_verifier import verify_memory_callee_stack_functions, emit_memory_callee_stack_descriptor
+from plt_verifier import verify_memory_plt_stub
 from link_exefs import BUILD_ROOT, build_destination, load_prepared
 from module_linker import Linker
 from prepare_runtime import STACK_BASE, STACK_SIZE, make_package
@@ -54,7 +57,10 @@ def emit_factory(names, body_hash, returns, root_name=None):
     return "\n".join(lines + ["}", ""])
 
 
-def emit_stack_factory(frame_names, leaf_names, root, body_hash, returns, cfg=False, layout=False, pauth=False, reads=False, read_ranges=(), lr_calls=False, plt_names=(), writes=False, write_ranges=()):
+def emit_stack_factory(frame_names, leaf_names, root, body_hash, returns, cfg=False, layout=False, pauth=False, reads=False, read_ranges=(), lr_calls=False, plt_names=(), writes=False, write_ranges=(), memory_callees=False, memory_leaf_names=()):
+    require(memory_callees or not memory_leaf_names,"memory leaf names require explicit policy")
+    require(set(memory_leaf_names)<=set(leaf_names),"memory leaves must be selected terminal names")
+    writes = writes or memory_callees
     plt = bool(plt_names)
     lr_calls = lr_calls or plt or writes
     reads = reads or lr_calls
@@ -68,8 +74,8 @@ def emit_stack_factory(frame_names, leaf_names, root, body_hash, returns, cfg=Fa
     digest = bytes.fromhex(body_hash)
     require(len(digest) == 32, "invalid image SHA-256")
     descriptor = "OotStackCallFunction" if lr_calls else "OotStackReadFunction" if reads else "OotStackPauthFunction" if pauth else "OotStackLayoutFunction" if layout else "OotStackCfgFunction" if cfg else "OotStackFunction"
-    prefix = "memory_" if writes else "plt_" if plt else "call_" if lr_calls else "read_" if reads else "pauth_" if pauth else "layout_" if layout else "cfg_" if cfg else ""
-    constructor = "_memory" if writes else "_plt" if plt else "_calls" if lr_calls else "_reads" if reads else "_pauth" if pauth else "_layout" if layout else "_cfg" if cfg else ""
+    prefix = "memory_callee_" if memory_callees else "memory_" if writes else "plt_" if plt else "call_" if lr_calls else "read_" if reads else "pauth_" if pauth else "layout_" if layout else "cfg_" if cfg else ""
+    constructor = "_memory_callees" if memory_callees else "_memory" if writes else "_plt" if plt else "_calls" if lr_calls else "_reads" if reads else "_pauth" if pauth else "_layout" if layout else "_cfg" if cfg else ""
     lines = ['#include "stack_dispatch.h"',
         f'OOT_LIFT_EXPORT OotStackDispatcher *oot_create_bound_registry(OotRuntimeImage *image, {"OotPauth *pauth, " if pauth else ""}uint32_t *error)',
         '{', '    static const uint8_t body_hash[32] = {' + ', '.join(f'0x{b:02x}' for b in digest) + '};',
@@ -86,7 +92,7 @@ def emit_stack_factory(frame_names, leaf_names, root, body_hash, returns, cfg=Fa
         if write_ranges:
             lines += ['    static const OotReadRange writes[] = {' + ', '.join(f'{{UINT64_C(0x{b:x}),UINT64_C(0x{z:x})}}' for b,z in write_ranges) + '};']
     if leaf_names:
-        lines += [f'    OotLeafFunction leaves[{len(leaf_names)}];', f'    OotCodeHash hashes[{len(leaf_names)}];']
+        lines += [f'    {"OotMemoryLeafFunction" if memory_callees else "OotLeafFunction"} leaves[{len(leaf_names)}];', f'    OotCodeHash hashes[{len(leaf_names)}];']
     if plt:
         require(len(plt_names)<=256 and leaf_names,'invalid PLT registry')
         lines += [f'    OotPltFunction plts[{len(plt_names)}];']
@@ -94,7 +100,10 @@ def emit_stack_factory(frame_names, leaf_names, root, body_hash, returns, cfg=Fa
     for i, name in enumerate(frame_names):
         lines += [f'    frames[{i}] = *oot_stack_{prefix}descriptor_{name}();']
     for i, name in enumerate(leaf_names):
-        lines += [f'    leaves[{i}] = *oot_leaf_descriptor_{name}();', f'    hashes[{i}] = *oot_leaf_code_hash_{name}();']
+        if name in memory_leaf_names: lines += [f'    leaves[{i}] = *oot_memory_leaf_descriptor_{name}();']
+        elif memory_callees: lines += [f'    leaves[{i}].info = *oot_leaf_descriptor_{name}();', f'    leaves[{i}].effect_words = NULL;']
+        else: lines += [f'    leaves[{i}] = *oot_leaf_descriptor_{name}();']
+        lines += [f'    hashes[{i}] = *oot_leaf_code_hash_{name}();']
     lines += [f'    return oot_stack_create{constructor}(image, frames, {len(frame_names)}, UINT64_C(0x{root:x}),',
         f'        {"leaves" if leaf_names else "NULL"}, {len(leaf_names)}, {"hashes" if leaf_names else "NULL"},',
         f'        body_hash, returns, {len(returns)}, {"pauth, " if pauth else ""}{("ranges, " if read_ranges else "NULL, ") + str(len(read_ranges)) + ", " if reads else ""}{"plts, " + str(len(plt_names)) + ", " if plt else "NULL, 0, " if writes else ""}{("writes, " if write_ranges else "NULL, ") + str(len(write_ranges)) + ", " if writes else ""}error);', '}', '']
@@ -103,16 +112,17 @@ def emit_stack_factory(frame_names, leaf_names, root, body_hash, returns, cfg=Fa
 
 def build_bundle(linker, config):
     require(isinstance(config, dict) and type(config.get("schema_version")) is int and
-            config["schema_version"] in (1, 2, 3, 4, 5, 6, 7, 8, 9), "unsupported registry config")
-    write_profile = config['schema_version'] == 9
+            config["schema_version"] in (1, 2, 3, 4, 5, 6, 7, 8, 9, 10), "unsupported registry config")
+    memory_callee_profile = config['schema_version'] == 10
+    write_profile = config['schema_version'] in (9,10)
     plt_profile = config['schema_version'] == 8 or write_profile and bool(config.get('plts'))
-    call_profile = config["schema_version"] in (7,8,9)
-    read_profile = config["schema_version"] in (6,7,8,9)
-    pauth_profile = config["schema_version"] in (5,6,7,8,9)
+    call_profile = config["schema_version"] in (7,8,9,10)
+    read_profile = config["schema_version"] in (6,7,8,9,10)
+    pauth_profile = config["schema_version"] in (5,6,7,8,9,10)
     require(not pauth_profile or config.get("pauth_model") == MODEL, "PAC schema requires explicit PAC model")
-    stack_profile = config["schema_version"] in (2, 3, 4, 5, 6, 7, 8, 9)
-    cfg_profile = config["schema_version"] in (3, 4, 5, 6, 7, 8, 9)
-    layout_profile = config["schema_version"] in (4, 5, 6, 7, 8, 9)
+    stack_profile = config["schema_version"] in (2, 3, 4, 5, 6, 7, 8, 9, 10)
+    cfg_profile = config["schema_version"] in (3, 4, 5, 6, 7, 8, 9, 10)
+    layout_profile = config["schema_version"] in (4, 5, 6, 7, 8, 9, 10)
     records = config.get("leaves")
     require(isinstance(records, list) and (0 if stack_profile else 1) <= len(records) <= 256,
             "invalid explicit leaf selection count")
@@ -132,6 +142,13 @@ def build_bundle(linker, config):
                 "entry": module.base + offset, "data": bytes(module.image[offset:offset + size])}
 
     leaves = sorted([selected(record) for record in records], key=lambda x: x["entry"])
+    memory_leaves=[]
+    require(memory_callee_profile or not config.get('memory_leaves'), 'memory leaves require schema 10')
+    if memory_callee_profile:
+        records=config.get('memory_leaves')
+        require(isinstance(records,list) and len(records)+len(leaves)<=256,'schema 10 requires explicit bounded memory leaf selections')
+        memory_leaves=sorted([selected(r) for r in records],key=lambda r:r['entry'])
+    terminals=sorted(leaves+memory_leaves,key=lambda r:r['entry'])
     frames = []
     if stack_profile:
         require(isinstance(config.get("frames"), list) and 0 < len(config["frames"]) <= 32, "invalid frame selections")
@@ -145,7 +162,7 @@ def build_bundle(linker, config):
     if plt_profile:
         requests=config.get('plts')
         require(isinstance(requests,list) and 0 < len(requests)<=256,'schema 8 requires explicit PLT selections')
-        leaf_names={r['name']:r for r in leaves};stub_maps={name:plt_stubs(m) for name,m in modules.items()}
+        leaf_names={r['name']:r for r in terminals};stub_maps={name:plt_stubs(m) for name,m in modules.items()}
         for r in requests:
             require(isinstance(r,dict) and r.get('leaf') in leaf_names,'PLT selection requires a selected leaf')
             require(type(r.get('size',16)) is int and r.get('size',16)==16,'PLT span must be 16 bytes')
@@ -156,7 +173,7 @@ def build_bundle(linker, config):
             item.update(slot=modules[item['module']].base+stub['got_offset'],target=target,symbol=stub['symbol'],leaf=r['leaf'])
             plts.append(item)
         plts.sort(key=lambda r:r['entry'])
-    ranges = sorted((r["entry"], r["entry"] + r["size"]) for r in leaves + plts + (frames if stack_profile else [root] if root else []))
+    ranges = sorted((r["entry"], r["entry"] + r["size"]) for r in terminals + plts + (frames if stack_profile else [root] if root else []))
     require(all(a[1] <= b[0] for a, b in zip(ranges, ranges[1:])), "registered code ranges overlap")
     returns = config.get("return_sites")
     require(isinstance(returns, list) and returns and len(returns) <= 256 and all(type(x) is int for x in returns), "invalid return sites")
@@ -202,30 +219,37 @@ def build_bundle(linker, config):
             write_records.append(dict(module=name,offset=offset,size=size,base=base))
         write_records.sort(key=lambda r:r['base'])
         require(all(a['base']+a['size'] <= b['base'] for a,b in zip(write_records,write_records[1:])), 'write ranges overlap')
+        if memory_callee_profile:
+            require(all(r['base']+r['size'] <= p['slot'] or p['slot']+8 <= r['base'] for r in write_records for p in plts),
+                    'schema 10 write grants must exclude registered PLT GOT slots')
     chunks = []
     for leaf in leaves:
         leaf["verification"] = verify_leaf(leaf["data"], leaf["entry"])
         function = "oot_lift_" + leaf["name"]
         chunks += [emit_c(leaf["data"], leaf["entry"], function)[0], emit_leaf_descriptor(leaf["data"], leaf["entry"], function)]
+    for leaf in memory_leaves:
+        leaf['verification']=verify_memory_leaf(leaf['data'],leaf['entry'])
+        function='oot_lift_'+leaf['name']
+        chunks += [emit_c(leaf['data'],leaf['entry'],function)[0],emit_memory_leaf_descriptor(leaf['data'],leaf['entry'],function)]
     if stack_profile:
         verifier = verify_call_stack_functions if call_profile else verify_read_stack_functions if read_profile else verify_pauth_stack_functions if pauth_profile else verify_layout_stack_functions if layout_profile else verify_cfg_stack_functions if cfg_profile else verify_stack_functions
-        emitter = emit_memory_stack_descriptor if write_profile else emit_plt_stack_descriptor if plt_profile else emit_call_stack_descriptor if call_profile else emit_read_stack_descriptor if read_profile else emit_pauth_stack_descriptor if pauth_profile else emit_layout_stack_descriptor if layout_profile else emit_cfg_stack_descriptor if cfg_profile else emit_stack_descriptor
-        frame_codes={f['entry']:f['data'] for f in frames};leaf_codes={f['entry']:f['data'] for f in leaves}
+        emitter = emit_memory_callee_stack_descriptor if memory_callee_profile else emit_memory_stack_descriptor if write_profile else emit_plt_stack_descriptor if plt_profile else emit_call_stack_descriptor if call_profile else emit_read_stack_descriptor if read_profile else emit_pauth_stack_descriptor if pauth_profile else emit_layout_stack_descriptor if layout_profile else emit_cfg_stack_descriptor if cfg_profile else emit_stack_descriptor
+        frame_codes={f['entry']:f['data'] for f in frames};leaf_codes={f['entry']:f['data'] for f in leaves};memory_codes={f['entry']:f['data'] for f in memory_leaves}
         if plt_profile:
             for p in plts:
-                p['verification']=verify_plt_stub(p['data'],p['entry'],p['slot'],p['target'],leaf_codes,p['symbol'])
+                p['verification']=verify_memory_plt_stub(p['data'],p['entry'],p['slot'],p['target'],leaf_codes | memory_codes,p['symbol'],memory_codes) if memory_callee_profile else verify_plt_stub(p['data'],p['entry'],p['slot'],p['target'],leaf_codes,p['symbol'])
                 chunks += [emit_c(p['data'],p['entry'],'oot_lift_'+p['name'])[0],emit_plt_descriptor(p['verification'],'oot_lift_'+p['name'])]
-            proofs=(verify_memory_stack_functions if write_profile else verify_plt_stack_functions)(frame_codes,leaf_codes,root['entry'],{p['entry']:p for p in plts})
-        else:proofs = (verify_memory_stack_functions if write_profile else verifier)(frame_codes,leaf_codes,root["entry"])
+            proofs=verify_memory_callee_stack_functions(frame_codes,leaf_codes,root['entry'],{p['entry']:p for p in plts},memory_codes) if memory_callee_profile else (verify_memory_stack_functions if write_profile else verify_plt_stack_functions)(frame_codes,leaf_codes,root['entry'],{p['entry']:p for p in plts})
+        else:proofs = verify_memory_callee_stack_functions(frame_codes,leaf_codes,root["entry"],{},memory_codes) if memory_callee_profile else (verify_memory_stack_functions if write_profile else verifier)(frame_codes,leaf_codes,root["entry"])
         for frame in frames:
             frame["verification"] = proofs[frame["entry"]]
             function = ("oot_pauth_lift_" if pauth_profile else "oot_lift_") + frame["name"]
             chunks += [(emit_pauth_c if pauth_profile else emit_c)(frame["data"], frame["entry"], function)[0],
                        emitter(frame["verification"], function)]
-        chunks += [emit_stack_factory([f["name"] for f in frames], [f["name"] for f in leaves],
+        chunks += [emit_stack_factory([f["name"] for f in frames], [f["name"] for f in terminals],
             root["entry"], image_report["body_sha256"], returns, cfg=cfg_profile, layout=layout_profile, pauth=pauth_profile,
             reads=read_profile,read_ranges=[(r["base"],r["size"]) for r in read_records],lr_calls=call_profile,
-            plt_names=[p['name'] for p in plts],writes=write_profile,write_ranges=[(r['base'],r['size']) for r in write_records])]
+            plt_names=[p['name'] for p in plts],writes=write_profile,write_ranges=[(r['base'],r['size']) for r in write_records],memory_callees=memory_callee_profile,memory_leaf_names=[f['name'] for f in memory_leaves])]
     elif root:
         callees = {leaf["entry"]: leaf["data"] for leaf in leaves}
         root["verification"] = verify_frame(root["data"], root["entry"], callees)
@@ -235,13 +259,14 @@ def build_bundle(linker, config):
         chunks += [emit_factory([r["name"] for r in leaves], image_report["body_sha256"], returns, root["name"] if root else None)]
     source = "\n".join(chunks)
     manifest = {"schema_version": config["schema_version"], "format": "bound-native-registry", "guest_code_executed": False,
-                "factory": "oot_create_bound_registry", "profile": "checked-memory-stack-dag" if write_profile else "plt-leaf-stack-dag" if plt_profile else "lr-pair-read-stack-dag" if call_profile else "checked-read-pauth-stack-dag" if read_profile else "pauth-stack-dag" if pauth_profile else "layout-stack-dag" if layout_profile else "cfg-stack-dag" if cfg_profile else "stack-dag" if stack_profile else "frame" if root else "leaf",
+                "factory": "oot_create_bound_registry", "profile": "memory-callee-stack-dag" if memory_callee_profile else "checked-memory-stack-dag" if write_profile else "plt-leaf-stack-dag" if plt_profile else "lr-pair-read-stack-dag" if call_profile else "checked-read-pauth-stack-dag" if read_profile else "pauth-stack-dag" if pauth_profile else "layout-stack-dag" if layout_profile else "cfg-stack-dag" if cfg_profile else "stack-dag" if stack_profile else "frame" if root else "leaf",
                 "registry_source_sha256": hashlib.sha256(source.encode()).hexdigest(), "return_sites": returns,
                 "image": image_report,
                 "leaves": [{k: v for k, v in r.items() if k != "data"} for r in leaves],
                 "root": {k: v for k, v in root.items() if k != "data"} if root else None}
     if stack_profile:
         manifest["frames"] = [{k: v for k, v in f.items() if k != "data"} for f in frames]
+    if memory_callee_profile:manifest['memory_leaves']=[{k:v for k,v in r.items() if k!='data'} for r in memory_leaves]
     if pauth_profile:
         manifest.update(pauth_model=MODEL, pauth_abi_version=1, keys_embedded=False)
     if read_profile:

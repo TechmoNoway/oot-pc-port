@@ -166,3 +166,15 @@ The separate [policy-8 memory survey](checked-memory.md) now reports upgraded re
 Policy 8 accepts 118 additional roots, currently isolated frames with no new inter-frame closure edges in the local game corpus. Of the roots previously failing memory policy, 1,250 now reach a missing-callee failure. The full new frontier has 17,822 dependency-blocked roots, 5,992 unique missing targets and 30,319 unique caller-region/target edges; root references overlap. Missing targets include 3,789 discovery-blocked metadata entries, 2,201 unapproved PLT stubs and two unregistered targets. Metadata first stops, original failure windows and linked PLT target snapshots remain diagnostic and never register a target or establish a live GOT guarantee.
 
 See the aggregate [profile results](function-profile-survey.md) and private `build/milestones/checked-memory-v3/memory.json`. All surveys use actual unchanged regions and production verifier/callee proofs. Native execution covers synthetic memory callees and factories only; no game callbacks, runtime read/write grants or execution are introduced.
+
+
+## Memory-leaf callee closures
+
+[Leaf policy 2 and stack policy 9/schema 10](memory-callees.md) now classify the complete preceding policy-8 missing frontier and prove actual direct/PLT closures with unframed memory callees. The prior 17,822 blocked roots, 5,992 unique missing targets and 30,319 caller-region/target edges must reproduce the passed memory baseline before new eligibility is reported. Discovery-blocked/unseeded targets remain diagnostic and cannot satisfy one another.
+
+The new catalog contains 16,805 structural memory-leaf regions. Its upgraded root closure union uses 360 memory leaves and 1,463 distinct call edges, with 1,030 newly accepted roots. Separate global direct-target and eligible-PLT catalog counts must not be read as the number of resolved prior blockers. `memory_callee_cohort.prior_missing_frontier` and `.remaining_missing_frontier` retain that distinction, preserve metadata failure windows and flag classification as diagnostic. Old policy-6 audit outcomes remain unchanged.
+
+The complete aggregate/status comparison and private target samples are in `build/milestones/memory-callees-v3/`. All executed validation is synthetic; game code is never generated/registered/executed, and surveys grant no runtime memory or GOT capabilities.
+
+
+Of the prior 5,992 missing targets, 313 become structurally eligible memory-target PLTs; 1,888 remain unqualified PLTs, 3,789 remain discovery-blocked metadata and two remain unregistered. Under policy 9 the newly reached frontier has 17,660 dependency-blocked roots, 5,670 unique missing targets and 29,599 unique caller-region/target edges. Those counts describe conservative first-failure paths and actual registry closures, not runtime readiness or a simple subtraction of all globally eligible bridges.

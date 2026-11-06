@@ -278,6 +278,28 @@ Of the 12,264 policy-7 roots whose first failure was memory policy, 6,879 retain
 
 The policy-8 missing-callee frontier contains 17,822 dependency-blocked roots, 5,992 distinct missing targets and 30,319 distinct caller-region/target edges. Targets comprise 3,789 metadata entries blocked during discovery, 2,201 unapproved PLT stubs and two unregistered targets. Blocked metadata first stops are 1,327 indirect calls, 1,123 window boundaries, 1,096 unsupported encodings and 243 indirect jumps. PLT annotations describe linked snapshots only: 1,023 point at discovered regions and 1,178 at discovery-blocked metadata. Counts differ from the unchanged policy-6 audit because policy 8 reaches additional call requirements. Metadata failure samples preserve original window size, sources and limiting evidence, including failures behind PLT snapshots.
 
+## Memory-leaf callee milestone
+
+The separate [leaf-policy-2 / stack-policy-9 contract](memory-callees.md) admits closed acyclic unframed integer memory helpers with explicit retained-image grants and complete stack exclusion. `--memory-callees` compares the unchanged policy-8 verifier with policy 9, using the actual ordinary/memory leaf bytes and relocation-backed stubs. The runner checks the preceding default/PLT/memory baselines, prior missing-frontier counts and all source/text/model/decoder/limit identities. No byte is stripped or rewritten and no game callbacks or runtime capabilities are supplied.
+
+| Measurement | Policy 8 | Policy 9 |
+| --- | ---: | ---: |
+| Metadata entry candidates | 284,396 | 284,396 |
+| PAC-enabled discovered regions | 135,571 | 135,571 |
+| Accepted framed structural roots | 1,828 | 2,858 |
+| Accepted root instruction words | 16,201 | 44,123 |
+| Main accepted roots | 1,782 | 2,683 |
+| Subsdk0 accepted roots | 0 | 1 |
+| SDK accepted roots | 46 | 174 |
+
+The global memory-leaf catalog contains 16,805 candidate regions/171,633 words: 7,536 read-only, 3,524 write-only and 5,745 mixed read/write. Of those, 2,167 are distinct direct targets in discovered caller regions. Exact eligible PLT snapshots include 1,344 memory-target bridges in addition to the unchanged 434 ordinary-target bridges, for 1,778 total. These are separate catalog/call-edge measurements, not executable runtime registrations or game function identities.
+
+There are 1,030 newly accepted framed roots. Their closure union contains 1,030 distinct frames, 360 used memory leaves and 1,463 distinct call edges, including real frame/PLT/leaf transitions. The 1,337 root-to-memory-leaf references overlap across roots. All older accepted outcomes stay unchanged; the new closures are conditional on checked dynamic addresses, actual grants, retained lifetimes and live GOT bindings.
+
+Full evidence is private under `build/milestones/memory-callees-v3/`, including native reports, the complete prior/remaining target classification and original metadata failure windows. The cohort reproduces the prior 17,822 dependency-blocked roots, 5,992 missing targets and 30,319 caller-region/target edges before classifying new bridge eligibility. Missing metadata/unseeded targets are not admitted through diagnostic probes. See [callee audit](callee-audit.md).
+
+The complete prior frontier classifies as 3,789 discovery-blocked metadata targets, 1,888 still-unqualified PLT stubs, 313 newly eligible memory-target PLT stubs and two unregistered targets. This reproduces all 5,992 old missing targets without admitting unseeded or discovery-blocked bodies. The policy-9 remaining frontier contains 17,660 dependency-blocked roots, 5,670 unique targets and 29,599 distinct caller-region/target edges: 3,791 discovery-blocked metadata targets, 1,877 PLT stubs and two unregistered targets. Changes in first-failure/closure traversal mean this is not simple subtraction from the global bridge catalog.
+
 ## Verification
 
 Synthetic tests cover positive leaf and framed cases under all profiles, real transitive closures, unavailable callees, call cycles, metadata aliases/window boundaries, multiple returns, indirect boundaries, unreachable words, samples/limits, PAC-prefix rejection, source preservation, fresh-output checks, and tampered-input rejection. The full Python suite continues to run the native/reference profile tests; the survey itself remains static and does not compile or run candidates.

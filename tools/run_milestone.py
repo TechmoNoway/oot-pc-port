@@ -83,6 +83,29 @@ def compare_memory(plt, memory):
             'profiles':memory['totals']['profiles'],'clusters':memory['memory_clusters']}
 
 
+def compare_memory_callees(before, after):
+    require(after.get('runtime_write_ranges_supplied') is False, 'callee survey supplied write capabilities')
+    require(after.get('policies') == {'checked_memory':'checked-memory-stack-dag-v8','memory_callees':'memory-callee-stack-dag-v9'}, 'invalid memory callee policies')
+    cohort=after.get('memory_callee_cohort')
+    require(isinstance(cohort,dict) and cohort.get('runtime_capabilities_granted') is False and cohort.get('game_code_executed') is False and cohort.get('original_bytes_only') is True,
+            'missing static original-byte callee cohort')
+    normalized=[]
+    for source in (before,after):
+        r=deepcopy(source);r['policies']={'checked_memory':'checked-memory-stack-dag-v8'}
+        r['totals']['profiles']={'checked_memory':r['totals']['profiles']['checked_memory']}
+        for m in r['modules']:m['profiles']={'checked_memory':m['profiles']['checked_memory']}
+        normalized.append(r)
+    c=compare_profiles(*normalized)
+    require(c['before']==c['after'],'shared memory policy outcomes changed')
+    a,b=({m['name']:m for m in r['modules']} for r in normalized)
+    require(all(a[n]['profiles']==b[n]['profiles'] for n in a),'shared per-module memory outcomes changed')
+    baseline_frontier=before.get('memory_clusters',{}).get('remaining_callee_frontier')
+    if baseline_frontier is not None:
+        require(all(cohort['prior_missing_frontier'][k]==baseline_frontier[k] for k in ('dependency_blocked_roots','unique_missing_targets','unique_caller_target_edges')),
+                'prior callee frontier does not reproduce the memory baseline')
+    return dict(source_text_hashes_match=True,shared_policy_outcomes_match=True,profiles=after['totals']['profiles'],cohort=cohort)
+
+
 class MilestoneRun:
     def __init__(self, output, name, stages):
         self.output = build_destination(output)
@@ -173,6 +196,8 @@ def execute(config, output, native_only=False):
     require(all(re.fullmatch(r"test_[a-z0-9_*]+\.py", p) for p in config["gcc_tests"]), "invalid GCC test pattern")
     require(all(re.fullmatch(r"[a-z][a-z0-9-]*", p) for p in config["factory_reports"]), "invalid factory report name")
     require(type(config.get('memory_survey',False)) is bool and type(config.get('preserve_baseline_outcomes',False)) is bool, 'invalid milestone scope flags')
+    require(type(config.get('memory_callee_survey',False)) is bool,'invalid memory callee scope flag')
+    if config.get('memory_callee_survey'):require(isinstance(config.get('baseline_memory'),str) and config['baseline_memory'],'memory callee milestone requires prior memory baseline')
     native = build_destination(ROOT/config["native_build"])
     cache = (native/"CMakeCache.txt").read_text(encoding="utf-8")
     require("CMAKE_GENERATOR:INTERNAL=Visual Studio" in cache, "configure a Visual Studio native build first")
@@ -183,6 +208,7 @@ def execute(config, output, native_only=False):
     if not native_only:
         require((prepared/"manifest.json").is_file(), "prepared inputs are missing")
         for key in ("baseline_default", "baseline_plt"): read_json(ROOT/config[key])
+        if config.get('memory_callee_survey'):read_json(ROOT/config['baseline_memory'])
         destination = build_destination(output)
         require(not destination.is_relative_to(prepared) and not prepared.is_relative_to(destination), "milestone output overlaps prepared inputs")
     cmake = Path(find_cmake()); ctest = cmake.with_name("ctest.exe")
@@ -192,6 +218,7 @@ def execute(config, output, native_only=False):
     stages = ["native-configure", "native-build", "msvc-suite", "gcc-common"] + ["gcc-tests-"+str(i) for i in range(len(config["gcc_tests"]))]
     stages += ["native-evidence"] + ([] if native_only else ["survey-default", "survey-plt", "callee-audit", "comparison"]) + ["summary"]
     if not native_only and config.get('memory_survey'): stages.insert(stages.index('comparison'),'survey-memory')
+    if not native_only and config.get('memory_callee_survey'): stages.insert(stages.index('comparison'),'survey-memory-callees')
     run = MilestoneRun(output, config["name"], stages)
     run.manifest["scope"] = "synthetic native only" if native_only else "synthetic native and static private game analysis"
     run.manifest["config"] = config; run.save()
@@ -216,8 +243,10 @@ def execute(config, output, native_only=False):
                 argv = py+["tools/survey_function_profiles.py", prepared, "--report", run.output/(scope+".json")]
                 if scope == "plt": argv += ["--plt"]
                 if scope == "memory": argv += ["--memory"]
+                if scope == "memory-callees": argv += ["--memory-callees"]
                 run.command("survey-"+scope, argv, env)
-            with ThreadPoolExecutor(max_workers=2) as pool: list(pool.map(survey, ("default", "plt", "memory") if config.get('memory_survey') else ("default", "plt")))
+            scopes=['default','plt']+(['memory'] if config.get('memory_survey') else [])+(['memory-callees'] if config.get('memory_callee_survey') else [])
+            with ThreadPoolExecutor(max_workers=2) as pool: list(pool.map(survey,scopes))
             run.command("callee-audit", py+["tools/survey_callees.py", prepared, "--baseline", run.output/"plt.json", "--report", run.output/"callees.json"], env)
             def compare():
                 comparisons = {scope: compare_profiles(read_json(ROOT/config["baseline_"+scope]), read_json(run.output/(scope+".json"))) for scope in ("default", "plt")}
@@ -241,6 +270,13 @@ def execute(config, output, native_only=False):
                     summary['memory_profiles']={k:v['accepted_regions'] for k,v in evidence['profiles'].items()}
                     summary['memory_clusters']={k:v for k,v in evidence['clusters'].items() if k not in ('samples','remaining_callee_frontier')}
                     summary['memory_callee_frontier']={k:v for k,v in evidence['clusters']['remaining_callee_frontier'].items() if k!='samples'}
+                if config.get('memory_callee_survey'):
+                    evidence=compare_memory_callees(read_json(ROOT/config['baseline_memory']),read_json(run.output/'memory-callees.json'))
+                    (run.output/'memory-callee-comparison.json').write_text(json.dumps(evidence,indent=2)+'\n',encoding='utf-8')
+                    summary['memory_callee_profiles']={k:v['accepted_regions'] for k,v in evidence['profiles'].items()}
+                    summary['memory_callee_cohort']={k:v for k,v in evidence['cohort'].items() if k not in ('samples','rejected','prior_missing_frontier','remaining_missing_frontier')}
+                    for key in ('prior_missing_frontier','remaining_missing_frontier'):
+                        summary['memory_callee_cohort'][key]={k:v for k,v in evidence['cohort'][key].items() if k!='samples'}
             run.action("comparison", compare)
         def publish_summary():
             (run.output/"summary.json").write_text(json.dumps(summary, indent=2)+"\n", encoding="utf-8")
@@ -251,6 +287,9 @@ def execute(config, output, native_only=False):
                 lines += ['', f"Memory policies: {summary['memory_profiles']}; newly accepted roots: {clusters['newly_accepted_roots']}; distinct upgraded frame edges: {clusters['unique_frame_call_edges']}.",
                     '', f"Remaining callee frontier: {frontier['dependency_blocked_roots']} blocked roots, {frontier['unique_missing_targets']} unique missing targets, {frontier['unique_caller_target_edges']} distinct caller/target edges. Root references overlap."]
             lines += ["", "All executed code is synthetic. Static game analysis grants no runtime capabilities. See run.json for final status and per-stage logs."]
+            if 'memory_callee_profiles' in summary:
+                cohort=summary['memory_callee_cohort']
+                lines += ['',f"Memory callees: {summary['memory_callee_profiles']}; newly accepted roots: {cohort['newly_accepted_roots']}; used memory leaves: {cohort['unique_used_memory_leaves']}; distinct upgraded closure edges: {cohort['unique_call_edges']}."]
             (run.output/"summary.md").write_text("\n".join(lines)+"\n", encoding="utf-8")
         run.action("summary", publish_summary); run.finish()
     except Exception as error:

@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "name": "memory-callees",
+  "native_build": "build/cmake",
+  "prepared": "build/prepared/oot111",
+  "baseline_default": "build/milestones/checked-memory-v3/default.json",
+  "baseline_plt": "build/milestones/checked-memory-v3/plt.json",
+  "baseline_memory": "build/milestones/checked-memory-v3/memory.json",
+  "gcc_tests": [
+    "test_memory_callees.py",
+    "test_checked_memory.py"
+  ],
+  "factory_reports": [
+    "memory-callees",
+    "memory-callee-factory",
+    "checked-memory",
+    "checked-memory-factory"
+  ],
+  "memory_callee_survey": true,
+  "preserve_baseline_outcomes": true
+}

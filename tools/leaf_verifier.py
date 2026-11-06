@@ -76,10 +76,16 @@ def emit_leaf_descriptor(data, base, function_name):
     """Bind verified CFG metadata to a compiled symbol, never a guest pointer."""
     require(re.fullmatch(r"oot_lift_[A-Za-z0-9_]+", function_name) is not None, "invalid leaf function identifier")
     proof = verify_leaf(data, base)
+    return emit_verified_leaf_descriptor(proof,function_name)
+
+
+def emit_verified_leaf_descriptor(proof, function_name, memory=False):
+    require(re.fullmatch(r"oot_lift_[A-Za-z0-9_]+", function_name) is not None, "invalid leaf function identifier")
+    base=proof["base"]
     suffix = function_name[len("oot_lift_"):]
     steps, descriptor = f"oot_leaf_steps_{suffix}", f"oot_leaf_info_{suffix}"
     lines = ['#include "leaf_dispatch.h"',
-             '#if OOT_LIFT_ABI_VERSION != 2 || OOT_LEAF_POLICY_VERSION != 1',
+             '#if OOT_LIFT_ABI_VERSION != 2 || OOT_LEAF_POLICY_VERSION != 1' + (' || OOT_LEAF_MEMORY_POLICY_VERSION != 2' if memory else ''),
              '#error Regenerate this leaf descriptor for the current ABI and policy', '#endif',
              f"static const OotLeafStep {steps}[] = {{"]
     for row in proof["control_flow"]:
@@ -89,7 +95,7 @@ def emit_leaf_descriptor(data, base, function_name):
         lines.append(f"    {{{a}, {b}, {row['max_steps']}, 0}},")
     lines.extend(["};", f"static const OotLeafFunction {descriptor} = {{",
                   f"    UINT64_C(0x{base:x}), {proof['instruction_count']}, {proof['max_retired_instructions']},",
-                  f"    OOT_LIFT_ABI_VERSION, OOT_LEAF_POLICY_VERSION, {function_name}, {steps}", "};",
+                  f"    OOT_LIFT_ABI_VERSION, {'OOT_LEAF_MEMORY_POLICY_VERSION' if memory else 'OOT_LEAF_POLICY_VERSION'}, {function_name}, {steps}", "};",
                   f"OOT_LIFT_EXPORT const OotLeafFunction *oot_leaf_descriptor_{suffix}(void)",
                   "{", f"    return &{descriptor};", "}",
                   f"static const OotCodeHash oot_leaf_hash_{suffix} = {{{{",
