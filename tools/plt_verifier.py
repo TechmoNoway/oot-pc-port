@@ -21,6 +21,15 @@ def verify_memory_plt_stub(data,entry,slot,target,leaves,symbol,memory_entries):
     return _verify_plt_stub(data,entry,slot,target,leaves,symbol,verify_memory_leaf if target in memory_entries else verify_leaf,True)
 
 
+def verify_bounded_plt_stub(data,entry,slot,target,leaves,symbol,memory_entries,bounded_entries):
+    from memory_leaf_verifier import verify_memory_leaf
+    from bounded_memory_verifier import verify_bounded_memory_leaf
+    verifier=verify_bounded_memory_leaf if target in bounded_entries else verify_memory_leaf if target in memory_entries else verify_leaf
+    p=_verify_plt_stub(data,entry,slot,target,leaves,symbol,verifier,True)
+    p['policy']='exact-plt-bounded-leaf-v3'
+    return p
+
+
 def _verify_plt_stub(data,entry,slot,target,leaves,symbol,verifier,memory):
     require(len(data)==16 and type(entry) is int and entry % 4==0 and 0 <= entry < (1<<39)-15,
             'invalid PLT text span')
@@ -79,4 +88,16 @@ def eligible_memory_plts(modules,leaves,memory_leaves):
             entry=m.base+off;slot=m.base+stub['got_offset'];data=bytes(m.image[off:off+16])
             proof=verify_memory_plt_stub(data,entry,slot,target,combined,stub['symbol'],memory_leaves)
             result[entry]=dict(data=data,slot=slot,target=target,symbol=stub['symbol'],proof=proof)
+    return result
+
+
+def eligible_bounded_plts(modules,leaves,memory_leaves,bounded_leaves):
+    result={};combined=leaves | memory_leaves | bounded_leaves
+    for m in modules:
+        for off,stub in plt_stubs(m).items():
+            target=int(stub['resolved_address'],16)
+            if target not in combined or stub['symbol'] in NONLOCAL:continue
+            entry=m.base+off;slot=m.base+stub['got_offset'];data=bytes(m.image[off:off+16])
+            p=verify_bounded_plt_stub(data,entry,slot,target,combined,stub['symbol'],memory_leaves,bounded_leaves)
+            result[entry]=dict(data=data,slot=slot,target=target,symbol=stub['symbol'],proof=p)
     return result

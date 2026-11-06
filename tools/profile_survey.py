@@ -15,7 +15,9 @@ from stack_cfg_verifier import verify_cfg_stack_functions
 from stack_layout_verifier import verify_layout_stack_functions
 from stack_layout_verifier import verify_pauth_stack_functions, verify_read_stack_functions, verify_call_stack_functions, verify_plt_stack_functions
 from stack_layout_verifier import verify_memory_stack_functions
-from plt_verifier import eligible_plts, eligible_memory_plts
+from plt_verifier import eligible_plts, eligible_memory_plts, eligible_bounded_plts
+from bounded_memory_verifier import verify_bounded_memory_leaf, MAX_ITERATIONS
+from stack_layout_verifier import verify_bounded_callee_stack_functions
 from memory_leaf_verifier import verify_memory_leaf
 from stack_layout_verifier import verify_memory_callee_stack_functions
 from pauth_lifter import decode_pauth_instruction, MODEL
@@ -156,14 +158,16 @@ def proof_summary(proof):
     return {k: proof[k] for k in keys if k in proof}
 
 
-def check_profile(profile, region, regions, leaf_codes, plts=None, memory_leaves=None):
+def check_profile(profile, region, regions, leaf_codes, plts=None, memory_leaves=None, bounded_leaves=None):
     if profile == "register_leaf": return verify_leaf(region.data, region.entry), 1, 0
     memory_leaves = {} if memory_leaves is None else memory_leaves
-    if memory_leaves: leaf_codes = ChainMap(memory_leaves,leaf_codes)
+    bounded_leaves={} if bounded_leaves is None else bounded_leaves
+    if bounded_leaves: leaf_codes=ChainMap(bounded_leaves,memory_leaves,leaf_codes)
+    elif memory_leaves: leaf_codes = ChainMap(memory_leaves,leaf_codes)
     leaves = {pc: leaf_codes[pc] for pc in region.calls if pc in leaf_codes}
     selected_plts={}
     def add_plt(target):
-        if profile in ('plt_leaf','checked_memory','memory_callees') and plts is not None and target in plts:
+        if profile in ('plt_leaf','checked_memory','memory_callees','bounded_callees') and plts is not None and target in plts:
             selected_plts[target]=plts[target]
             leaves[plts[target]['target']]=leaf_codes[plts[target]['target']]
             return True
@@ -175,6 +179,7 @@ def check_profile(profile, region, regions, leaf_codes, plts=None, memory_leaves
                 "checked_reads": verify_read_stack_functions, "lr_calls": verify_call_stack_functions,
                 "plt_leaf":lambda f,l,r:verify_plt_stack_functions(f,l,r,selected_plts),
                 "checked_memory":lambda f,l,r:verify_memory_stack_functions(f,l,r,selected_plts),
+                "bounded_callees":lambda f,l,r:verify_bounded_callee_stack_functions(f,{e:c for e,c in l.items() if e not in memory_leaves and e not in bounded_leaves},r,selected_plts,{e:c for e,c in l.items() if e in memory_leaves},{e:c for e,c in l.items() if e in bounded_leaves}),
                 "memory_callees":lambda f,l,r:verify_memory_callee_stack_functions(f,{e:c for e,c in l.items() if e not in memory_leaves},r,selected_plts,{e:c for e,c in l.items() if e in memory_leaves})}[profile]
     # Most roots fail their own policy. Run the real root-only verifier first,
     # with actual verified leaf bytes; no fabricated callee bodies are supplied.
@@ -278,10 +283,10 @@ def memory_clusters(regions, leaves, bridges, outcomes, sample_limit, failures, 
         counts_overlap_across_roots=True, runtime_capabilities_granted=False)
 
 
-def memory_callee_cohort(regions,ordinary,memories,proofs,bridges,outcomes,rejected,limit,failures,stubs):
-    old,new=outcomes['checked_memory'],outcomes['memory_callees']
+def memory_callee_cohort(regions,ordinary,memories,proofs,bridges,outcomes,rejected,limit,failures,stubs,baseline_profile="checked_memory",new_profile="memory_callees"):
+    old,new=outcomes[baseline_profile],outcomes[new_profile]
     upgraded={e for e in regions if new[e][0] and not old[e][0]}
-    frames,used,edges,root_refs=set(),set(),set(),Counter();samples=[]
+    frames,used,edges,root_refs=set(),set(),set(),Counter();samples=[];roots_using_loops=0
     for root in sorted(upgraded):
         pending,seen,targets=[root],set(),set()
         while pending:
@@ -298,6 +303,7 @@ def memory_callee_cohort(regions,ordinary,memories,proofs,bridges,outcomes,rejec
                 else:
                     require(t in regions,'accepted memory-callee closure has unknown target');pending.append(t)
         frames.update(seen);used.update(targets);root_refs.update(targets)
+        roots_using_loops+=int(any(proofs[t].get('loop_count',0) for t in targets))
         if len(samples)<limit:samples.append(dict(entry=root,frame_entries=sorted(seen),memory_leaf_entries=sorted(targets),prior_reason=old[root][1],prior_detail=old[root][2],verification=new[root][0]))
     def frontier(results,terminals,known_bridges):
         targets,callers=defaultdict(set),defaultdict(set)
@@ -325,19 +331,20 @@ def memory_callee_cohort(regions,ordinary,memories,proofs,bridges,outcomes,rejec
     prior=frontier(old,ordinary,{e:b for e,b in bridges.items() if b['target'] in ordinary})
     remaining=frontier(new,ordinary | memories,bridges)
     direct={t for r in regions.values() for t in r.calls if t in memories}
-    return dict(candidate_memory_leaves=len(memories),candidate_instruction_words=sum(p['instruction_count'] for p in proofs.values()),
+    return dict(previously_accepted_lost=sum(bool(old[e][0]) and not new[e][0] for e in regions),candidate_memory_leaves=len(memories),candidate_instruction_words=sum(p['instruction_count'] for p in proofs.values()),
         read_only=sum(p['checked_read_count']>0 and not p['checked_write_count'] for p in proofs.values()),
         write_only=sum(p['checked_write_count']>0 and not p['checked_read_count'] for p in proofs.values()),
         read_write=sum(p['checked_read_count']>0 and p['checked_write_count']>0 for p in proofs.values()),
         distinct_direct_memory_targets=len(direct),eligible_memory_target_bridges=sum(b['target'] in memories for b in bridges.values()),
         eligible_all_bridges=len(bridges),rejected=dict(rejected.most_common()),newly_accepted_roots=len(upgraded),
         unique_frames_in_upgraded_closures=len(frames),unique_used_memory_leaves=len(used),unique_call_edges=len(edges),
+        unique_used_loop_leaves=sum(proofs[t].get('loop_count',0) for t in used),roots_using_loop_helpers=roots_using_loops,
         overlapping_root_memory_references=sum(root_refs.values()),samples=samples,samples_truncated=len(upgraded)>len(samples),
         prior_missing_frontier=prior,remaining_missing_frontier=remaining,
         original_bytes_only=True,runtime_capabilities_granted=False,game_code_executed=False)
 
 
-def survey_modules(modules, sample_limit=16, max_words=256, progress=None, pauth=False, reads=False, lr_calls=False, plt=False, memory=False, memory_callees=False):
+def survey_modules(modules, sample_limit=16, max_words=256, progress=None, pauth=False, reads=False, lr_calls=False, plt=False, memory=False, memory_callees=False, bounded_memory=False):
     require(type(sample_limit) is int and 0 <= sample_limit <= 4096, "survey sample limit must be 0-4096")
     require(type(max_words) is int and 1 <= max_words <= 256, "survey word limit must be 1-256")
     require(type(pauth) is bool, "PAC survey opt-in must be boolean")
@@ -346,12 +353,14 @@ def survey_modules(modules, sample_limit=16, max_words=256, progress=None, pauth
     require(type(plt) is bool,'PLT survey opt-in must be boolean')
     require(type(memory) is bool, "memory survey opt-in must be boolean")
     require(type(memory_callees) is bool,"memory callee opt-in must be boolean")
+    require(type(bounded_memory) is bool,"bounded memory opt-in must be boolean")
+    memory_callees = memory_callees or bounded_memory
     memory = memory or memory_callees
     plt = plt or memory
     lr_calls = lr_calls or plt
     reads = reads or lr_calls
     pauth = pauth or reads
-    profiles = ('checked_memory','memory_callees') if memory_callees else ('plt_leaf','checked_memory') if memory else ('lr_calls','plt_leaf') if plt else ("checked_reads","lr_calls") if lr_calls else ("pauth_stack","checked_reads") if reads else ("pauth_stack",) if pauth else PROFILES
+    profiles = ('memory_callees','bounded_callees') if bounded_memory else ('checked_memory','memory_callees') if memory_callees else ('plt_leaf','checked_memory') if memory else ('lr_calls','plt_leaf') if plt else ("checked_reads","lr_calls") if lr_calls else ("pauth_stack","checked_reads") if reads else ("pauth_stack",) if pauth else PROFILES
     syntax, regions, reports, module_reports = Syntax(), {}, [], {}
     memory_failures = {}
     for module in modules:
@@ -400,6 +409,15 @@ def survey_modules(modules, sample_limit=16, max_words=256, progress=None, pauth
             except ValueError as error:memory_rejected[str(error)]+=1
             else:memory_codes[e]=r.data;memory_proofs[e]=p
     memory_bridges=eligible_memory_plts(modules,leaf_codes,memory_codes) if memory_callees else {}
+    bounded_codes={};bounded_proofs={};bounded_rejected=Counter();bounded_lost=0
+    if bounded_memory:
+        for e,r in regions.items():
+            try:p=verify_bounded_memory_leaf(r.data,e)
+            except ValueError as error:
+                bounded_rejected[str(error)]+=1;bounded_lost+=int(e in memory_codes)
+            else:
+                if e not in memory_codes:bounded_codes[e]=r.data;bounded_proofs[e]=p
+    bounded_bridges=eligible_bounded_plts(modules,leaf_codes,memory_codes,bounded_codes) if bounded_memory else {}
     memory_outcomes = {}
     for name in profiles:
         memory_outcomes[name] = {}
@@ -410,7 +428,7 @@ def survey_modules(modules, sample_limit=16, max_words=256, progress=None, pauth
             if name == "register_leaf": proof, category, detail = outcomes[name][entry]
             else:
                 try:
-                    verified, closure_frames, closure_leaves = check_profile(name, region, regions, leaf_codes,memory_bridges if name=='memory_callees' else bridges,memory_codes if name=='memory_callees' else None)
+                    verified, closure_frames, closure_leaves = check_profile(name,region,regions,leaf_codes,bounded_bridges if name=='bounded_callees' else memory_bridges if name=='memory_callees' else bridges,memory_codes if name in ('memory_callees','bounded_callees') else None,bounded_codes if name=='bounded_callees' else None)
                     proof = proof_summary(verified)
                 except ValueError as error: category, detail = rejection(error)
             if memory: memory_outcomes[name][entry] = (proof, category, detail)
@@ -458,12 +476,16 @@ def survey_modules(modules, sample_limit=16, max_words=256, progress=None, pauth
     return {"schema_version": 1, "format": "arm64-function-profile-survey", "guest_code_executed": False,
         "translation_performed": False, "native_callbacks_registered": False, "function_identity_proven": False,
         "coverage_is_complete": False, "decoder": syntax.metadata,
-        "policies": {"checked_memory":"checked-memory-stack-dag-v8","memory_callees":"memory-callee-stack-dag-v9"} if memory_callees else {"plt_leaf":"plt-leaf-stack-dag-v7", "checked_memory":"checked-memory-stack-dag-v8"} if memory else {'lr_calls':'lr-pair-read-stack-dag-v6','plt_leaf':'plt-leaf-stack-dag-v7'} if plt else {"checked_reads":"checked-read-pauth-stack-dag-v5","lr_calls":"lr-pair-read-stack-dag-v6"} if lr_calls else {"pauth_stack":"pauth-layout-stack-dag-v4","checked_reads":"checked-read-pauth-stack-dag-v5"} if reads else {"pauth_stack": "pauth-layout-stack-dag-v4"} if pauth else dict(zip(PROFILES, POLICIES)),
+        "policies": {"memory_callees":"memory-callee-stack-dag-v9","bounded_callees":"bounded-callee-stack-dag-v10"} if bounded_memory else {"checked_memory":"checked-memory-stack-dag-v8","memory_callees":"memory-callee-stack-dag-v9"} if memory_callees else {"plt_leaf":"plt-leaf-stack-dag-v7", "checked_memory":"checked-memory-stack-dag-v8"} if memory else {'lr_calls':'lr-pair-read-stack-dag-v6','plt_leaf':'plt-leaf-stack-dag-v7'} if plt else {"checked_reads":"checked-read-pauth-stack-dag-v5","lr_calls":"lr-pair-read-stack-dag-v6"} if lr_calls else {"pauth_stack":"pauth-layout-stack-dag-v4","checked_reads":"checked-read-pauth-stack-dag-v5"} if reads else {"pauth_stack": "pauth-layout-stack-dag-v4"} if pauth else dict(zip(PROFILES, POLICIES)),
         'eligible_plt_leaf_bridges':len(bridges),'runtime_got_targets_checked':False,
         "pauth_model": MODEL if pauth else None,
         "runtime_read_ranges_supplied": False,
         "runtime_write_ranges_supplied": False,
-        "memory_callee_cohort": memory_callee_cohort(regions,leaf_codes,memory_codes,memory_proofs,memory_bridges,memory_outcomes,memory_rejected,sample_limit,memory_failures,memory_stubs) if memory_callees else None,
+        "bounded_memory_cohort": (dict(memory_callee_cohort(regions,leaf_codes | memory_codes,bounded_codes,bounded_proofs,bounded_bridges,memory_outcomes,bounded_rejected,sample_limit,memory_failures,memory_stubs,'memory_callees','bounded_callees'),
+            previous_memory_catalog=len(memory_codes),total_memory_catalog=len(memory_codes)+len(bounded_codes),previous_memory_candidates_lost=bounded_lost,
+            new_loop_leaves=sum(p['loop_count'] for p in bounded_proofs.values()),new_acyclic_writeback_leaves=sum(not p['loop_count'] and p['writeback_count']>0 for p in bounded_proofs.values()),
+            new_writeback_leaves=sum(p['writeback_count']>0 for p in bounded_proofs.values()),max_iterations=MAX_ITERATIONS)) if bounded_memory else None,
+        "memory_callee_cohort": memory_callee_cohort(regions,leaf_codes,memory_codes,memory_proofs,memory_bridges,memory_outcomes,memory_rejected,sample_limit,memory_failures,memory_stubs) if memory_callees and not bounded_memory else None,
         "memory_clusters": memory_clusters(regions, leaf_codes, bridges, memory_outcomes, sample_limit, memory_failures, memory_stubs) if memory and not memory_callees else None,
         "read_survey_scope": "structural proof only; dynamic addresses/ranges/ownership/alignment checked by runtime; no read capabilities granted" if reads else None,
         "method": {"seeds": ["module_entry", "unwind_table", "defined_function_symbol"], "max_words": max_words,

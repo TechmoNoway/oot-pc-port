@@ -106,6 +106,27 @@ def compare_memory_callees(before, after):
     return dict(source_text_hashes_match=True,shared_policy_outcomes_match=True,profiles=after['totals']['profiles'],cohort=cohort)
 
 
+def compare_bounded_memory(before, after):
+    require(after.get('runtime_write_ranges_supplied') is False,'bounded survey supplied runtime capabilities')
+    require(after.get('policies') == {'memory_callees':'memory-callee-stack-dag-v9','bounded_callees':'bounded-callee-stack-dag-v10'},'invalid bounded policies')
+    cohort=after.get('bounded_memory_cohort')
+    require(isinstance(cohort,dict) and cohort.get('runtime_capabilities_granted') is False and cohort.get('game_code_executed') is False and cohort.get('original_bytes_only') is True,'invalid bounded cohort')
+    require(cohort.get('previous_memory_candidates_lost')==0 and cohort.get('previously_accepted_lost')==0,'bounded policy lost previous candidates')
+    normalized=[]
+    for source in (before,after):
+        r=deepcopy(source);r['policies']={'memory_callees':'memory-callee-stack-dag-v9'}
+        r['totals']['profiles']={'memory_callees':r['totals']['profiles']['memory_callees']}
+        for m in r['modules']:m['profiles']={'memory_callees':m['profiles']['memory_callees']}
+        normalized.append(r)
+    c=compare_profiles(*normalized);require(c['before']==c['after'],'shared memory callee outcomes changed')
+    a,b=({m['name']:m for m in r['modules']} for r in normalized)
+    require(all(a[n]['profiles']==b[n]['profiles'] for n in a),'shared per-module callee outcomes changed')
+    baseline=before.get('memory_callee_cohort',{}).get('remaining_missing_frontier')
+    if baseline is not None:
+        require(all(cohort['prior_missing_frontier'][k]==baseline[k] for k in ('dependency_blocked_roots','unique_missing_targets','unique_caller_target_edges')),'bounded prior frontier differs')
+    return dict(source_text_hashes_match=True,shared_policy_outcomes_match=True,profiles=after['totals']['profiles'],cohort=cohort)
+
+
 class MilestoneRun:
     def __init__(self, output, name, stages):
         self.output = build_destination(output)
@@ -198,6 +219,8 @@ def execute(config, output, native_only=False):
     require(type(config.get('memory_survey',False)) is bool and type(config.get('preserve_baseline_outcomes',False)) is bool, 'invalid milestone scope flags')
     require(type(config.get('memory_callee_survey',False)) is bool,'invalid memory callee scope flag')
     if config.get('memory_callee_survey'):require(isinstance(config.get('baseline_memory'),str) and config['baseline_memory'],'memory callee milestone requires prior memory baseline')
+    require(type(config.get('bounded_memory_survey',False)) is bool,'invalid bounded scope flag')
+    if config.get('bounded_memory_survey'):require(isinstance(config.get('baseline_callees'),str) and config['baseline_callees'],'bounded milestone requires callee baseline')
     native = build_destination(ROOT/config["native_build"])
     cache = (native/"CMakeCache.txt").read_text(encoding="utf-8")
     require("CMAKE_GENERATOR:INTERNAL=Visual Studio" in cache, "configure a Visual Studio native build first")
@@ -209,6 +232,7 @@ def execute(config, output, native_only=False):
         require((prepared/"manifest.json").is_file(), "prepared inputs are missing")
         for key in ("baseline_default", "baseline_plt"): read_json(ROOT/config[key])
         if config.get('memory_callee_survey'):read_json(ROOT/config['baseline_memory'])
+        if config.get('bounded_memory_survey'):read_json(ROOT/config['baseline_callees'])
         destination = build_destination(output)
         require(not destination.is_relative_to(prepared) and not prepared.is_relative_to(destination), "milestone output overlaps prepared inputs")
     cmake = Path(find_cmake()); ctest = cmake.with_name("ctest.exe")
@@ -219,6 +243,7 @@ def execute(config, output, native_only=False):
     stages += ["native-evidence"] + ([] if native_only else ["survey-default", "survey-plt", "callee-audit", "comparison"]) + ["summary"]
     if not native_only and config.get('memory_survey'): stages.insert(stages.index('comparison'),'survey-memory')
     if not native_only and config.get('memory_callee_survey'): stages.insert(stages.index('comparison'),'survey-memory-callees')
+    if not native_only and config.get('bounded_memory_survey'): stages.insert(stages.index('comparison'),'survey-bounded-memory')
     run = MilestoneRun(output, config["name"], stages)
     run.manifest["scope"] = "synthetic native only" if native_only else "synthetic native and static private game analysis"
     run.manifest["config"] = config; run.save()
@@ -244,8 +269,9 @@ def execute(config, output, native_only=False):
                 if scope == "plt": argv += ["--plt"]
                 if scope == "memory": argv += ["--memory"]
                 if scope == "memory-callees": argv += ["--memory-callees"]
+                if scope == "bounded-memory": argv += ["--bounded-memory"]
                 run.command("survey-"+scope, argv, env)
-            scopes=['default','plt']+(['memory'] if config.get('memory_survey') else [])+(['memory-callees'] if config.get('memory_callee_survey') else [])
+            scopes=['default','plt']+(['memory'] if config.get('memory_survey') else [])+(['memory-callees'] if config.get('memory_callee_survey') else [])+(['bounded-memory'] if config.get('bounded_memory_survey') else [])
             with ThreadPoolExecutor(max_workers=2) as pool: list(pool.map(survey,scopes))
             run.command("callee-audit", py+["tools/survey_callees.py", prepared, "--baseline", run.output/"plt.json", "--report", run.output/"callees.json"], env)
             def compare():
@@ -277,6 +303,13 @@ def execute(config, output, native_only=False):
                     summary['memory_callee_cohort']={k:v for k,v in evidence['cohort'].items() if k not in ('samples','rejected','prior_missing_frontier','remaining_missing_frontier')}
                     for key in ('prior_missing_frontier','remaining_missing_frontier'):
                         summary['memory_callee_cohort'][key]={k:v for k,v in evidence['cohort'][key].items() if k!='samples'}
+                if config.get('bounded_memory_survey'):
+                    evidence=compare_bounded_memory(read_json(ROOT/config['baseline_callees']),read_json(run.output/'bounded-memory.json'))
+                    (run.output/'bounded-comparison.json').write_text(json.dumps(evidence,indent=2)+'\n',encoding='utf-8')
+                    summary['bounded_profiles']={k:v['accepted_regions'] for k,v in evidence['profiles'].items()}
+                    summary['bounded_cohort']={k:v for k,v in evidence['cohort'].items() if k not in ('samples','rejected','prior_missing_frontier','remaining_missing_frontier')}
+                    for key in ('prior_missing_frontier','remaining_missing_frontier'):
+                        summary['bounded_cohort'][key]={k:v for k,v in evidence['cohort'][key].items() if k!='samples'}
             run.action("comparison", compare)
         def publish_summary():
             (run.output/"summary.json").write_text(json.dumps(summary, indent=2)+"\n", encoding="utf-8")
@@ -290,6 +323,9 @@ def execute(config, output, native_only=False):
             if 'memory_callee_profiles' in summary:
                 cohort=summary['memory_callee_cohort']
                 lines += ['',f"Memory callees: {summary['memory_callee_profiles']}; newly accepted roots: {cohort['newly_accepted_roots']}; used memory leaves: {cohort['unique_used_memory_leaves']}; distinct upgraded closure edges: {cohort['unique_call_edges']}."]
+            if 'bounded_profiles' in summary:
+                c=summary['bounded_cohort']
+                lines += ['',f"Bounded memory: {summary['bounded_profiles']}; new leaves: {c['candidate_memory_leaves']} ({c['new_loop_leaves']} loops); upgraded roots: {c['newly_accepted_roots']}; distinct closure edges: {c['unique_call_edges']}."]
             (run.output/"summary.md").write_text("\n".join(lines)+"\n", encoding="utf-8")
         run.action("summary", publish_summary); run.finish()
     except Exception as error:

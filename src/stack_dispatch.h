@@ -12,6 +12,7 @@
 #define OOT_STACK_PLT_POLICY_VERSION 7u
 #define OOT_STACK_MEMORY_POLICY_VERSION 8u
 #define OOT_STACK_MEMORY_CALLEE_POLICY_VERSION 9u
+#define OOT_STACK_BOUNDED_CALLEE_POLICY_VERSION 10u
 #define OOT_STACK_MAX_PLT 256u
 #define OOT_STACK_MAX_READ_RANGES 128u
 #define OOT_STACK_MAX_FUNCTIONS 32u
@@ -149,6 +150,13 @@ OOT_MEMORY_API OotStackDispatcher *oot_stack_create_memory_callees(OotRuntimeIma
     const OotReadRange *write_ranges, size_t write_count, uint32_t *error);
 OOT_MEMORY_API int oot_stack_begin(OotStackDispatcher *dispatcher, const OotArm64State *state,
     uint64_t expected_return, OotLeafReport *report);
+OOT_MEMORY_API OotStackDispatcher *oot_stack_create_bounded_callees(OotRuntimeImage *image,
+    const OotStackCallFunction *functions, size_t count, uint64_t root,
+    const OotBoundedLeafFunction *leaves, size_t leaf_count, const OotCodeHash *hashes,
+    const uint8_t body_hash[32], const uint64_t *returns, size_t return_count,
+    OotPauth *pauth, const OotReadRange *ranges, size_t range_count,
+    const OotPltFunction *plts, size_t plt_count,
+    const OotReadRange *write_ranges, size_t write_count, uint32_t *error);
 OOT_MEMORY_API int oot_stack_run(OotStackDispatcher *dispatcher, OotArm64State *state, uint64_t budget, OotLeafReport *report);
 OOT_MEMORY_API int oot_stack_abort(OotStackDispatcher *dispatcher, OotLeafReport *report);
 #endif

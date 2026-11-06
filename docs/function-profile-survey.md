@@ -300,6 +300,28 @@ Full evidence is private under `build/milestones/memory-callees-v3/`, including 
 
 The complete prior frontier classifies as 3,789 discovery-blocked metadata targets, 1,888 still-unqualified PLT stubs, 313 newly eligible memory-target PLT stubs and two unregistered targets. This reproduces all 5,992 old missing targets without admitting unseeded or discovery-blocked bodies. The policy-9 remaining frontier contains 17,660 dependency-blocked roots, 5,670 unique targets and 29,599 distinct caller-region/target edges: 3,791 discovery-blocked metadata targets, 1,877 PLT stubs and two unregistered targets. Changes in first-failure/closure traversal mean this is not simple subtraction from the global bridge catalog.
 
+## Bounded-loop and writeback milestone
+
+The separate [leaf-policy-3 / stack-policy-10 contract](bounded-memory.md) adds scalar/pair pre/post-index writeback and one linear counter-loop shape. `--bounded-memory` compares unchanged policy 9 with policy 10 using full original words, actual callee proofs and relocation-backed PLT stubs. A structural loop proof carries first-header count and dynamic operand obligations; it never derives runtime grants from survey data. Earlier policies and ABI prefixes remain unchanged.
+
+The fresh original-byte survey from the passed `build/milestones/bounded-memory-v1/` run matches the preceding inputs, 284,396 metadata-entry denominator and 135,571 PAC-enabled discovered regions. The shared policy-9 acceptance remains unchanged, with zero lost memory candidates or framed roots:
+
+| Measurement | Policy 9 | Policy 10 |
+| --- | ---: | ---: |
+| Accepted framed structural roots | 2,858 | 2,868 |
+| Accepted root instruction words | 44,123 | 44,444 |
+| Main accepted roots | 2,683 | 2,690 |
+| Subsdk0 accepted roots | 1 | 1 |
+| SDK accepted roots | 174 | 177 |
+
+All 16,805 preceding memory-leaf regions are preserved. The new cohort adds 554 regions/15,075 declared words: 251 acyclic writeback helpers and 303 bounded loops. Of the 554, 364 use writeback, including 113 loops; read-only/write-only/read-write classes are 70/167/317. The combined memory catalog contains 17,359 regions. These are declared structural regions, not established original function identities or executable registrations.
+
+The new cohort contains 84 distinct direct-target candidates and 17 additional globally eligible bounded-target PLT bridges, bringing the total ordinary/memory bridge catalog from 1,778 to 1,795. These global measurements differ from targets reached by new closures or the old missing frontier.
+
+The 10 newly accepted roots have a union of 10 frames, 12 distinct new memory leaves and 20 unique call edges. Five used leaves contain bounded loops, reached by two upgraded roots; the other seven are acyclic writeback helpers. Their 13 root-to-new-leaf references overlap. The 554 new catalog regions are distinct from these actually used callee proofs. Acceptance requires the unchanged original-byte proof plus live header-count, image-grant and GOT conditions.
+
+The preceding frontier's exhaustive aggregate counts are reproduced at 17,660 dependency-blocked roots, 5,670 missing targets and 29,599 unique caller-region/target edges. New policy 10 reaches a frontier of 17,658 blocked roots, 5,660 targets and 29,580 edges. Baseline comparison checks shared-policy profile outcomes including retained accepted/rejected samples, plus source/text/model identity. Prior-frontier comparison checks only the three aggregate counts, not its samples or every target identity; zero lost current candidates/roots comes from the real production maps. Detailed metadata windows/target samples remain private; see [callee audit](callee-audit.md). The [milestone configuration](../config/milestones/bounded-memory.json) passes fresh default/PLT surveys, shared-policy/previous-frontier comparisons, native evidence and the final unchanged source fingerprint. `build/milestones/bounded-memory-v1/run.json` records all stages passed; [native validation](bounded-memory.md) remains synthetic. No game C, callbacks, execution or runtime capabilities are produced.
+
 ## Verification
 
 Synthetic tests cover positive leaf and framed cases under all profiles, real transitive closures, unavailable callees, call cycles, metadata aliases/window boundaries, multiple returns, indirect boundaries, unreachable words, samples/limits, PAC-prefix rejection, source preservation, fresh-output checks, and tampered-input rejection. The full Python suite continues to run the native/reference profile tests; the survey itself remains static and does not compile or run candidates.

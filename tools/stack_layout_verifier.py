@@ -78,23 +78,36 @@ def verify_memory_callee_stack_functions(frames,leaves,root,plts,memory_leaves):
     return _verify_layout(frames,leaves,root,True,True,True,terminal,writes=True,memory_leaves=memory_leaves)
 
 
+def verify_bounded_callee_stack_functions(frames,leaves,root,plts,memory_leaves,bounded_leaves):
+    from plt_verifier import verify_bounded_plt_stub
+    require(not(leaves.keys() & memory_leaves.keys() or leaves.keys() & bounded_leaves.keys() or memory_leaves.keys() & bounded_leaves.keys()),'duplicate terminal leaf')
+    require(len(plts)<=256,'too many PLT bridges')
+    combined=leaves | memory_leaves | bounded_leaves
+    terminal={e:verify_bounded_plt_stub(p['data'],e,p['slot'],p['target'],combined,p['symbol'],memory_leaves,bounded_leaves) for e,p in plts.items()}
+    return _verify_layout(frames,leaves,root,True,True,True,terminal,writes=True,memory_leaves=memory_leaves,bounded_leaves=bounded_leaves)
+
+
 def lr_pair(i, load):
     return (i.form == "loadstore_pair" and i.access_size == 8 and i.rn == 31 and i.load == load and
             i.writeback and i.post_index == load and
             ((i.rd == 30 and 19 <= i.rt2 <= 28) or (i.rt2 == 30 and 19 <= i.rd <= 28)))
 
 
-def _verify_layout(frames, leaves, root, pauth, reads=False, lr_calls=False, plts=None, writes=False, memory_leaves=None):
+def _verify_layout(frames, leaves, root, pauth, reads=False, lr_calls=False, plts=None, writes=False, memory_leaves=None, bounded_leaves=None):
     terminal_memory = {} if memory_leaves is None else memory_leaves
-    require(len(leaves)+len(terminal_memory)<=256, 'too many terminal leaves')
+    terminal_bounded={} if bounded_leaves is None else bounded_leaves
+    require(len(leaves)+len(terminal_memory)+len(terminal_bounded)<=256, 'too many terminal leaves')
     require(0 < len(frames) <= MAX_FUNCTIONS and len(leaves) <= 256 and root in frames, "invalid layout registry/root")
-    ranges = sorted((entry, entry + len(code)) for entry, code in [*frames.items(), *leaves.items(), *terminal_memory.items()])
+    ranges = sorted((entry, entry + len(code)) for entry, code in [*frames.items(), *leaves.items(), *terminal_memory.items(), *terminal_bounded.items()])
     if plts is not None:ranges=sorted(ranges+[(entry,entry+16) for entry in plts])
     require(all(a[1] <= b[0] for a, b in zip(ranges, ranges[1:])), "layout registry code overlaps")
     leaf_proofs = {entry: verify_leaf(code, entry) for entry, code in leaves.items()}
     if memory_leaves is not None:
         from memory_leaf_verifier import verify_memory_leaf
         leaf_proofs.update({e:verify_memory_leaf(c,e) for e,c in memory_leaves.items()})
+    if bounded_leaves is not None:
+        from bounded_memory_verifier import verify_bounded_memory_leaf
+        leaf_proofs.update({e:verify_bounded_memory_leaf(c,e) for e,c in bounded_leaves.items()})
     if plts is not None:leaf_proofs.update(plts) # Real terminal bridge proofs, never substituted RET bodies.
     proofs = {}
     for entry, data in frames.items():
@@ -247,6 +260,7 @@ def _verify_layout(frames, leaves, root, pauth, reads=False, lr_calls=False, plt
             proofs[entry].update(policy='checked-memory-stack-dag-v8', checked_write_count=sum(s['kind'] == WRITE for s in steps),
                 runtime_write_preconditions='unreserved owned locals or explicit retained-image write ranges; whole-operand staged effects checked before commit')
         if memory_leaves is not None: proofs[entry].update(policy='memory-callee-stack-dag-v9')
+        if bounded_leaves is not None: proofs[entry].update(policy='bounded-callee-stack-dag-v10')
     return verify_cfg_graphs(proofs, leaf_proofs, root)
 
 
@@ -278,7 +292,11 @@ def emit_memory_callee_stack_descriptor(p,name):
     return _emit_descriptor(p,name,True,True,True,writes=True,memory_callees=True)
 
 
-def _emit_descriptor(p, name, pauth, reads=False, lr_calls=False, plt=False, writes=False, memory_callees=False):
+def emit_bounded_callee_stack_descriptor(p,name):
+    return _emit_descriptor(p,name,True,True,True,writes=True,memory_callees=True,bounded=True)
+
+
+def _emit_descriptor(p, name, pauth, reads=False, lr_calls=False, plt=False, writes=False, memory_callees=False, bounded=False):
     prefix = "oot_pauth_lift_" if pauth else "oot_lift_"
     require(re.fullmatch(prefix + r"[A-Za-z0-9_]+", name) is not None, "invalid layout identifier")
     suffix = name[len(prefix):]
@@ -301,12 +319,13 @@ def _emit_descriptor(p, name, pauth, reads=False, lr_calls=False, plt=False, wri
     if plt:lines+=['#if OOT_STACK_PLT_POLICY_VERSION != 7','#error Regenerate PLT frame descriptor','#endif']
     if writes: lines += ['#if OOT_STACK_MEMORY_POLICY_VERSION != 8', '#error Regenerate memory descriptor', '#endif']
     if memory_callees: lines += ['#if OOT_STACK_MEMORY_CALLEE_POLICY_VERSION != 9', '#error Regenerate memory callee descriptor', '#endif']
+    if bounded: lines += ['#if OOT_STACK_BOUNDED_CALLEE_POLICY_VERSION != 10','#error Regenerate bounded callee descriptor','#endif']
     lines += [f'static const {descriptor} oot_layout_info_{suffix} = {{']
     if lr_calls: lines += ['    {']
     if reads: lines += ['    {']
     if pauth: lines += ['    {']
     lines += ['    {', '        {',
-        f"            UINT64_C(0x{p['base']:x}), {p['instruction_count']}, {p['max_retired_instructions']}, 2, {9 if memory_callees else 8 if writes else 7 if plt else 6 if lr_calls else 5 if reads else 4 if pauth else 3},",
+        f"            UINT64_C(0x{p['base']:x}), {p['instruction_count']}, {p['max_retired_instructions']}, 2, {10 if bounded else 9 if memory_callees else 8 if writes else 7 if plt else 6 if lr_calls else 5 if reads else 4 if pauth else 3},",
         f"            {p['frame_size']}, {p['max_depth']}, {'NULL' if pauth else name}, oot_layout_steps_{suffix}, {{{{",
         '                ' + ', '.join(f'0x{b:02x}' for b in bytes.fromhex(p['source_sha256'])), '            }}', '        },',
         f"        oot_layout_flow_{suffix}, UINT32_C(0x{p['saved_mask']:x}), 0", '    },',
@@ -315,6 +334,6 @@ def _emit_descriptor(p, name, pauth, reads=False, lr_calls=False, plt=False, wri
     if reads: lines += ['    },', f'    oot_read_words_{suffix}']
     if lr_calls: lines += ['    },', f"    UINT32_C(0x{p['open_word']:08x}), UINT32_C(0x{p['close_word']:08x})"]
     lines += ['};',
-        f'OOT_LIFT_EXPORT const {descriptor} *oot_stack_{"memory_callee" if memory_callees else "memory" if writes else "plt" if plt else "call" if lr_calls else "read" if reads else "pauth" if pauth else "layout"}_descriptor_{suffix}(void)',
+        f'OOT_LIFT_EXPORT const {descriptor} *oot_stack_{"bounded_callee" if bounded else "memory_callee" if memory_callees else "memory" if writes else "plt" if plt else "call" if lr_calls else "read" if reads else "pauth" if pauth else "layout"}_descriptor_{suffix}(void)',
         '{', f'    return &oot_layout_info_{suffix};', '}', '']
     return '\n'.join(lines)

@@ -178,3 +178,22 @@ The complete aggregate/status comparison and private target samples are in `buil
 
 
 Of the prior 5,992 missing targets, 313 become structurally eligible memory-target PLTs; 1,888 remain unqualified PLTs, 3,789 remain discovery-blocked metadata and two remain unregistered. Under policy 9 the newly reached frontier has 17,660 dependency-blocked roots, 5,670 unique missing targets and 29,599 unique caller-region/target edges. Those counts describe conservative first-failure paths and actual registry closures, not runtime readiness or a simple subtraction of all globally eligible bridges.
+
+## Bounded-loop and writeback closures
+
+[Leaf policy 3 and stack policy 10/schema 11](bounded-memory.md) extend the real direct/PLT memory-leaf catalog with verified writeback and bounded linear counter loops. The fresh original-byte survey preserves all 16,805 preceding memory candidates and policy-9 accepted roots. It adds 554 helper regions: 251 acyclic writeback regions and 303 loops. New closures use 12 distinct new leaves through 20 unique call edges and add 10 accepted framed roots. The actual closure census identifies five used bounded-loop leaves reached by two upgraded roots and seven used acyclic writeback helpers; this composition is separate from the global catalog.
+
+The prior policy-9 frontier's exhaustive aggregate counts reproduce 17,660 dependency-blocked roots, 5,670 distinct missing targets and 29,599 unique caller-region/target edges. The fresh survey classifies that entire frontier as follows:
+
+| Prior missing-target classification | Targets |
+| --- | ---: |
+| Metadata blocked during discovery | 3,791 |
+| PLT still unqualified | 1,867 |
+| Newly eligible bounded-target PLT | 10 |
+| Unregistered target | 2 |
+
+The separate global eligible bridge catalog gains 17 entries; only 10 occur in this old missing-target frontier. Those quantities must remain separate. Diagnostic probes of discovery-blocked/unregistered bodies still cannot register targets or satisfy one another.
+
+Policy 10 reaches a remaining frontier of 17,658 dependency-blocked roots, 5,660 distinct missing targets and 29,580 unique caller-region/target edges. Remaining target classes are 3,791 discovery-blocked metadata entries, 1,867 unqualified PLTs and two unregistered targets. Root references and first-failure paths overlap, so the frontier reduction is not the accepted-root increase or a simple subtraction of global bridge eligibility.
+
+The [bounded-memory milestone runner](development-workflow.md) checks shared policy-9 profile outcomes, including retained accepted/rejected samples, against the preceding passed memory-callee baseline with matching source/text hashes, model and limits. Prior-frontier comparison checks only its three exhaustive aggregate counts (roots, unique targets and edges), not frontier samples or every target identity. Current zero-loss candidate/root counts come from actual production maps. The policy-6 audit and default/PLT outcomes reproduce unchanged. The full `build/milestones/bounded-memory-v1/run.json` reports all stages passed with an unchanged source fingerprint; native validation executes synthetic code only. Detailed addresses, metadata failure windows and original-word samples remain private in that run directory. Runtime still requires admitted loop counts, exact live GOT targets, retained images/keys and explicit operand grants; no survey grants stack/GOT writes or generates, registers or executes game callbacks.

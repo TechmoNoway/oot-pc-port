@@ -6,6 +6,8 @@
 
 #define OOT_LEAF_POLICY_VERSION 1u
 #define OOT_LEAF_MEMORY_POLICY_VERSION 2u
+#define OOT_LEAF_BOUNDED_POLICY_VERSION 3u
+#define OOT_LEAF_MAX_ITERATIONS 1024u
 #define OOT_LEAF_MAX_RANGES 128u
 #define OOT_LEAF_MAX_WORDS 256u
 #define OOT_LEAF_MAX_FUNCTIONS 256u
@@ -37,6 +39,16 @@ typedef struct OotMemoryLeafFunction {
     OotLeafFunction info;
     const uint32_t *effect_words;
 } OotMemoryLeafFunction;
+/* Step ranks describe the DAG after cutting the sole declared backedge.
+ * max_iterations=0 means acyclic; all loop fields are then zero. */
+typedef struct OotLeafLoop {
+    uint32_t header, latch, decrement, guard, counter, width, max_iterations, reserved;
+} OotLeafLoop;
+typedef struct OotBoundedLeafFunction {
+    OotMemoryLeafFunction memory;
+    const uint32_t *words;
+    OotLeafLoop loop;
+} OotBoundedLeafFunction;
 
 enum OotLeafStatus {
     OOT_LEAF_READY = 0,
@@ -67,7 +79,10 @@ enum OotLeafError {
     OOT_LEAF_BAD_CODE = 17,
     OOT_LEAF_BAD_MEMORY_RANGE = 18,
     OOT_LEAF_BAD_MEMORY_EFFECT = 19,
-    OOT_LEAF_BAD_MEMORY = 20
+    OOT_LEAF_BAD_MEMORY = 20,
+    OOT_LEAF_BAD_LOOP_INPUT = 21,
+    OOT_LEAF_BAD_LOOP_EFFECT = 22,
+    OOT_LEAF_BAD_LOOP_LIMIT = 23
 };
 
 typedef struct OotLeafReport {
@@ -94,6 +109,10 @@ OOT_MEMORY_API OotLeafDispatcher *oot_leaf_dispatcher_create_memory_bound(OotRun
     const uint64_t *returns, size_t return_count,
     const OotReadRange *reads, size_t read_count, const OotReadRange *writes, size_t write_count, uint32_t *error);
 OOT_MEMORY_API int oot_leaf_dispatcher_destroy(OotLeafDispatcher *dispatcher); /* Refuses reentrant destruction. */
+OOT_MEMORY_API OotLeafDispatcher *oot_leaf_dispatcher_create_bounded_bound(OotRuntimeImage *image,
+    const OotBoundedLeafFunction *functions, size_t count, const OotCodeHash *hashes, const uint8_t body_hash[32],
+    const uint64_t *returns, size_t return_count,
+    const OotReadRange *reads, size_t read_count, const OotReadRange *writes, size_t write_count, uint32_t *error);
 OOT_MEMORY_API int oot_leaf_begin(OotLeafDispatcher *dispatcher, const OotArm64State *state,
     uint64_t entry, uint64_t expected_return, OotLeafReport *report);
 OOT_MEMORY_API int oot_leaf_run(OotLeafDispatcher *dispatcher, OotArm64State *state,

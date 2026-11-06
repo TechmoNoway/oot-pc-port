@@ -9,6 +9,8 @@ typedef struct OwnedLeaf {
     OotCodeHash hash;
     uint32_t effect_words[OOT_LEAF_MAX_WORDS];
     uint8_t effects[OOT_LEAF_MAX_WORDS];
+    uint32_t words[OOT_LEAF_MAX_WORDS];
+    OotLeafLoop loop;
 } OwnedLeaf;
 
 struct OotLeafDispatcher {
@@ -17,7 +19,7 @@ struct OotLeafDispatcher {
     size_t count, return_count, current;
     uint64_t stack_low, stack_high, expected_return, total_retired;
     OotArm64State initial, checkpoint;
-    unsigned phase, executing; /* 0 idle, 1 active, 2 returned, 3 failed. */
+    unsigned phase, executing, loop_entered; /* 0 idle, 1 active, 2 returned, 3 failed. */
     uint32_t fault;
     OotRuntimeImage *image;
     uint8_t body_sha256[32];
@@ -44,7 +46,7 @@ static int same_state(const OotArm64State *a, const OotArm64State *b)
     return memcmp(a->x, b->x, sizeof(a->x)) == 0 && a->sp == b->sp && a->pc == b->pc && a->nzcv == b->nzcv;
 }
 
-static int validate_cfg(const OotLeafFunction *f)
+static int validate_cfg(const OotLeafFunction *f, const OotLeafLoop *loop)
 {
     unsigned index, count = f->instruction_count, head = 0, tail = 1;
     uint16_t pending[OOT_LEAF_MAX_WORDS] = {0};
@@ -61,7 +63,10 @@ static int validate_cfg(const OotLeafFunction *f)
             unsigned longest;
             if (a >= count || b >= count)
                 return 0;
-            longest = f->steps[a].max_steps > f->steps[b].max_steps ? f->steps[a].max_steps : f->steps[b].max_steps;
+            if (loop->max_iterations && index == loop->latch) {
+                if (!((a == loop->header && b == index+1) || (b == loop->header && a == index+1))) return 0;
+                longest = f->steps[index+1].max_steps;
+            } else longest = f->steps[a].max_steps > f->steps[b].max_steps ? f->steps[a].max_steps : f->steps[b].max_steps;
             if (step->max_steps != longest + 1)
                 return 0;
         }
@@ -77,7 +82,55 @@ static int validate_cfg(const OotLeafFunction *f)
             }
         }
     }
-    return tail == count && f->max_steps == f->steps[0].max_steps;
+    return tail == count && f->max_steps == (loop->max_iterations ?
+        count+(OOT_LEAF_MAX_ITERATIONS-1)*(loop->latch-loop->header+1) : f->steps[0].max_steps);
+}
+
+static uint64_t decrement_amount(uint32_t word)
+{
+    return (uint64_t)((word >> 10) & 4095) << (word & (1u << 22) ? 12 : 0);
+}
+
+static int validate_loop(const OwnedLeaf *o)
+{
+    const OotLeafFunction *f = &o->info;
+    const OotLeafLoop *l = &o->loop;
+    unsigned i;
+    uint32_t dec, latch;
+    int64_t delta;
+    if (!l->max_iterations) return !l->header && !l->latch && !l->decrement && !l->guard && !l->counter && !l->width && !l->reserved;
+    if (l->max_iterations != OOT_LEAF_MAX_ITERATIONS || l->reserved || l->counter >= 18 ||
+        (l->width != 32 && l->width != 64) || l->header >= l->latch || l->latch >= f->instruction_count-1 ||
+        l->decrement < l->header || l->decrement >= l->latch) return 0;
+    dec = o->words[l->decrement]; latch = o->words[l->latch];
+    if ((dec & UINT32_C(0x5f800000)) != UINT32_C(0x51000000) || (dec & 31) != l->counter ||
+        ((dec >> 5) & 31) != l->counter || (dec >> 31 ? 64u : 32u) != l->width || !decrement_amount(dec)) return 0;
+    if ((latch & UINT32_C(0x7f000000)) == UINT32_C(0x35000000)) {
+        if ((latch & 31) != l->counter || (latch >> 31 ? 64u : 32u) != l->width) return 0;
+    } else if ((latch & UINT32_C(0xff00001f)) != UINT32_C(0x54000001) || !(dec & (1u << 29))) return 0;
+    delta = (int64_t)oot_arm64_sign_extend((latch >> 5) & 0x7ffff,19);
+    if ((int64_t)l->latch+delta != l->header) return 0;
+    for (i = 0; i < f->instruction_count; ++i) {
+        const OotLeafStep *s = &f->steps[i];
+        unsigned a = s->next_a, b = s->next_b;
+        if (i >= l->header && i < l->latch) { if (a != i+1 || b != i+1) return 0; }
+        if (i == l->latch) { if (!((a == l->header && b == i+1) || (b == l->header && a == i+1))) return 0; }
+        else if ((a != OOT_LEAF_RETURN && a <= i) || (b != OOT_LEAF_RETURN && b <= i)) return 0;
+        if (i < l->header || i > l->latch) {
+            if ((a > l->header && a <= l->latch) || (b > l->header && b <= l->latch)) return 0;
+        }
+    }
+    if (l->guard != UINT32_MAX) {
+        uint32_t g;
+        int64_t target;
+        if (!l->header || l->guard != l->header-1) return 0;
+        g = o->words[l->guard]; target = (int64_t)l->guard+(int64_t)oot_arm64_sign_extend((g >> 5) & 0x7ffff,19);
+        if ((g & UINT32_C(0x7f000000)) != UINT32_C(0x34000000) || (g & 31) != l->counter ||
+            (g >> 31 ? 64u : 32u) != l->width || target <= l->latch || target >= f->instruction_count ||
+            !((f->steps[l->guard].next_a == (unsigned)target && f->steps[l->guard].next_b == l->header) ||
+              (f->steps[l->guard].next_b == (unsigned)target && f->steps[l->guard].next_a == l->header))) return 0;
+    }
+    return 1;
 }
 
 int oot_leaf_dispatcher_destroy(OotLeafDispatcher *d)
@@ -135,7 +188,7 @@ OotLeafDispatcher *oot_leaf_dispatcher_create_bound(OotRuntimeImage *image,
 
 static OotLeafDispatcher *create_registry(const OotLeafFunction *functions, size_t count,
     const uint64_t *return_sites, size_t return_count, uint64_t stack_low, uint64_t stack_high, uint32_t *error,
-    const OotMemoryLeafFunction *memory)
+    const OotMemoryLeafFunction *memory, const OotBoundedLeafFunction *bounded)
 {
     OotLeafDispatcher *d;
     size_t index, function_index = 0;
@@ -159,12 +212,22 @@ static OotLeafDispatcher *create_registry(const OotLeafFunction *functions, size
         *f = functions[index];
         if (f->entry % 4 != 0 || f->instruction_count == 0 || f->instruction_count > OOT_LEAF_MAX_WORDS ||
             f->entry > UINT64_MAX - (uint64_t)f->instruction_count * 4 || f->entry < previous_end ||
-            f->abi_version != OOT_LIFT_ABI_VERSION || (f->policy_version != OOT_LEAF_POLICY_VERSION && (!memory || f->policy_version != OOT_LEAF_MEMORY_POLICY_VERSION)) ||
+            f->abi_version != OOT_LIFT_ABI_VERSION || (f->policy_version != OOT_LEAF_POLICY_VERSION && (!memory || f->policy_version != OOT_LEAF_MEMORY_POLICY_VERSION) && (!bounded || f->policy_version != OOT_LEAF_BOUNDED_POLICY_VERSION)) ||
             f->run == NULL || f->steps == NULL)
             goto failure;
         memcpy(d->functions[index].steps, f->steps, (size_t)f->instruction_count * sizeof(*f->steps));
         f->steps = d->functions[index].steps;
-        if (!validate_cfg(f)) goto failure;
+        if (bounded) {
+            if (f->policy_version == OOT_LEAF_BOUNDED_POLICY_VERSION) {
+                if (!bounded[index].words) goto failure;
+                memcpy(d->functions[index].words,bounded[index].words,f->instruction_count*sizeof(uint32_t));
+                d->functions[index].loop = bounded[index].loop;
+            } else {
+                OotLeafLoop empty = {0};
+                if (bounded[index].words || memcmp(&bounded[index].loop,&empty,sizeof(empty))) goto failure;
+            }
+        }
+        if (!validate_loop(&d->functions[index]) || !validate_cfg(f,&d->functions[index].loop)) goto failure;
         if (memory) {
             unsigned j, found = 0;
             if (f->policy_version == OOT_LEAF_POLICY_VERSION) { if (memory[index].effect_words) goto failure; }
@@ -176,12 +239,12 @@ static OotLeafDispatcher *create_registry(const OotLeafFunction *functions, size
                     OotArm64State empty = {0};
                     if (!word) continue;
                     if (f->steps[j].next_a != j+1 || f->steps[j].next_b != j+1 || j+1 == f->instruction_count) goto failure;
-                    if (oot_read_decode(word,f->entry+j*4,&empty,&effect)) {
+                    if ((f->policy_version == OOT_LEAF_BOUNDED_POLICY_VERSION ? oot_leaf_read_decode : oot_read_decode)(word,f->entry+j*4,&empty,&effect)) {
                         if ((effect.rd >= 18 && effect.rd != 31) || (effect.pair && effect.rt2 >= 18 && effect.rt2 != 31)) goto failure;
                         d->functions[index].effects[j] = 1;
-                    } else if (oot_write_decode(word,f->entry+j*4,&empty,&effect)) d->functions[index].effects[j] = 2;
+                    } else if ((f->policy_version == OOT_LEAF_BOUNDED_POLICY_VERSION ? oot_leaf_write_decode : oot_write_decode)(word,f->entry+j*4,&empty,&effect)) d->functions[index].effects[j] = 2;
                     else goto failure;
-                    if (effect.frame_base) goto failure;
+                    if (effect.frame_base || (effect.writeback && effect.rn >= 18)) goto failure;
                     d->functions[index].effect_words[j] = word; ++found;
                 }
                 if (!found) goto failure;
@@ -208,7 +271,7 @@ failure:
 OotLeafDispatcher *oot_leaf_dispatcher_create(const OotLeafFunction *functions, size_t count,
     const uint64_t *returns, size_t return_count, uint64_t low, uint64_t high, uint32_t *error)
 {
-    return create_registry(functions,count,returns,return_count,low,high,error,NULL);
+    return create_registry(functions,count,returns,return_count,low,high,error,NULL,NULL);
 }
 
 static int copy_ranges(OotLeafDispatcher *d, const OotReadRange *ranges, size_t count, unsigned access)
@@ -233,10 +296,10 @@ static int copy_ranges(OotLeafDispatcher *d, const OotReadRange *ranges, size_t 
     return 1;
 }
 
-OotLeafDispatcher *oot_leaf_dispatcher_create_memory_bound(OotRuntimeImage *image,
+static OotLeafDispatcher *create_memory_bound(OotRuntimeImage *image,
     const OotMemoryLeafFunction *functions, size_t count, const OotCodeHash *hashes, const uint8_t body_hash[32],
     const uint64_t *returns, size_t return_count, const OotReadRange *reads, size_t read_count,
-    const OotReadRange *writes, size_t write_count, uint32_t *error)
+    const OotReadRange *writes, size_t write_count, uint32_t *error, const OotBoundedLeafFunction *bounded)
 {
     OotLeafFunction common[OOT_LEAF_MAX_FUNCTIONS];
     OotLeafDispatcher *d;
@@ -244,7 +307,7 @@ OotLeafDispatcher *oot_leaf_dispatcher_create_memory_bound(OotRuntimeImage *imag
     if (error) *error = OOT_LEAF_BAD_ARGUMENT;
     if (!image || !functions || !count || count > OOT_LEAF_MAX_FUNCTIONS || !hashes || !body_hash) return NULL;
     for (i = 0; i < count; ++i) common[i] = functions[i].info;
-    d = create_registry(common,count,returns,return_count,oot_runtime_stack_base(image),oot_runtime_stack_pointer(image),error,functions);
+    d = create_registry(common,count,returns,return_count,oot_runtime_stack_base(image),oot_runtime_stack_pointer(image),error,functions,bounded);
     if (!d) return NULL;
     if (error) *error = OOT_LEAF_BAD_IMAGE;
     if (!oot_runtime_retain(image)) goto failure;
@@ -255,15 +318,38 @@ OotLeafDispatcher *oot_leaf_dispatcher_create_memory_bound(OotRuntimeImage *imag
         unsigned reason;
         d->functions[i].hash = hashes[i]; reason = check_code(d,i);
         if (reason) { if (error) *error = reason; goto failure; }
-        for (j = 0; j < common[i].instruction_count; ++j) if (d->functions[i].effect_words[j]) {
+        for (j = 0; j < common[i].instruction_count; ++j) if (d->functions[i].effect_words[j] || common[i].policy_version == OOT_LEAF_BOUNDED_POLICY_VERSION) {
             uint64_t word;
-            if (!oot_memory_load(oot_runtime_memory(image),common[i].entry+j*4,4,&word) || word != d->functions[i].effect_words[j]) goto failure;
+            if (!oot_memory_load(oot_runtime_memory(image),common[i].entry+j*4,4,&word) || (common[i].policy_version == OOT_LEAF_BOUNDED_POLICY_VERSION ?
+                (word != d->functions[i].words[j] || (d->functions[i].effect_words[j] && word != d->functions[i].effect_words[j])) :
+                word != d->functions[i].effect_words[j])) goto failure;
         }
     }
     if (error) *error = OOT_LEAF_OK;
     return d;
 failure:
     (void)oot_leaf_dispatcher_destroy(d); return NULL;
+}
+
+OotLeafDispatcher *oot_leaf_dispatcher_create_memory_bound(OotRuntimeImage *image,
+    const OotMemoryLeafFunction *functions, size_t count, const OotCodeHash *hashes, const uint8_t body_hash[32],
+    const uint64_t *returns, size_t return_count, const OotReadRange *reads, size_t read_count,
+    const OotReadRange *writes, size_t write_count, uint32_t *error)
+{
+    return create_memory_bound(image,functions,count,hashes,body_hash,returns,return_count,reads,read_count,writes,write_count,error,NULL);
+}
+
+OotLeafDispatcher *oot_leaf_dispatcher_create_bounded_bound(OotRuntimeImage *image,
+    const OotBoundedLeafFunction *functions, size_t count, const OotCodeHash *hashes, const uint8_t body_hash[32],
+    const uint64_t *returns, size_t return_count, const OotReadRange *reads, size_t read_count,
+    const OotReadRange *writes, size_t write_count, uint32_t *error)
+{
+    OotMemoryLeafFunction memory[OOT_LEAF_MAX_FUNCTIONS];
+    size_t i;
+    if (error) *error = OOT_LEAF_BAD_ARGUMENT;
+    if (!functions || !count || count > OOT_LEAF_MAX_FUNCTIONS) return NULL;
+    for (i = 0; i < count; ++i) memory[i] = functions[i].memory;
+    return create_memory_bound(image,memory,count,hashes,body_hash,returns,return_count,reads,read_count,writes,write_count,error,functions);
 }
 
 static int effect_allowed(const OotLeafDispatcher *d, const OotReadEffect *e, int write)
@@ -317,7 +403,7 @@ int oot_leaf_begin(OotLeafDispatcher *d, const OotArm64State *s, uint64_t entry,
     if (!error && (s->nzcv & UINT32_C(0x0fffffff))) error = OOT_LEAF_BAD_NZCV;
     if (error) return report_result(d, s, out, OOT_LEAF_REJECTED, error, 0);
     d->current = index; d->expected_return = expected_return; d->total_retired = 0;
-    d->initial = *s; d->checkpoint = *s; d->phase = 1; d->fault = OOT_LEAF_OK;
+    d->initial = *s; d->checkpoint = *s; d->phase = 1; d->loop_entered = 0; d->fault = OOT_LEAF_OK;
     return report_result(d, s, out, OOT_LEAF_READY, OOT_LEAF_OK, 0);
 }
 
@@ -325,7 +411,7 @@ int oot_leaf_abort(OotLeafDispatcher *d, OotLeafReport *out)
 {
     if (d == NULL) return report_result(NULL, NULL, out, OOT_LEAF_REJECTED, OOT_LEAF_BAD_ARGUMENT, 0);
     if (d->executing) return report_result(d, &d->checkpoint, out, OOT_LEAF_REJECTED, OOT_LEAF_REENTRY, 0);
-    d->phase = 0; d->total_retired = 0; d->fault = OOT_LEAF_OK;
+    d->phase = 0; d->total_retired = 0; d->loop_entered = 0; d->fault = OOT_LEAF_OK;
     return report_result(d, NULL, out, OOT_LEAF_READY, OOT_LEAF_OK, 0);
 }
 
@@ -352,32 +438,59 @@ int oot_leaf_run(OotLeafDispatcher *d, OotArm64State *s, uint64_t budget, OotLea
         OotArm64State working = d->checkpoint;
         unsigned error = OOT_LEAF_OK, kind = d->functions[d->current].effects[index], i;
         OotReadEffect effect = {0};
-        OotArm64State expected = working;
+        OotArm64State expected = working, expected_loop = working;
+        const OotLeafLoop *loop = &d->functions[d->current].loop;
+        int control = 0;
+        if (f->policy_version == OOT_LEAF_BOUNDED_POLICY_VERSION && d->total_retired >= f->max_steps) {
+            d->phase = 3; d->fault = OOT_LEAF_BAD_LOOP_LIMIT;
+            return report_result(d,s,out,OOT_LEAF_CONTRACT_FAULT,d->fault,retired);
+        }
+        if (loop->max_iterations) {
+            uint32_t dec = d->functions[d->current].words[loop->decrement];
+            if (index == loop->header && !d->loop_entered) {
+                uint64_t value = oot_arm64_read(&working,loop->counter,loop->width,0), amount = decrement_amount(dec);
+                if (!value || value % amount || value / amount > loop->max_iterations)
+                    return report_result(d,s,out,OOT_LEAF_REJECTED,OOT_LEAF_BAD_LOOP_INPUT,retired);
+                d->loop_entered = 1;
+            }
+            if (index == loop->decrement) {
+                uint64_t value = oot_arm64_addsub(&expected_loop,oot_arm64_read(&working,loop->counter,loop->width,0),
+                    decrement_amount(dec),loop->width,1,!!(dec & (1u << 29)));
+                oot_arm64_write(&expected_loop,loop->counter,loop->width,0,value);expected_loop.pc += 4;control = 1;
+            } else if (index == loop->latch || index == loop->guard) {
+                uint32_t word = d->functions[d->current].words[index];
+                int take = index == loop->guard ? !oot_arm64_read(&working,loop->counter,loop->width,0) :
+                    (word & UINT32_C(0x7f000000)) == UINT32_C(0x35000000) ? !!oot_arm64_read(&working,loop->counter,loop->width,0) :
+                    (int)oot_arm64_condition(working.nzcv,1);
+                expected_loop.pc += take ? oot_arm64_sign_extend((word >> 5) & 0x7ffff,19)*4 : 4;control = 1;
+            }
+        }
         OotGuestMemory window;
         OotGuestRegion region;
         uint8_t bytes[16] = {0}, wanted[16] = {0};
         (void)oot_memory_init(&window,NULL,0);
         if (kind) {
             uint32_t word = d->functions[d->current].effect_words[index];
-            if (!(kind == 2 ? oot_write_decode : oot_read_decode)(word,working.pc,&working,&effect))
+            if (!(kind == 2 ? (f->policy_version == OOT_LEAF_BOUNDED_POLICY_VERSION ? oot_leaf_write_decode : oot_write_decode) :
+                (f->policy_version == OOT_LEAF_BOUNDED_POLICY_VERSION ? oot_leaf_read_decode : oot_read_decode))(word,working.pc,&working,&effect))
                 return report_result(d,s,out,OOT_LEAF_REJECTED,OOT_LEAF_BAD_REGISTRY,retired);
             if (!effect_allowed(d,&effect,kind == 2))
                 return report_result(d,s,out,OOT_LEAF_REJECTED,OOT_LEAF_BAD_MEMORY_RANGE,retired);
             if (kind == 1) {
-                if (!oot_read_capture(oot_runtime_memory(d->image),&effect,bytes,&expected))
+                if (!(f->policy_version == OOT_LEAF_BOUNDED_POLICY_VERSION ? oot_leaf_read_capture : oot_read_capture)(oot_runtime_memory(d->image),&effect,bytes,&expected))
                     return report_result(d,s,out,OOT_LEAF_REJECTED,OOT_LEAF_BAD_MEMORY,retired);
                 memcpy(wanted,bytes,effect.size);
             } else {
                 if (!oot_memory_probe(oot_runtime_memory(d->image),effect.address,effect.size,OOT_MEMORY_WRITE))
                     return report_result(d,s,out,OOT_LEAF_REJECTED,OOT_LEAF_BAD_MEMORY,retired);
-                oot_write_expected(&effect,&working,wanted,&expected);
+                (f->policy_version == OOT_LEAF_BOUNDED_POLICY_VERSION ? oot_leaf_write_expected : oot_write_expected)(&effect,&working,wanted,&expected);
                 for (i = 0; i < effect.size; ++i) bytes[i] = (uint8_t)~wanted[i];
             }
             region = (OotGuestRegion){effect.address,effect.size,bytes,kind == 2 ? OOT_MEMORY_WRITE : OOT_MEMORY_READ};
             (void)oot_memory_init(&window,&region,1);
         }
         d->executing = 1;
-        status = f->run(&working, f->policy_version == OOT_LEAF_MEMORY_POLICY_VERSION ? &window : NULL, 1, &executed);
+        status = f->run(&working, f->policy_version >= OOT_LEAF_MEMORY_POLICY_VERSION ? &window : NULL, 1, &executed);
         d->executing = 0;
         if (status != (returning ? OOT_LIFT_DISPATCH : OOT_LIFT_BUDGET)) error = OOT_LEAF_BAD_LIFT_STATUS;
         else if (executed != 1) error = OOT_LEAF_BAD_COUNT;
@@ -387,13 +500,21 @@ int oot_leaf_run(OotLeafDispatcher *d, OotArm64State *s, uint64_t budget, OotLea
         else if (returning ? working.pc != d->expected_return :
                  (working.pc != f->entry + (uint64_t)step->next_a * 4 && working.pc != f->entry + (uint64_t)step->next_b * 4))
             error = OOT_LEAF_BAD_EDGE;
-        if (!error && f->policy_version == OOT_LEAF_MEMORY_POLICY_VERSION) {
+        if (!error && f->policy_version >= OOT_LEAF_MEMORY_POLICY_VERSION) {
             if (window.fault.reason) error = OOT_LEAF_BAD_MEMORY;
             else if (window.valid != 1 || (kind ? (window.regions != &region || window.count != 1 ||
                 region.base != effect.address || region.size != effect.size || region.data != bytes ||
                 region.permissions != (unsigned)(kind == 2 ? OOT_MEMORY_WRITE : OOT_MEMORY_READ) ||
                 memcmp(bytes,wanted,effect.size) || !same_state(&working,&expected)) : (window.regions != NULL || window.count != 0)))
                 error = OOT_LEAF_BAD_MEMORY_EFFECT;
+        }
+        if (!error && loop->max_iterations) {
+            if (control ? !same_state(&working,&expected_loop) :
+                (index >= loop->header && index <= loop->latch && working.x[loop->counter] != d->checkpoint.x[loop->counter]))
+                error = OOT_LEAF_BAD_LOOP_EFFECT;
+            if (!error && index > loop->decrement && index <= loop->latch &&
+                (d->functions[d->current].words[loop->latch] & UINT32_C(0xff00001f)) == UINT32_C(0x54000001) && working.nzcv != d->checkpoint.nzcv)
+                error = OOT_LEAF_BAD_LOOP_EFFECT;
         }
         if (error) {
             d->phase = 3; d->fault = error;

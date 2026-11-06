@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "name": "bounded-memory",
+  "native_build": "build/cmake",
+  "prepared": "build/prepared/oot111",
+  "baseline_default": "build/milestones/memory-callees-v3/default.json",
+  "baseline_plt": "build/milestones/memory-callees-v3/plt.json",
+  "baseline_callees": "build/milestones/memory-callees-v3/memory-callees.json",
+  "gcc_tests": [
+    "test_bounded_memory.py",
+    "test_memory_callees.py",
+    "test_checked_memory.py"
+  ],
+  "factory_reports": [
+    "bounded-memory",
+    "bounded-memory-factory",
+    "memory-callees",
+    "memory-callee-factory",
+    "checked-memory",
+    "checked-memory-factory"
+  ],
+  "bounded_memory_survey": true,
+  "preserve_baseline_outcomes": true
+}
