@@ -80,7 +80,7 @@ static int check_limit(OotGuestMemory *memory, uint64_t address, unsigned size, 
         const OotGuestRegion *region = find_region(memory, address + index);
         if (region == NULL)
             return fail(memory, address, size, access, OOT_MEMORY_UNMAPPED, address + index);
-        if ((region->permissions & access) == 0)
+        if ((region->permissions & access) != access)
             return fail(memory, address, size, access, OOT_MEMORY_PERMISSION, address + index);
     }
     return 1;
@@ -213,6 +213,29 @@ int oot_memory_load_rcpc(OotGuestMemory *memory, uint64_t address, unsigned size
     else if (address % size || (sp_base && address % 16))
         ok = fail(memory, address, size, OOT_MEMORY_READ, OOT_MEMORY_ALIGNMENT, address);
     else ok = load(memory, address, size, value);
+    ReleaseSRWLockExclusive(&transfer_lock);
+    return ok;
+}
+
+int oot_memory_compare_exchange(OotGuestMemory *memory, uint64_t address,
+    unsigned size, unsigned sp_base, uint64_t expected, uint64_t desired, uint64_t *observed)
+{
+    int ok;
+    uint64_t value, mask = size == 4 ? UINT64_C(0xffffffff) : UINT64_MAX;
+    const unsigned access = OOT_MEMORY_READ | OOT_MEMORY_WRITE;
+    AcquireSRWLockExclusive(&transfer_lock);
+    if (!memory || !memory->valid || !observed || sp_base > 1 || (size != 4 && size != 8))
+        ok = fail(memory,address,size,access,OOT_MEMORY_CONFIGURATION,address);
+    else if (address % size || (sp_base && address % 16))
+        ok = fail(memory,address,size,access,OOT_MEMORY_ALIGNMENT,address);
+    else {
+        ok = check(memory,address,size,access);
+        if (ok) {
+            value = read_bytes(memory,address,size);
+            if (value == (expected & mask)) write_bytes(memory,address,size,desired);
+            *observed = value;
+        }
+    }
     ReleaseSRWLockExclusive(&transfer_lock);
     return ok;
 }

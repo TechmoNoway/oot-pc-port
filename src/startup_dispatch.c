@@ -17,6 +17,8 @@ struct OotStartupDispatcher {
     uint64_t entry, limit, retired, stack_base, stack_top;
     OotArm64State checkpoint;
     uint32_t phase, executing, stop_error, stop_word, stop_service;
+    uint32_t sdk, has_goal, stage_count, stages_completed, goal_bad_order, goal_thunk_retired;
+    uint64_t goal_thunk, goal_entry, stages[OOT_STARTUP_SDK_MAX_STAGES];
 };
 
 static int same_state(const OotArm64State *a, const OotArm64State *b)
@@ -75,6 +77,10 @@ static int pac_word(uint32_t word)
 static uint32_t word_kind(uint32_t word)
 {
     uint32_t reg = word & UINT32_C(0xfffffc1f);
+    uint32_t system = word & UINT32_C(0xffffffe0);
+    if (system == UINT32_C(0xd53bd060) || system == UINT32_C(0xd53bd040) ||
+        system == UINT32_C(0xd51bd040)) return OOT_STARTUP_SYSTEM;
+    if ((word & UINT32_C(0xbfa07c00)) == UINT32_C(0x88a07c00)) return OOT_STARTUP_SYSTEM;
     if ((word & UINT32_C(0xffe0001f)) == UINT32_C(0xd4000001)) return OOT_STARTUP_SVC;
     if (reg == UINT32_C(0xd61f0000) || reg == UINT32_C(0xd63f0000) ||
         reg == UINT32_C(0xd65f0000) || word == UINT32_C(0xd65f0bff) || word == UINT32_C(0xd65f0fff))
@@ -116,13 +122,14 @@ static int control_expected(const OotStartupDispatcher *d, const OotStartupInstr
     return 1;
 }
 
-static int valid_metadata(const OotStartupInstruction *i)
+static int valid_metadata(const OotStartupInstruction *i, int sdk)
 {
     uint32_t kind = word_kind(i->word);
     uint64_t target = i->pc+4;
     if (i->kind == OOT_STARTUP_UNSUPPORTED)
         return !i->run && i->next_a == i->pc && i->next_b == i->pc;
-    if (i->kind != kind || (kind == OOT_STARTUP_SVC ? i->run != NULL : i->run == NULL)) return 0;
+    if ((kind == OOT_STARTUP_SYSTEM && !sdk) || i->kind != kind ||
+        ((kind == OOT_STARTUP_SVC || kind == OOT_STARTUP_SYSTEM) ? i->run != NULL : i->run == NULL)) return 0;
     if (kind == OOT_STARTUP_INDIRECT) return !i->next_a && !i->next_b;
     if (kind == OOT_STARTUP_BRANCH) {
         if ((i->word & UINT32_C(0x7c000000)) == UINT32_C(0x14000000)) {
@@ -141,6 +148,20 @@ static int valid_state(const OotStartupDispatcher *d, const OotArm64State *s)
 {
     return !(s->nzcv & UINT32_C(0x0fffffff)) && !(s->sp & 15) &&
         s->sp >= d->stack_base && s->sp <= d->stack_top;
+}
+
+static void observe_retirement(OotStartupDispatcher *d, uint64_t pc, uint64_t next_pc)
+{
+    uint32_t n;
+    if (!d->has_goal) return;
+    for (n = d->stages_completed; n < d->stage_count; ++n) {
+        if (pc != d->stages[n]) continue;
+        if (n == d->stages_completed) ++d->stages_completed;
+        else d->goal_bad_order = 1;
+        break;
+    }
+    if (pc == d->goal_thunk && next_pc == d->goal_entry)
+        d->goal_thunk_retired = 1;
 }
 
 static uint32_t check_code(const OotStartupDispatcher *d)
@@ -167,18 +188,21 @@ int oot_startup_dispatch_destroy(OotStartupDispatcher *d)
     return 1;
 }
 
-OotStartupDispatcher *oot_startup_dispatch_create(OotRuntimeImage *image,
+static OotStartupDispatcher *create_registry(OotRuntimeImage *image,
     OotStartupContext *context, OotPauth *pauth, const OotStartupProgram *p,
-    uint64_t limit, uint32_t *error)
+    uint64_t limit, uint32_t *error, int sdk)
 {
     OotStartupDispatcher *d;
     size_t n, span = 0;
     uint32_t failure = OOT_STARTUP_BAD_ARGUMENT;
     if (error) *error = failure;
     if (!image || !context || !pauth || oot_pauth_model(pauth) != OOT_PAUTH_QARMA5_VA39 || !p ||
-        p->version != OOT_STARTUP_DISPATCH_VERSION || p->flags != OOT_STARTUP_RAW_IMAGE ||
-        !limit || limit > OOT_STARTUP_MAX_RETIRED || !p->instructions || !p->instruction_count ||
-        p->instruction_count > OOT_STARTUP_MAX_INSTRUCTIONS || !p->spans || !p->span_count || p->span_count > OOT_STARTUP_MAX_SPANS)
+        p->version != OOT_STARTUP_DISPATCH_VERSION || p->flags != (OOT_STARTUP_RAW_IMAGE | (sdk ? OOT_STARTUP_SDK_RUNTIME : 0u)) ||
+        !!oot_startup_context_sdk_enabled(context) != !!sdk ||
+        !limit || limit > (sdk ? OOT_STARTUP_SDK_MAX_RETIRED : OOT_STARTUP_MAX_RETIRED) ||
+        !p->instructions || !p->instruction_count ||
+        p->instruction_count > (sdk ? OOT_STARTUP_SDK_MAX_INSTRUCTIONS : OOT_STARTUP_MAX_INSTRUCTIONS) ||
+        !p->spans || !p->span_count || p->span_count > (sdk ? OOT_STARTUP_SDK_MAX_SPANS : OOT_STARTUP_MAX_SPANS))
         return NULL;
     d = calloc(1,sizeof(*d));
     if (!d) return NULL;
@@ -189,7 +213,7 @@ OotStartupDispatcher *oot_startup_dispatch_create(OotRuntimeImage *image,
     memcpy(d->instructions,p->instructions,p->instruction_count*sizeof(*d->instructions));
     memcpy(d->spans,p->spans,p->span_count*sizeof(*d->spans));
     d->instruction_count = p->instruction_count; d->span_count = p->span_count;
-    d->entry = p->entry; d->limit = limit;
+    d->entry = p->entry; d->limit = limit; d->sdk = !!sdk;
     memcpy(d->body_sha256,p->body_sha256,sizeof(d->body_sha256));
     for (n = 0; n < d->span_count; ++n) {
         const OotStartupSpan *s = &d->spans[n];
@@ -198,10 +222,11 @@ OotStartupDispatcher *oot_startup_dispatch_create(OotRuntimeImage *image,
     }
     for (n = 0; n < d->instruction_count; ++n) {
         const OotStartupInstruction *i = &d->instructions[n];
-        if ((i->pc & 3) || i->pc >= STARTUP_ADDRESS_LIMIT-3 || (n && i->pc <= d->instructions[n-1].pc) || !valid_metadata(i)) goto fail;
+        if ((i->pc & 3) || i->pc >= STARTUP_ADDRESS_LIMIT-3 || (n && i->pc <= d->instructions[n-1].pc) || !valid_metadata(i,sdk)) goto fail;
         while (span < d->span_count && i->pc >= d->spans[span].entry+d->spans[span].size) ++span;
         if (span == d->span_count || i->pc < d->spans[span].entry || i->pc-d->spans[span].entry > d->spans[span].size-4) goto fail;
-        if ((i->kind == OOT_STARTUP_NORMAL || i->kind == OOT_STARTUP_SVC) && find_instruction(d,i->pc+4) == d->instruction_count) goto fail;
+        if ((i->kind == OOT_STARTUP_NORMAL || i->kind == OOT_STARTUP_SVC || i->kind == OOT_STARTUP_SYSTEM) &&
+            find_instruction(d,i->pc+4) == d->instruction_count) goto fail;
     }
     if (find_instruction(d,d->entry) == d->instruction_count) goto fail;
     failure = OOT_STARTUP_BAD_IMAGE;
@@ -228,6 +253,58 @@ fail:
     return NULL;
 }
 
+OotStartupDispatcher *oot_startup_dispatch_create(OotRuntimeImage *image,
+    OotStartupContext *context, OotPauth *pauth, const OotStartupProgram *p,
+    uint64_t limit, uint32_t *error)
+{
+    return create_registry(image,context,pauth,p,limit,error,0);
+}
+
+OotStartupDispatcher *oot_startup_dispatch_create_sdk(OotRuntimeImage *image,
+    OotStartupContext *context, OotPauth *pauth, const OotStartupProgram *p,
+    uint64_t limit, uint32_t *error)
+{
+    return create_registry(image,context,pauth,p,limit,error,1);
+}
+
+int oot_startup_dispatch_set_sdk_goal(OotStartupDispatcher *d, const OotSdkGoal *goal,
+    uint32_t *error)
+{
+    size_t index;
+    uint32_t n, m, failure = OOT_STARTUP_BAD_SDK_GOAL;
+    const OotStartupInstruction *thunk;
+    if (error) *error = failure;
+    if (!d || !goal) return 0;
+    if (d->executing) { if (error) *error = OOT_STARTUP_REENTRY; return 0; }
+    if (!d->sdk || d->phase || goal->version != OOT_STARTUP_SDK_GOAL_VERSION ||
+        !goal->stages || !goal->stage_count || goal->stage_count > OOT_STARTUP_SDK_MAX_STAGES ||
+        goal->entry == goal->thunk || goal->entry == d->entry) return 0;
+    index = find_instruction(d,goal->thunk);
+    if (index == d->instruction_count || find_instruction(d,goal->entry) == d->instruction_count) return 0;
+    thunk = &d->instructions[index];
+    if (thunk->kind != OOT_STARTUP_BRANCH || thunk->word != goal->thunk_word ||
+        (thunk->word & UINT32_C(0xfc000000)) != UINT32_C(0x14000000) ||
+        thunk->next_a != goal->entry || thunk->next_b != goal->entry) return 0;
+    for (n = 0; n < goal->stage_count; ++n) {
+        index = find_instruction(d,goal->stages[n]);
+        if (index == d->instruction_count || goal->stages[n] == goal->entry) return 0;
+        for (m = 0; m < n; ++m) if (goal->stages[m] == goal->stages[n]) return 0;
+    }
+    failure = check_code(d);
+    if (failure) { if (error) *error = failure; return 0; }
+    memcpy(d->stages,goal->stages,goal->stage_count*sizeof(*goal->stages));
+    d->stage_count = goal->stage_count; d->goal_entry = goal->entry; d->goal_thunk = goal->thunk;
+    d->stages_completed = d->goal_bad_order = d->goal_thunk_retired = 0;
+    d->has_goal = 1;
+    if (error) *error = OOT_STARTUP_OK;
+    return 1;
+}
+
+uint32_t oot_startup_dispatch_sdk_stages_completed(const OotStartupDispatcher *d)
+{
+    return d && d->sdk && d->has_goal ? d->stages_completed : 0;
+}
+
 int oot_startup_dispatch_begin(OotStartupDispatcher *d, const OotArm64State *s, OotStartupReport *out)
 {
     uint32_t error;
@@ -239,6 +316,7 @@ int oot_startup_dispatch_begin(OotStartupDispatcher *d, const OotArm64State *s, 
     if (!oot_runtime_claim_startup(d->image))
         return result(d,out,OOT_STARTUP_REJECTED,OOT_STARTUP_BAD_IMAGE,0,0);
     d->checkpoint = *s; d->retired = 0; d->phase = 1;
+    d->stages_completed = d->goal_bad_order = d->goal_thunk_retired = 0;
     d->stop_error = d->stop_word = d->stop_service = 0;
     return result(d,out,OOT_STARTUP_READY,OOT_STARTUP_OK,0,0);
 }
@@ -247,6 +325,7 @@ int oot_startup_dispatch_abort(OotStartupDispatcher *d)
 {
     if (!d || d->executing) return 0;
     d->phase = 0; d->retired = 0; d->stop_error = d->stop_word = d->stop_service = 0;
+    d->stages_completed = d->goal_bad_order = d->goal_thunk_retired = 0;
     return 1;
 }
 
@@ -276,12 +355,51 @@ int oot_startup_dispatch_run(OotStartupDispatcher *d, OotArm64State *s, uint64_t
         if (!same_state(s,&d->checkpoint)) return stop(d,out,sink,user,OOT_STARTUP_BAD_STATE,0,0,s->pc,1);
         if (index == d->instruction_count) return stop(d,out,sink,user,OOT_STARTUP_UNREGISTERED_TARGET,0,0,working.pc,0);
         i = &d->instructions[index];
+        if (d->has_goal && working.pc == d->goal_entry)
+            return stop(d,out,sink,user,d->stages_completed == d->stage_count &&
+                !d->goal_bad_order && d->goal_thunk_retired ? OOT_STARTUP_SDK_INITIALIZED : OOT_STARTUP_BAD_SDK_GOAL,
+                i->word,0,working.pc,0);
         if (d->retired >= d->limit) return stop(d,out,sink,user,OOT_STARTUP_RETIREMENT_LIMIT,i->word,0,working.pc,0);
         memory = oot_startup_context_memory(d->context);
         if (!memory) return stop(d,out,sink,user,OOT_STARTUP_BAD_IMAGE,i->word,0,working.pc,0);
         if (!oot_memory_load(oot_runtime_memory(d->image),i->pc,4,&word) || word != i->word)
             return stop(d,out,sink,user,OOT_STARTUP_BAD_CODE,i->word,0,working.pc,0);
         if (i->kind == OOT_STARTUP_UNSUPPORTED) return stop(d,out,sink,user,OOT_STARTUP_UNSUPPORTED_WORD,i->word,0,working.pc,0);
+        if (i->kind == OOT_STARTUP_SYSTEM) {
+            uint32_t system = i->word & UINT32_C(0xffffffe0), rd = i->word & 31;
+            uint64_t value = 0;
+            int atomic = (i->word & UINT32_C(0xbfa07c00)) == UINT32_C(0x88a07c00);
+            expected = working; expected.pc += 4;
+            if (atomic) {
+                unsigned rn=(i->word >> 5)&31, rs=(i->word >> 16)&31;
+                unsigned size=(i->word & UINT32_C(0x40000000)) ? 8:4;
+                uint64_t address=oot_arm64_read(&working,rn,64,1);
+                /* This context/image has one owner thread. The snapshot is
+                 * only the independent full-state expectation; the actual
+                 * compare/conditional write is one locked backend transfer. */
+                if (!oot_memory_load(memory,address,size,&value))
+                    return stop(d,out,sink,user,OOT_STARTUP_MEMORY_FAULT,i->word,0,source_pc,0);
+                oot_arm64_write(&expected,rs,size*8,0,value);
+            }
+            else if (system == UINT32_C(0xd53bd060)) value = oot_startup_context_tls_pointer(d->context);
+            else if (system == UINT32_C(0xd53bd040)) value = oot_startup_context_tpidr_el0(d->context);
+            else value = oot_arm64_read(&working,rd,64,0);
+            if (!atomic && system != UINT32_C(0xd51bd040)) oot_arm64_write(&expected,rd,64,0,value);
+            d->executing = 1;
+            status = oot_startup_context_system(d->context,i->word,&working);
+            d->executing = 0;
+            if (status != OOT_STARTUP_SERVICE_IMPLEMENTED)
+                return stop(d,out,sink,user,status == OOT_STARTUP_SERVICE_UNSUPPORTED ? OOT_STARTUP_UNSUPPORTED_WORD :
+                    atomic ? OOT_STARTUP_MEMORY_FAULT : OOT_STARTUP_BAD_STATE,
+                    i->word,0,source_pc,0);
+            if (!same_state(&working,&expected) || !valid_state(d,&working) ||
+                (!atomic && system == UINT32_C(0xd51bd040) && oot_startup_context_tpidr_el0(d->context) != value))
+                return stop(d,out,sink,user,OOT_STARTUP_BAD_CALLBACK,i->word,0,working.pc,1);
+            d->checkpoint = working; *s = working; ++count; ++d->retired;
+            observe_retirement(d,source_pc,working.pc);
+            trace_row(d,sink,user,source_pc,working.pc,i->word,OOT_STARTUP_TRACE_STEP,OOT_STARTUP_OK,0);
+            continue;
+        }
         if (i->kind == OOT_STARTUP_SVC) {
             OotStartupServiceReport service;
             uint32_t id = (i->word >> 5) & 65535;
@@ -293,6 +411,7 @@ int oot_startup_dispatch_run(OotStartupDispatcher *d, OotArm64State *s, uint64_t
             if (working.pc != source_pc+4 || !valid_state(d,&working))
                 return stop(d,out,sink,user,OOT_STARTUP_BAD_CALLBACK,i->word,id,working.pc,1);
             d->checkpoint = working; *s = working; ++count; ++d->retired;
+            observe_retirement(d,source_pc,working.pc);
             trace_row(d,sink,user,source_pc,working.pc,i->word,OOT_STARTUP_TRACE_SERVICE,OOT_STARTUP_OK,id);
             continue;
         }
@@ -337,6 +456,7 @@ int oot_startup_dispatch_run(OotStartupDispatcher *d, OotArm64State *s, uint64_t
         if (memory_kind == 2 && !oot_write_commit(memory,&effect,&d->checkpoint))
             return stop(d,out,sink,user,OOT_STARTUP_MEMORY_FAULT,i->word,0,source_pc,0);
         d->checkpoint = working; *s = working; ++count; ++d->retired;
+        observe_retirement(d,source_pc,working.pc);
         trace_row(d,sink,user,source_pc,working.pc,i->word,OOT_STARTUP_TRACE_STEP,OOT_STARTUP_OK,0);
     }
     if (!same_state(s,&d->checkpoint)) return stop(d,out,sink,user,OOT_STARTUP_BAD_STATE,0,0,s->pc,1);

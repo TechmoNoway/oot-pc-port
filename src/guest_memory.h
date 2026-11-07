@@ -67,6 +67,16 @@ OOT_MEMORY_API int oot_memory_store(OotGuestMemory *memory, uint64_t address, un
  * No guest SCTLR/alignment-control registers or guest scheduling ABI are implied. */
 OOT_MEMORY_API int oot_memory_load_rcpc(OotGuestMemory *memory, uint64_t address, unsigned size,
                                       unsigned sp_base, uint64_t *value);
+/* Startup SDK CAS32/64 uses the same serialized Normal-memory order as every
+ * other backend transfer. Require natural alignment (and SP16 for an SP base)
+ * and complete READ|WRITE permission even when comparison fails. A successful
+ * call returns the original little-endian value, zero-extended for CAS32, and
+ * stores the low desired bits only when the low expected bits match. A rejected
+ * call changes neither output nor backing. The native output must be private,
+ * stable and nonaliasing with guest backing/metadata. This conservative total
+ * order does not model every permitted weak-memory outcome or guest threads. */
+OOT_MEMORY_API int oot_memory_compare_exchange(OotGuestMemory *memory, uint64_t address,
+    unsigned size, unsigned sp_base, uint64_t expected, uint64_t desired, uint64_t *observed);
 /* Paired 4/8-byte elements use whole-pair preflight; outputs must be distinct.
  * No element, register output, or writeback is committed on a rejected pair. */
 OOT_MEMORY_API int oot_memory_load_pair(OotGuestMemory *memory, uint64_t address, unsigned element_size,

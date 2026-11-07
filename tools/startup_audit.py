@@ -97,9 +97,9 @@ def _entry_evidence(module, syntax):
                 cross_module_initialization_order_proven=False)
 
 
-def _entry_graph(modules, entry, syntax, max_instructions, linked=True, extra_entries=()):
-    require(isinstance(extra_entries, (list, tuple)) and len(extra_entries) <= 256,
-            "additional startup entries must be an explicit list of at most 256")
+def _entry_graph(modules, entry, syntax, max_instructions, linked=True, extra_entries=(), sdk=False):
+    require(isinstance(extra_entries, (list, tuple)) and len(extra_entries) <= (1024 if sdk else 256),
+            "too many additional startup entries")
     require(all(type(pc) is int and _owner(modules, pc) is not None for pc in extra_entries),
             "additional startup entry is not aligned mapped text")
     require(len(set(extra_entries)) == len(extra_entries) and entry not in extra_entries,
@@ -130,7 +130,11 @@ def _entry_graph(modules, entry, syntax, max_instructions, linked=True, extra_en
                    edges=[], semantic_supported=False)
         reason = None
         try:
-            ins = decode_pauth_instruction(word, pc)
+            if sdk:
+                from sdk_instructions import decode_sdk_instruction
+                ins = decode_sdk_instruction(word, pc)
+            else:
+                ins = decode_pauth_instruction(word, pc)
         except InputError as error:
             row["semantic_error"] = str(error)
             reason = "unsupported_semantics"
@@ -156,11 +160,11 @@ def _entry_graph(modules, entry, syntax, max_instructions, linked=True, extra_en
         if reason:
             frontier.append(dict(address=pc, module=module.name, kind=reason,
                                  word=word, mnemonic=mnemonic, distance=distance))
-        elif flow != RETURN:
+        if (not reason and flow != RETURN) or (sdk and (mnemonic == "svc" or flow == INDIRECT_CALL)):
             targets = [direct_target(word, pc)] if flow == JUMP else (
                 [direct_target(word, pc), pc + 4] if flow in (CALL, CONDITIONAL) else [pc + 4])
             row["edges"] = targets
-            if flow == CALL:
+            if flow == CALL or (sdk and flow == INDIRECT_CALL):
                 row["continuation_requires_return"] = True
             for target in targets:
                 if target not in queued:
@@ -179,7 +183,7 @@ def _entry_graph(modules, entry, syntax, max_instructions, linked=True, extra_en
                 complete_function_closure_proven=False)
 
 
-def audit_entry(linker, max_instructions=8192, extra_entries=()):
+def audit_entry(linker, max_instructions=8192, extra_entries=(), sdk=False):
     """Inspect raw or linked entry text; unresolved data never becomes a target."""
     require(type(max_instructions) is int and 1 <= max_instructions <= MAX_INSTRUCTIONS,
             "startup instruction limit must be 1-65536")
@@ -196,7 +200,7 @@ def audit_entry(linker, max_instructions=8192, extra_entries=()):
                     for m in modules],
                 entry_evidence=_entry_evidence(modules[0], syntax),
                 entry_graph=_entry_graph(modules, modules[0].base, syntax, max_instructions,
-                                         linked=linker.applied, extra_entries=extra_entries))
+                                         linked=linker.applied, extra_entries=extra_entries, sdk=sdk))
 
 
 def audit_startup(linker, max_instructions=8192, sample_limit=32):

@@ -12,6 +12,8 @@
 const OotStartupProgram *oot_startup_compiled_program(void);
 const OotStartupConfig *oot_startup_compiled_config(void);
 const OotStartupProbe *oot_startup_compiled_probes(size_t *count);
+const OotSdkConfig *oot_startup_compiled_sdk_config(void);
+const OotSdkGoal *oot_startup_compiled_sdk_goal(void);
 
 typedef struct TraceFile {
     FILE *file;
@@ -46,13 +48,13 @@ static void write_trace(const OotStartupTrace *r, void *user)
         fwrite(row,1,(size_t)size,out->file)!=(size_t)size) out->failed=1;
 }
 
-static int parse_limit(const char *s, uint64_t *value)
+static int parse_limit(const char *s, uint64_t *value, uint64_t maximum)
 {
     char *end;
     unsigned long long n;
     if (!*s || *s=='-' || *s=='+') return 0;
     errno=0; n=strtoull(s,&end,10);
-    if (errno || *end || !n || n>OOT_STARTUP_MAX_RETIRED) return 0;
+    if (errno || *end || !n || n>maximum) return 0;
     *value=(uint64_t)n; return 1;
 }
 #endif
@@ -64,7 +66,7 @@ int oot_startup_cli(int argc, char **argv)
     fputs("This executable has no compiled startup selection. Use tools/build_startup.py to prepare a private raw-image build.\n",stderr);
     return 2;
 #else
-    const char *package=NULL, *trace_path=NULL;
+    const char *package=NULL, *trace_path=NULL, *entropy_path=NULL;
     uint64_t limit=1000000,quantum=1000;
     uint32_t error=0;
     char message[192];
@@ -80,12 +82,16 @@ int oot_startup_cli(int argc, char **argv)
     int result=1;
     size_t probe_count=0,probe_matches=0;
     const OotStartupProgram *program=oot_startup_compiled_program();
+    const OotSdkConfig *compiled_sdk=oot_startup_compiled_sdk_config();
+    OotSdkConfig sdk={0};
+    uint64_t maximum=compiled_sdk ? OOT_STARTUP_SDK_MAX_RETIRED : OOT_STARTUP_MAX_RETIRED;
     if (argc < 5 || strcmp(argv[3],"--trace")) goto usage;
     package=argv[2]; trace_path=argv[4];
     for (int i=5;i<argc;i+=2) {
         if (i+1==argc) goto usage;
-        if (!strcmp(argv[i],"--limit")) { if (!parse_limit(argv[i+1],&limit)) goto usage; }
-        else if (!strcmp(argv[i],"--quantum")) { if (!parse_limit(argv[i+1],&quantum)) goto usage; }
+        if (!strcmp(argv[i],"--limit")) { if (!parse_limit(argv[i+1],&limit,maximum)) goto usage; }
+        else if (!strcmp(argv[i],"--quantum")) { if (!parse_limit(argv[i+1],&quantum,maximum)) goto usage; }
+        else if (!strcmp(argv[i],"--entropy-file") && compiled_sdk) entropy_path=argv[i+1];
         else if (!strcmp(argv[i],"--trace-mode")) {
             if (!strcmp(argv[i+1],"compact")) trace.compact=1;
             else if (strcmp(argv[i+1],"full")) goto usage;
@@ -94,12 +100,38 @@ int oot_startup_cli(int argc, char **argv)
     }
     image=oot_runtime_open(package,message,sizeof(message));
     if (!image) { fprintf(stderr,"Startup mapping failed: %s\n",message); goto cleanup; }
-    context=oot_startup_context_create(image,oot_startup_compiled_config(),&error);
+    if (compiled_sdk) {
+        sdk=*compiled_sdk;
+        if (entropy_path) {
+            uint8_t bytes[32];
+            FILE *input=fopen(entropy_path,"rb");
+            if (!input) { fputs("SDK entropy input could not be opened.\n",stderr); goto cleanup; }
+            size_t count=fread(bytes,1,sizeof(bytes),input);
+            int extra=fgetc(input),failed=ferror(input);
+            fclose(input);
+            if (count!=sizeof(bytes) || extra!=EOF || failed) {
+                SecureZeroMemory(bytes,sizeof(bytes));
+                fputs("SDK entropy input must contain exactly 32 bytes.\n",stderr); goto cleanup;
+            }
+            for (unsigned i=0;i<4;++i) {
+                sdk.entropy[i]=0;
+                for (unsigned j=0;j<8;++j) sdk.entropy[i]|=(uint64_t)bytes[i*8+j]<<(8*j);
+            }
+            SecureZeroMemory(bytes,sizeof(bytes));
+            sdk.flags|=OOT_SDK_EXPLICIT_ENTROPY;
+        }
+        context=oot_startup_context_create_sdk(image,oot_startup_compiled_config(),&sdk,&error);
+        SecureZeroMemory(sdk.entropy,sizeof(sdk.entropy));
+    } else context=oot_startup_context_create(image,oot_startup_compiled_config(),&error);
     if (!context) { fprintf(stderr,"Startup context rejected: %" PRIu32 "\n",error); goto cleanup; }
     pauth=oot_pauth_create(OOT_PAUTH_QARMA5_VA39,NULL);
     if (!pauth) { fputs("Startup PAC context failed.\n",stderr); goto cleanup; }
-    dispatcher=oot_startup_dispatch_create(image,context,pauth,program,limit,&error);
+    dispatcher=compiled_sdk ? oot_startup_dispatch_create_sdk(image,context,pauth,program,limit,&error) :
+        oot_startup_dispatch_create(image,context,pauth,program,limit,&error);
     if (!dispatcher) { fprintf(stderr,"Startup selection rejected: %" PRIu32 "\n",error); goto cleanup; }
+    if (compiled_sdk && !oot_startup_dispatch_set_sdk_goal(dispatcher,oot_startup_compiled_sdk_goal(),&error)) {
+        fprintf(stderr,"SDK goal rejected: %" PRIu32 "\n",error); goto cleanup;
+    }
     if (!oot_startup_context_initial_state(context,program->entry,&state)) {
         fputs("Startup state initialization rejected.\n",stderr); goto cleanup;
     }
@@ -141,11 +173,23 @@ int oot_startup_cli(int argc, char **argv)
     if (report.service==0x29)
         printf(",\"get_info_request\":{\"info_id\":%" PRIu64 ",\"handle\":%" PRIu32 ",\"sub_id\":%" PRIu64 "}",
             state.x[1],(uint32_t)state.x[2],state.x[3]);
+    printf(",\"sdk_runtime\":%s,\"sdk_stages_completed\":%" PRIu32
+        ",\"sdk_initialization_completed\":%s,\"game_entry_reached\":%s",
+        compiled_sdk ? "true":"false",oot_startup_dispatch_sdk_stages_completed(dispatcher),
+        report.error==OOT_STARTUP_SDK_INITIALIZED ? "true":"false",
+        report.error==OOT_STARTUP_SDK_INITIALIZED ? "true":"false");
+    if (compiled_sdk && report.service==0x1f) {
+        uint8_t name[4];
+        int sm=oot_memory_load_record(oot_startup_context_memory(context),state.x[1],name,sizeof(name)) &&
+            !memcmp(name,"sm:",sizeof(name));
+        /* Match only this known protocol name; never dump arbitrary guest bytes. */
+        printf(",\"named_port\":\"%s\"",sm ? "sm:":"unrecognized");
+    }
     printf(",\"trace_mode\":\"%s\",\"trace_rows\":%" PRIu64 ",\"trace_steps\":%" PRIu64 ",\"trace_sha256\":\"%s\"",
         trace.compact?"compact":"full",trace.rows,trace.steps,digest_hex);
     puts("}");
     /* A diagnostic boundary is not a completed process or a successful boot. */
-    result=report.status==OOT_STARTUP_STOPPED ? 3 : 1;
+    result=report.status==OOT_STARTUP_STOPPED ? (report.error==OOT_STARTUP_SDK_INITIALIZED ? 0:3) : 1;
 cleanup:
     if (trace.hash) BCryptDestroyHash(trace.hash);
     if (trace.file) fclose(trace.file);
@@ -155,7 +199,7 @@ cleanup:
     oot_runtime_close(image);
     return result;
 usage:
-    fputs("Usage: oot-pc-port --boot-images FILE --trace NEW_FILE [--limit N] [--quantum N] [--trace-mode full|compact]\n",stderr);
+    fputs("Usage: oot-pc-port --boot-images FILE --trace NEW_FILE [--limit N] [--quantum N] [--trace-mode full|compact] [--entropy-file FILE]\n",stderr);
     return 2;
 #endif
 }

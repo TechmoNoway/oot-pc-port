@@ -6,18 +6,25 @@
 
 #define OOT_STARTUP_DISPATCH_VERSION 1u
 #define OOT_STARTUP_RAW_IMAGE 1u
+#define OOT_STARTUP_SDK_RUNTIME 2u
 #define OOT_STARTUP_MAX_INSTRUCTIONS 16384u
 #define OOT_STARTUP_MAX_SPANS 256u
 #define OOT_STARTUP_MAX_RETIRED UINT64_C(100000000)
+#define OOT_STARTUP_SDK_MAX_INSTRUCTIONS 65536u
+#define OOT_STARTUP_SDK_MAX_SPANS 1024u
+#define OOT_STARTUP_SDK_MAX_RETIRED UINT64_C(1000000000)
+#define OOT_STARTUP_SDK_GOAL_VERSION 1u
+#define OOT_STARTUP_SDK_MAX_STAGES 32u
 
 typedef int (*OotStartupRun)(OotArm64State *, OotGuestMemory *, const OotPauth *, uint64_t, uint64_t *);
 enum OotStartupInstructionKind {
     OOT_STARTUP_NORMAL = 0, OOT_STARTUP_BRANCH = 1, OOT_STARTUP_INDIRECT = 2,
-    OOT_STARTUP_SVC = 3, OOT_STARTUP_UNSUPPORTED = 4
+    OOT_STARTUP_SVC = 3, OOT_STARTUP_UNSUPPORTED = 4, OOT_STARTUP_SYSTEM = 5
 };
 /* Direct branches use next_a=target and next_b=fallthrough (both target for
  * unconditional branches). Indirect targets use two zero fields. Normal/SVC
- * instructions use pc+4 twice; explicit unsupported stops use pc twice. */
+ * and SDK system-register instructions use pc+4 twice; explicit unsupported
+ * stops use pc twice. SVC/system rows have no native callback. */
 typedef struct OotStartupInstruction {
     uint64_t pc;
     uint32_t word, kind;
@@ -50,7 +57,8 @@ enum OotStartupError {
     OOT_STARTUP_UNSUPPORTED_WORD = 8, OOT_STARTUP_UNSUPPORTED_SERVICE = 9,
     OOT_STARTUP_UNREGISTERED_TARGET = 10, OOT_STARTUP_MEMORY_FAULT = 11,
     OOT_STARTUP_RETIREMENT_LIMIT = 12, OOT_STARTUP_BAD_CALLBACK = 13,
-    OOT_STARTUP_BAD_SERVICE = 14
+    OOT_STARTUP_BAD_SERVICE = 14, OOT_STARTUP_SDK_INITIALIZED = 15,
+    OOT_STARTUP_BAD_SDK_GOAL = 16
 };
 enum OotStartupEvent { OOT_STARTUP_TRACE_STEP = 0, OOT_STARTUP_TRACE_SERVICE = 1, OOT_STARTUP_TRACE_STOP = 2 };
 typedef struct OotStartupTrace {
@@ -64,6 +72,17 @@ typedef struct OotStartupReport {
 } OotStartupReport;
 typedef struct OotStartupDispatcher OotStartupDispatcher;
 
+/* Private diagnostic completion requirement, not an executable callback. The
+ * original unconditional B thunk must retire to entry after the ordered stage
+ * entries have each retired an instruction. Execution stops before entry's
+ * first instruction. All PCs must belong to the copied, hash-bound program. */
+typedef struct OotSdkGoal {
+    uint32_t version, stage_count;
+    uint64_t thunk, entry;
+    uint32_t thunk_word;
+    const uint64_t *stages;
+} OotSdkGoal;
+
 /* Separate trusted-native startup prefix contract. The raw-image flag is an
  * explicit compilation/provenance declaration, bound to the package body hash;
  * it does not infer a startup ABI from arbitrary image bytes. All code metadata
@@ -72,6 +91,16 @@ typedef struct OotStartupDispatcher OotStartupDispatcher;
 OOT_MEMORY_API OotStartupDispatcher *oot_startup_dispatch_create(OotRuntimeImage *image,
     OotStartupContext *context, OotPauth *pauth, const OotStartupProgram *program,
     uint64_t retirement_limit, uint32_t *error);
+/* SDK opt-in requires RAW_IMAGE|SDK_RUNTIME flags and an SDK-enabled context.
+ * The original constructor rejects that context/profile and system operations. */
+OOT_MEMORY_API OotStartupDispatcher *oot_startup_dispatch_create_sdk(OotRuntimeImage *image,
+    OotStartupContext *context, OotPauth *pauth, const OotStartupProgram *program,
+    uint64_t retirement_limit, uint32_t *error);
+/* Install a copied goal only before begin on an idle SDK dispatcher. Without a
+ * goal SDK execution remains a diagnostic prefix, never completed startup. */
+OOT_MEMORY_API int oot_startup_dispatch_set_sdk_goal(OotStartupDispatcher *dispatcher,
+    const OotSdkGoal *goal, uint32_t *error);
+OOT_MEMORY_API uint32_t oot_startup_dispatch_sdk_stages_completed(const OotStartupDispatcher *dispatcher);
 OOT_MEMORY_API int oot_startup_dispatch_destroy(OotStartupDispatcher *dispatcher);
 OOT_MEMORY_API int oot_startup_dispatch_begin(OotStartupDispatcher *dispatcher,
     const OotArm64State *state, OotStartupReport *report);

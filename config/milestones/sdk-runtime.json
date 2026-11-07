@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "name": "sdk-runtime-foundation",
+  "native_build": "build/cmake",
+  "prepared": "build/prepared/oot111",
+  "baseline_default": "build/milestones/bounded-memory-v1/default.json",
+  "baseline_plt": "build/milestones/bounded-memory-v1/plt.json",
+  "baseline_callees": "build/milestones/memory-callees-v3/memory-callees.json",
+  "baseline_bounded": "build/milestones/bounded-memory-v1/bounded-memory.json",
+  "baseline_startup": "build/milestones/startup-bootstrap-v1/startup-cmake/run.json",
+  "gcc_tests": ["test_sdk_*.py", "test_startup_dispatch.py", "test_startup_cli.py", "test_bounded_memory.py", "test_memory_callees.py", "test_checked_memory.py"],
+  "factory_reports": ["startup", "bounded-memory", "bounded-memory-factory", "memory-callees", "memory-callee-factory", "checked-memory", "checked-memory-factory"],
+  "bounded_memory_survey": true,
+  "preserve_baseline_outcomes": true,
+  "startup_experiment": true,
+  "startup_expected_error": 9,
+  "startup_expected_get_info": {"info_id": 11, "handle": 0, "sub_id": 2},
+  "sdk_experiment": true,
+  "sdk_expected_error": 9,
+  "sdk_expected_service": 31,
+  "sdk_expected_port": "sm:",
+  "sdk_required_stages": 5
+}

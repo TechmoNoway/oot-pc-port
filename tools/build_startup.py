@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import secrets
 import subprocess
 import sys
 
@@ -16,6 +17,19 @@ from module_linker import Linker
 from prepare_startup import prepare_bundle, owner
 
 ROOT=Path(__file__).resolve().parent.parent
+
+
+def prepared_npdm(prepared):
+    """Read the small metadata object once and bind it to the prepared record."""
+    manifest=json.loads((prepared/'manifest.json').read_text(encoding='utf-8'))
+    record=next((r for r in manifest['files'] if r['name']=='main.npdm'),None)
+    if record is None:return None
+    require(type(record['bytes']) is int and 0<=record['bytes']<=32768,'prepared NPDM exceeds size limit')
+    path=prepared/'main.npdm'
+    require(path.resolve().is_relative_to(prepared.resolve()),'prepared NPDM escapes input directory')
+    with path.open('rb') as stream:raw=stream.read(32769)
+    require(len(raw)==record['bytes'] and hashlib.sha256(raw).hexdigest()==record['sha256'],'prepared NPDM differs from verified metadata')
+    return raw
 
 
 def build_native(bundle, mode, native_cache=None):
@@ -52,14 +66,17 @@ def build_native(bundle, mode, native_cache=None):
     return exe,identity
 
 
-def execute(exe,bundle,limit,quantum,trace_mode='compact'):
+def execute(exe,bundle,limit,quantum,trace_mode='compact',entropy_file=None):
     trace=bundle/'trace.jsonl'
-    r=subprocess.run([str(exe),'--boot-images',str(bundle/'startup.ootmem'),'--trace',str(trace),
-                      '--limit',str(limit),'--quantum',str(quantum),'--trace-mode',trace_mode],capture_output=True,text=True,timeout=300)
+    args=[str(exe),'--boot-images',str(bundle/'startup.ootmem'),'--trace',str(trace),
+          '--limit',str(limit),'--quantum',str(quantum),'--trace-mode',trace_mode]
+    if entropy_file is not None:args+=['--entropy-file',str(entropy_file)]
+    r=subprocess.run(args,capture_output=True,text=True,timeout=600)
     (bundle/'execution.log').write_text(r.stdout+r.stderr,encoding='utf-8')
-    require(r.returncode in (1,3) and r.stdout.strip(),'startup execution failed before a diagnostic; see execution.log')
+    require(r.returncode in (0,1,3) and r.stdout.strip(),'startup execution failed before a diagnostic; see execution.log')
     report=json.loads(r.stdout)
     require(report.get('format')=='oot-startup-run' and report.get('startup_completed') is False,'invalid startup execution report')
+    require((r.returncode==0)==(report.get('sdk_initialization_completed') is True and report.get('error')==15), 'invalid SDK completion report')
     last=None;step_count=0;digest=hashlib.sha256()
     with trace.open('rb') as stream:
         for line in stream:
@@ -77,21 +94,35 @@ def execute(exe,bundle,limit,quantum,trace_mode='compact'):
     return report
 
 
-def run(prepared,output,compiler='cmake',execute_code=False,expand_targets=0,limit=1000000,quantum=1000,initial_entries=(),trace_mode='compact'):
+def run(prepared,output,compiler='cmake',execute_code=False,expand_targets=0,limit=1000000,quantum=1000,initial_entries=(),trace_mode='compact',sdk=False,entropy_file=None):
     require(os.name=='nt','native startup builds require Windows')
     output=build_destination(output)
     require(not output.exists(),'choose a fresh startup output directory')
     require(type(expand_targets) is int and 0<=expand_targets<=64,'invalid target expansion limit')
-    require(1<=limit<=100000000 and 1<=quantum<=100000000,'invalid startup budget')
+    require(1<=limit<=(1000000000 if sdk else 100000000) and 1<=quantum<=(1000000000 if sdk else 100000000),'invalid startup budget')
     require(trace_mode in ('full','compact'),'invalid startup trace mode')
     require(execute_code or not expand_targets,'target expansion requires explicit execution')
+    require(sdk or entropy_file is None,'private SDK entropy requires SDK opt-in')
+    if entropy_file is not None:
+        entropy_file=build_destination(entropy_file)
+        require(len(entropy_file.read_bytes())==32,'SDK entropy input must contain exactly 32 bytes')
     output.mkdir(parents=True)
+    if sdk and execute_code and entropy_file is None:
+        entropy_file=output/'process-entropy.bin'
+        with entropy_file.open('xb') as stream:stream.write(secrets.token_bytes(32))
     extras=list(initial_entries);iterations=[]
     for index in range(expand_targets+1):
         raw=Linker(load_prepared(prepared))
         bundle=output/f'iteration-{index:02d}'
-        metadata=inspect_npdm((prepared/'main.npdm').read_bytes()) if (prepared/'main.npdm').is_file() else None
+        npdm=prepared_npdm(prepared)
+        metadata=inspect_npdm(npdm) if npdm is not None else None
+        sdk_metadata=None
+        if sdk:
+            from sdk_startup_audit import inspect_sdk_npdm
+            require(npdm is not None,'SDK runtime requires verified NPDM metadata')
+            sdk_metadata=inspect_sdk_npdm(npdm)
         manifest=prepare_bundle(raw,bundle,extra_entries=extras,
+            max_instructions=32768 if sdk else 8192,sdk_metadata=sdk_metadata,
             shared_package=output/'iteration-00/startup.ootmem' if index else None,
             **({'stack_size':metadata['main_thread_stack_size']} if metadata else {}))
         manifest['npdm']=metadata
@@ -102,7 +133,7 @@ def run(prepared,output,compiler='cmake',execute_code=False,expand_targets=0,lim
                  executable_sha256=hashlib.sha256(exe.read_bytes()).hexdigest(),
                  additional_entries=list(extras),selection=manifest['selection'])
         if execute_code:
-            report=execute(exe,bundle,limit,quantum,trace_mode)
+            report=execute(exe,bundle,limit,quantum,trace_mode,entropy_file)
             row['execution']=report
         iterations.append(row)
         (output/'run.json').write_text(json.dumps(dict(schema_version=1,format='oot-startup-experiment',
@@ -110,7 +141,7 @@ def run(prepared,output,compiler='cmake',execute_code=False,expand_targets=0,lim
         if not execute_code or index==expand_targets:break
         if report['error']==10:
             target=int(report['last_transition']['next_pc'],16)
-        elif report['error']==8 and any(b['address']==int(report['pc'],16) and b['reason']=='unselected continuation' for b in manifest['selection_boundaries']):
+        elif report['error']==8 and any(b['address']==int(report['pc'],16) and b['reason'] in ('unselected continuation','unselected SDK goal marker') for b in manifest['selection_boundaries']):
             target=int(report['pc'],16)
         else:break
         if target in extras:break
@@ -131,6 +162,8 @@ def run(prepared,output,compiler='cmake',execute_code=False,expand_targets=0,lim
     final=dict(schema_version=1,format='oot-startup-experiment',status='diagnostic-complete',
         process_abi='experimental',switch2_startup_abi_proven=False,
         startup_completed=False,game_code_executed=bool(execute_code and any(r['execution']['retired'] for r in iterations)),
+        sdk_runtime=sdk,sdk_initialization_completed=bool(execute_code and iterations[-1]['execution'].get('sdk_initialization_completed')),
+        entropy_input_sha256=hashlib.sha256(entropy_file.read_bytes()).hexdigest() if entropy_file else None,
         iterations=iterations)
     (output/'run.json').write_text(json.dumps(final,indent=2)+'\n',encoding='utf-8')
     return final
@@ -145,9 +178,11 @@ def main():
     p.add_argument('--extra-entry',type=lambda s:int(s,0),action='append',default=[],help='explicit prior observed code address to audit again')
     p.add_argument('--limit',type=int,default=1000000);p.add_argument('--quantum',type=int,default=1000)
     p.add_argument('--trace-mode',choices=('compact','full'),default='compact')
+    p.add_argument('--sdk',action='store_true',help='explicit opt-in experimental SDK process model and initialization goal')
+    p.add_argument('--entropy-file',type=Path,help='private 32-byte process entropy under ignored build/')
     a=p.parse_args()
     try:
-        r=run(a.prepared,a.output,a.compiler,a.execute,a.expand_targets,a.limit,a.quantum,a.extra_entry,a.trace_mode)
+        r=run(a.prepared,a.output,a.compiler,a.execute,a.expand_targets,a.limit,a.quantum,a.extra_entry,a.trace_mode,a.sdk,a.entropy_file)
         last=r['iterations'][-1]
         print(json.dumps(dict(output=str(a.output),status=r['status'],iterations=len(r['iterations']),
             game_code_executed=r['game_code_executed'],startup_completed=False,

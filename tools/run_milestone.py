@@ -44,6 +44,32 @@ def source_digest():
     return digest.hexdigest()
 
 
+def startup_evidence(report, expected_error, expected_info=None, sdk_stages=None, expected_service=None, expected_port=None):
+    """Validate a declared endpoint without equating a diagnostic with boot."""
+    require(report['status']=='diagnostic-complete' and report['game_code_executed'] is True and
+            report['startup_completed'] is False and report['switch2_startup_abi_proven'] is False,
+            'invalid startup experiment scope')
+    last=report['iterations'][-1];e=last['execution']
+    require(e['retired']>0 and e['status']==2 and e['error']==expected_error,'startup experiment did not reach its declared boundary')
+    require(e.get('get_info_request')==expected_info,'startup stopped at a different service request')
+    if expected_service is not None:require(e['service']==expected_service,'startup stopped at a different service')
+    require(e.get('named_port')==expected_port,'startup stopped at a different named port')
+    require(e.get('relative_relocation_probes',0)>0 and e['relative_relocation_probes']==e['relative_relocations_matching_offline_link'],
+            'raw rtld self-relocation differs from independent offline expected values')
+    if sdk_stages is not None:
+        complete=expected_error==15
+        require(report.get('sdk_runtime') is True and e.get('sdk_runtime') is True and
+                e.get('sdk_stages_completed')==sdk_stages and report.get('sdk_initialization_completed') is complete and
+                e.get('sdk_initialization_completed') is complete and e.get('game_entry_reached') is complete,
+                'SDK stage/completion evidence differs from the declared goal')
+    result={k:e[k] for k in ('status','error','pc','retired','word','service','startup_completed',
+        'relative_relocation_probes','relative_relocations_matching_offline_link','trace_sha256')}
+    for k in ('get_info_request','named_port','sdk_stages_completed','sdk_initialization_completed','game_entry_reached'):
+        if k in e:result[k]=e[k]
+    result['compiler']=last['compiler']
+    return result
+
+
 def compare_profiles(before, after):
     for r in (before, after):
         require(r.get("format") == "arm64-function-profile-survey" and r.get("schema_version") == 1, "invalid profile report")
@@ -222,6 +248,11 @@ def execute(config, output, native_only=False):
     if config.get('memory_callee_survey'):require(isinstance(config.get('baseline_memory'),str) and config['baseline_memory'],'memory callee milestone requires prior memory baseline')
     require(type(config.get('bounded_memory_survey',False)) is bool,'invalid bounded scope flag')
     require(type(config.get('startup_experiment',False)) is bool,'invalid startup scope flag')
+    require(type(config.get('sdk_experiment',False)) is bool,'invalid SDK scope flag')
+    if config.get('sdk_experiment'):
+        require(config.get('startup_experiment') is True and isinstance(config.get('baseline_startup'),str),'SDK milestone requires prior raw startup evidence')
+        require(type(config.get('sdk_expected_error')) is int and config['sdk_expected_error'] in (8,9,10,11,12,15),'SDK requires a declared stop or initialization goal')
+        require(type(config.get('sdk_required_stages')) is int and 0<config['sdk_required_stages']<=32,'SDK requires a declared stage count')
     if config.get('startup_experiment'):
         require(config.get('bounded_memory_survey') is True and isinstance(config.get('baseline_bounded'),str),'startup milestone requires the prior bounded baseline')
         require(type(config.get('startup_expected_error')) is int and config['startup_expected_error'] in (8,9,10,11,12),'startup milestone requires an explicit diagnostic stop')
@@ -245,6 +276,7 @@ def execute(config, output, native_only=False):
     require(Path(gcc).is_file(), "GCC is required for milestone validation")
     env = os.environ.copy(); env["PATH"] = str(Path(gcc).parent)+os.pathsep+env.get("PATH", "")
     stages = ["native-configure", "native-build", "msvc-suite", "gcc-common"] + ["gcc-tests-"+str(i) for i in range(len(config["gcc_tests"]))]
+    if config.get('sdk_experiment'):stages += ['gcc-sdk-context-build','gcc-sdk-context-test']
     stages += ["native-evidence"] + ([] if native_only else ["survey-default", "survey-plt", "callee-audit", "comparison"]) + ["summary"]
     if not native_only and config.get('memory_survey'): stages.insert(stages.index('comparison'),'survey-memory')
     if not native_only and config.get('memory_callee_survey'): stages.insert(stages.index('comparison'),'survey-memory-callees')
@@ -252,6 +284,9 @@ def execute(config, output, native_only=False):
     if not native_only and config.get('startup_experiment'):
         stages.insert(stages.index('comparison'),'startup-audit')
         for mode in ('cmake','gcc'):stages.insert(stages.index('summary'),'startup-experiment-'+mode)
+    if not native_only and config.get('sdk_experiment'):
+        stages.insert(stages.index('comparison'),'sdk-audit')
+        for mode in ('cmake','gcc'):stages.insert(stages.index('summary'),'sdk-experiment-'+mode)
     run = MilestoneRun(output, config["name"], stages)
     run.manifest["scope"] = "synthetic native only" if native_only else "synthetic native and static private game analysis"
     if not native_only and config.get('startup_experiment'):
@@ -269,6 +304,12 @@ def execute(config, output, native_only=False):
             run.command("gcc-common", py+["tools/lifter_validation.py", "--compiler", "gcc"], e)
             for i, pattern in enumerate(config["gcc_tests"]):
                 run.command("gcc-tests-"+str(i), py+["-m", "unittest", "discover", "-s", "tests", "-p", pattern, "-v"], e)
+            if config.get('sdk_experiment'):
+                exe=run.output/'sdk-context-test.exe'
+                run.command('gcc-sdk-context-build',[gcc,'-std=c17','-O2','-Wall','-Wextra','-Wpedantic','-Werror',
+                    '-D_CRT_SECURE_NO_WARNINGS','-D_WIN32_WINNT=0x0A00','-I',ROOT/'src',ROOT/'tests/startup_context_test.c',
+                    *[ROOT/'src'/(name+'.c') for name in ('startup_context','runtime_image','guest_memory','host_win32')],'-lbcrypt','-o',exe],e)
+                run.command('gcc-sdk-context-test',[exe,run.output/'sdk-context-test.ootmem'],e)
         with ThreadPoolExecutor(max_workers=2) as pool:
             futures = [pool.submit(msvc), pool.submit(gcc_lane)]
             for future in futures: future.result()
@@ -286,6 +327,8 @@ def execute(config, output, native_only=False):
             run.command("callee-audit", py+["tools/survey_callees.py", prepared, "--baseline", run.output/"plt.json", "--report", run.output/"callees.json"], env)
             if config.get('startup_experiment'):
                 run.command('startup-audit',py+['tools/audit_startup.py',prepared,'--report',run.output/'startup-audit.json'],env)
+            if config.get('sdk_experiment'):
+                run.command('sdk-audit',py+['tools/sdk_startup_audit.py',prepared,'--report',run.output/'sdk-audit.json'],env)
             def compare():
                 comparisons = {scope: compare_profiles(read_json(ROOT/config["baseline_"+scope]), read_json(run.output/(scope+".json"))) for scope in ("default", "plt")}
                 audit = read_json(run.output/"callees.json"); compare_baseline(audit, read_json(run.output/"plt.json"))
@@ -336,20 +379,49 @@ def execute(config, output, native_only=False):
             run.action("comparison", compare)
             if config.get('startup_experiment'):
                 experiments={}
+                seeds=[]
+                if config.get('sdk_experiment'):
+                    baseline=read_json(ROOT/config['baseline_startup'])
+                    require(baseline['format']=='oot-startup-experiment' and baseline['startup_completed'] is False,'invalid prior startup evidence')
+                    seeds=baseline['iterations'][-1]['additional_entries']
                 for mode in ('cmake','gcc'):
                     folder=run.output/('startup-'+mode)
-                    run.command('startup-experiment-'+mode,py+['tools/build_startup.py',prepared,'--output',folder,'--compiler',mode,'--execute','--expand-targets','64','--limit','100000000','--quantum','10000'],env)
-                    r=read_json(folder/'run.json');last=r['iterations'][-1];e=last['execution']
-                    require(r['status']=='diagnostic-complete' and r['game_code_executed'] is True and r['startup_completed'] is False and r['switch2_startup_abi_proven'] is False,'invalid startup experiment scope')
-                    require(e['retired']>0 and e['status']==2 and e['error']==config['startup_expected_error'],'startup experiment did not reach its declared diagnostic boundary')
-                    require(e.get('get_info_request')==config.get('startup_expected_get_info'),'startup stopped at a different service request')
-                    require(e.get('relative_relocation_probes',0)>0 and e['relative_relocation_probes']==e['relative_relocations_matching_offline_link'],'raw rtld self-relocation differs from independent offline expected values')
-                    experiments[mode]={k:e[k] for k in ('status','error','pc','retired','word','service','startup_completed','relative_relocation_probes','relative_relocations_matching_offline_link')}
-                    experiments[mode]['trace_sha256']=e['trace_sha256']
-                    if 'get_info_request' in e:experiments[mode]['get_info_request']=e['get_info_request']
-                    experiments[mode]['compiler']=last['compiler']
+                    args=py+['tools/build_startup.py',prepared,'--output',folder,'--compiler',mode,'--execute','--expand-targets','64','--limit','100000000','--quantum','10000']
+                    for pc in seeds:args+=['--extra-entry',str(pc)]
+                    run.command('startup-experiment-'+mode,args,env)
+                    experiments[mode]=startup_evidence(read_json(folder/'run.json'),config['startup_expected_error'],config.get('startup_expected_get_info'))
+                    if config.get('sdk_experiment'):
+                        prior=baseline['iterations'][-1]['execution']
+                        require(all(experiments[mode][k]==prior[k] for k in ('status','error','pc','retired','word','service','trace_sha256')),'legacy original startup prefix changed')
                 require(all(experiments['cmake'][k]==experiments['gcc'][k] for k in ('status','error','pc','retired','word','service','trace_sha256')),'native compilers reached different startup prefixes')
                 summary['startup_experiments']=experiments
+            if config.get('sdk_experiment'):
+                audit=read_json(run.output/'sdk-audit.json')
+                require(audit['format']=='oot-sdk-startup-audit' and audit['guest_code_executed'] is False and audit['startup_completed'] is False and audit['npdm']['declarations_complete'] is True,'invalid SDK audit scope')
+                original=read_json(run.output/'startup-audit.json')
+                require({m['name']:(m['base'],m['source_sha256'],m['original_text_sha256']) for m in audit['modules']}==
+                        {m['name']:(m['base'],m['source_sha256'],m['linked_text_sha256']) for m in original['modules']},'SDK audit source/text identities differ')
+                require(config['sdk_required_stages']<=len(audit['mandatory_stage_entries']),'SDK required stage count exceeds audited stages')
+                if config['sdk_expected_error']==15:
+                    require(config['sdk_required_stages']==len(audit['mandatory_stage_entries']),'SDK initialization requires every audited stage')
+                entropy=run.output/'process-entropy.bin'
+                with entropy.open('xb') as stream:stream.write(os.urandom(32))
+                sdk_experiments={}
+                for mode in ('cmake','gcc'):
+                    folder=run.output/('sdk-'+mode)
+                    args=py+['tools/build_startup.py',prepared,'--output',folder,'--compiler',mode,'--sdk','--entropy-file',entropy,'--execute','--expand-targets','64','--limit','1000000000','--quantum','10000']
+                    for pc in seeds:args+=['--extra-entry',str(pc)]
+                    run.command('sdk-experiment-'+mode,args,env)
+                    result=read_json(folder/'run.json')
+                    require(result['entropy_input_sha256']==hashlib.sha256(entropy.read_bytes()).hexdigest(),'SDK experiment used different private process entropy')
+                    bundle=read_json(Path(result['iterations'][-1]['bundle'])/'manifest.json')
+                    require(bundle['sdk_npdm']['source_sha256']==audit['npdm']['source_sha256'] and
+                            bundle['sdk_audit']['goal_entry']==audit['goal_entry'] and
+                            bundle['sdk_audit']['mandatory_stage_entries']==audit['mandatory_stage_entries'],'SDK executable was generated from different goal/metadata evidence')
+                    sdk_experiments[mode]=startup_evidence(result,config['sdk_expected_error'],config.get('sdk_expected_get_info'),config['sdk_required_stages'],config.get('sdk_expected_service'),config.get('sdk_expected_port'))
+                require(all(sdk_experiments['cmake'][k]==sdk_experiments['gcc'][k] for k in ('status','error','pc','retired','word','service','trace_sha256','sdk_stages_completed','sdk_initialization_completed')),'native compilers reached different SDK prefixes')
+                summary['sdk_experiments']=sdk_experiments
+                summary['sdk_initialization_completed']=config['sdk_expected_error']==15
         def publish_summary():
             (run.output/"summary.json").write_text(json.dumps(summary, indent=2)+"\n", encoding="utf-8")
             lines = ["# Milestone validation", "", f"Milestone: {config['name']}", "", f"Python tests: {summary['python_tests']}; CTest groups: {summary['ctest_groups']}; native comparisons per compiler: {summary['native_trials_per_compiler']}."]
