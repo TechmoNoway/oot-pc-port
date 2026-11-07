@@ -11,7 +11,8 @@ permissions:
 
 jobs:
   windows:
-    runs-on: windows-latest
+    # The native startup builder requires the Visual Studio 17 2022 generator.
+    runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
