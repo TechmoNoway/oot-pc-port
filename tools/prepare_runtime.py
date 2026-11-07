@@ -24,11 +24,16 @@ STACK_SIZE = 2 * 1024 * 1024
 def make_package(linker, stack_base=STACK_BASE, stack_size=STACK_SIZE):
     report = linker.report()
     require(report["link_complete"], "runtime packaging requires a complete offline link")
+    return pack_regions(linker.modules, report, stack_base, stack_size)
+
+
+def pack_regions(modules, provenance, stack_base=STACK_BASE, stack_size=STACK_SIZE):
+    """Encode exact data regions; callers establish and label image provenance."""
     require(stack_base % PAGE == 0 and PAGE <= stack_size <= 64 * 1024 * 1024 and stack_size % PAGE == 0 and
             PAGE <= stack_base and stack_base + stack_size + PAGE <= ADDRESS_LIMIT,
             "invalid synthetic stack range or guard pages")
     regions = []
-    for module in linker.modules:
+    for module in modules:
         for kind, (begin, end) in enumerate((*module.ranges, (module.bss_start, module.bss_end)), 1):
             if end > begin:
                 data = bytes(module.image[begin:end])
@@ -64,7 +69,7 @@ def make_package(linker, stack_base=STACK_BASE, stack_size=STACK_SIZE):
                 "package_sha256": hashlib.sha256(package).hexdigest(), "package_bytes": len(package),
                 "body_sha256": hashlib.sha256(body).hexdigest(), "backing_bytes": backing,
                 "initial_sp": stack_top, "stack_guards": [stack_base - PAGE, stack_top],
-                "regions": records, "offline_link": report}
+                "regions": records, "offline_link": provenance}
     return package, manifest
 
 

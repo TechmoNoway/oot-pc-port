@@ -20,6 +20,9 @@ struct OotRuntimeImage {
     uint64_t backing_bytes;
     uint32_t kinds[REGION_LIMIT], region_count, references;
     uint8_t body_sha256[32];
+    OotGuestRegion initial_regions[REGION_LIMIT];
+    uint8_t initial_region_sha256[REGION_LIMIT][32];
+    uint32_t startup_claimed;
 };
 
 static uint32_t read32(const uint8_t *data)
@@ -70,9 +73,39 @@ int oot_runtime_retain(OotRuntimeImage *image)
     return 1;
 }
 
+int oot_runtime_claim_startup(OotRuntimeImage *image)
+{
+    uint32_t index;
+    uint8_t digest[32];
+    if (image == NULL || image->startup_claimed || image->memory.valid != 1 ||
+        image->memory.regions != image->regions || image->memory.count != image->region_count)
+        return 0;
+    /* Check every descriptor before dereferencing any backing supplied through
+     * the borrowed view. Stack changes also make an image non-pristine. */
+    for (index = 0; index < image->region_count; ++index) {
+        const OotGuestRegion *current = &image->regions[index], *initial = &image->initial_regions[index];
+        if (current->base != initial->base || current->size != initial->size ||
+            current->data != initial->data || current->permissions != initial->permissions)
+            return 0;
+    }
+    for (index = 0; index < image->region_count; ++index) {
+        const OotGuestRegion *r = &image->initial_regions[index];
+        if (BCryptHash(BCRYPT_SHA256_ALG_HANDLE, NULL, 0, r->data, (ULONG)r->size,
+                       digest, sizeof(digest)) < 0 || memcmp(digest, image->initial_region_sha256[index], sizeof(digest)))
+            return 0;
+    }
+    image->startup_claimed = 1;
+    return 1;
+}
+
 uint64_t oot_runtime_stack_base(const OotRuntimeImage *image)
 {
     return image != NULL && image->region_count != 0 ? image->regions[image->region_count - 1].base : 0;
+}
+
+uint32_t oot_runtime_region_kind(const OotRuntimeImage *image, size_t index)
+{
+    return image != NULL && index < image->region_count ? image->kinds[index] : 0;
 }
 
 int oot_runtime_check_code(const OotRuntimeImage *image, const uint8_t body_sha256[32],
@@ -190,6 +223,12 @@ OotRuntimeImage *oot_runtime_open(const char *path, char *error, size_t error_si
         }
         if (payload != 0)
             memcpy(image->regions[index].data, blob + (size_t)cursor, (size_t)payload);
+        image->initial_regions[index] = image->regions[index];
+        if (BCryptHash(BCRYPT_SHA256_ALG_HANDLE, NULL, 0, image->regions[index].data,
+                       (ULONG)size, image->initial_region_sha256[index], 32) < 0) {
+            message = "could not fingerprint initial runtime region";
+            goto failure;
+        }
         cursor += payload;
         total += size;
         previous_end = base + size;

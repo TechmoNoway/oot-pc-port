@@ -1,5 +1,6 @@
 #include "host.h"
 #include "runtime_image.h"
+#include "startup_cli.h"
 
 #include <inttypes.h>
 #include <stdio.h>
@@ -10,7 +11,8 @@ _Static_assert(sizeof(void *) == 8, "A 64-bit build is required");
 static void print_help(void) {
     puts("OOT PC Port 0.1.0 - Windows host scaffold\n"
          "Usage: oot-pc-port [--help | --version | --host-info | --self-test | --map-images FILE]\n"
-         "--map-images verifies and maps a data-only runtime package. Game execution is not implemented.");
+         "--map-images verifies and maps a data-only runtime package.\n"
+         "--boot-images FILE --trace NEW_FILE runs only an explicitly compiled startup selection.");
 }
 
 static int print_host_info(void) {
@@ -63,6 +65,8 @@ static int self_test(void) {
 }
 
 int main(int argc, char **argv) {
+    int startup_result=oot_startup_cli(argc,argv);
+    if (startup_result >= 0) return startup_result;
     if (argc == 3 && strcmp(argv[1], "--map-images") == 0) {
         char error[192];
         OotRuntimeImage *image = oot_runtime_open(argv[2], error, sizeof(error));

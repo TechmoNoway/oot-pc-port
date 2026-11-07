@@ -13,8 +13,16 @@ OOT_MEMORY_API OotGuestMemory *oot_runtime_memory(OotRuntimeImage *image);
 OOT_MEMORY_API uint64_t oot_runtime_stack_pointer(const OotRuntimeImage *image);
 OOT_MEMORY_API uint64_t oot_runtime_backing_bytes(const OotRuntimeImage *image);
 OOT_MEMORY_API uint64_t oot_runtime_stack_base(const OotRuntimeImage *image);
+/* Immutable package kind: text=1, rodata=2, data=3, BSS=4, stack=5; zero on invalid index. */
+OOT_MEMORY_API uint32_t oot_runtime_region_kind(const OotRuntimeImage *image, size_t index);
 /* Single-threaded ownership: retain adds a reference, close releases one. */
 OOT_MEMORY_API int oot_runtime_retain(OotRuntimeImage *image);
+/* One-shot opt-in for an experimental startup session. All mapped region
+ * metadata and bytes, including the stack, must still match their initial
+ * snapshot. A successful claim belongs to this IMAGE for its entire lifetime;
+ * aborting/destroying a dispatcher or creating another context does not release
+ * it. Reopen a fresh package to start again. Old data/image APIs do not claim. */
+OOT_MEMORY_API int oot_runtime_claim_startup(OotRuntimeImage *image);
 /* Snapshot identity is immutable; writable data may change after loading.
  * Code matching hashes the current bytes of one read-only text region. */
 OOT_MEMORY_API int oot_runtime_check_code(const OotRuntimeImage *image, const uint8_t body_sha256[32],

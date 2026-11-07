@@ -197,6 +197,7 @@ def collect_native(run, native, config):
     require(int(junit.get("failures", "0")) == 0 and int(junit.get("errors", "0")) == 0, "CTest reported failures")
     names = {t.get("name") for t in junit.iter("testcase")}
     require({"host_self_test", "guest_memory_self_test", "ordered_memory_self_test", "pauth_self_test", "leaf_dispatch_self_test", "python_tests"} <= names, "required CTest groups did not execute")
+    if config.get('startup_experiment'):require('startup_context_self_test' in names,'startup context self-test did not execute')
     require(not list(junit.iter("skipped")) and not list(junit.iter("failure")) and not list(junit.iter("error")), "CTest contains skipped or failed groups")
     log = native/"Testing/Temporary/LastTest.log"
     require(log.stat().st_mtime_ns >= run.started_ns, "stale CTest log")
@@ -220,6 +221,10 @@ def execute(config, output, native_only=False):
     require(type(config.get('memory_callee_survey',False)) is bool,'invalid memory callee scope flag')
     if config.get('memory_callee_survey'):require(isinstance(config.get('baseline_memory'),str) and config['baseline_memory'],'memory callee milestone requires prior memory baseline')
     require(type(config.get('bounded_memory_survey',False)) is bool,'invalid bounded scope flag')
+    require(type(config.get('startup_experiment',False)) is bool,'invalid startup scope flag')
+    if config.get('startup_experiment'):
+        require(config.get('bounded_memory_survey') is True and isinstance(config.get('baseline_bounded'),str),'startup milestone requires the prior bounded baseline')
+        require(type(config.get('startup_expected_error')) is int and config['startup_expected_error'] in (8,9,10,11,12),'startup milestone requires an explicit diagnostic stop')
     if config.get('bounded_memory_survey'):require(isinstance(config.get('baseline_callees'),str) and config['baseline_callees'],'bounded milestone requires callee baseline')
     native = build_destination(ROOT/config["native_build"])
     cache = (native/"CMakeCache.txt").read_text(encoding="utf-8")
@@ -244,8 +249,13 @@ def execute(config, output, native_only=False):
     if not native_only and config.get('memory_survey'): stages.insert(stages.index('comparison'),'survey-memory')
     if not native_only and config.get('memory_callee_survey'): stages.insert(stages.index('comparison'),'survey-memory-callees')
     if not native_only and config.get('bounded_memory_survey'): stages.insert(stages.index('comparison'),'survey-bounded-memory')
+    if not native_only and config.get('startup_experiment'):
+        stages.insert(stages.index('comparison'),'startup-audit')
+        for mode in ('cmake','gcc'):stages.insert(stages.index('summary'),'startup-experiment-'+mode)
     run = MilestoneRun(output, config["name"], stages)
     run.manifest["scope"] = "synthetic native only" if native_only else "synthetic native and static private game analysis"
+    if not native_only and config.get('startup_experiment'):
+        run.manifest['scope']='synthetic validation, static audits and explicitly authorized experimental original startup execution'
     run.manifest["config"] = config; run.save()
     py = [sys.executable, "-B"]
     try:
@@ -274,6 +284,8 @@ def execute(config, output, native_only=False):
             scopes=['default','plt']+(['memory'] if config.get('memory_survey') else [])+(['memory-callees'] if config.get('memory_callee_survey') else [])+(['bounded-memory'] if config.get('bounded_memory_survey') else [])
             with ThreadPoolExecutor(max_workers=2) as pool: list(pool.map(survey,scopes))
             run.command("callee-audit", py+["tools/survey_callees.py", prepared, "--baseline", run.output/"plt.json", "--report", run.output/"callees.json"], env)
+            if config.get('startup_experiment'):
+                run.command('startup-audit',py+['tools/audit_startup.py',prepared,'--report',run.output/'startup-audit.json'],env)
             def compare():
                 comparisons = {scope: compare_profiles(read_json(ROOT/config["baseline_"+scope]), read_json(run.output/(scope+".json"))) for scope in ("default", "plt")}
                 audit = read_json(run.output/"callees.json"); compare_baseline(audit, read_json(run.output/"plt.json"))
@@ -310,7 +322,34 @@ def execute(config, output, native_only=False):
                     summary['bounded_cohort']={k:v for k,v in evidence['cohort'].items() if k not in ('samples','rejected','prior_missing_frontier','remaining_missing_frontier')}
                     for key in ('prior_missing_frontier','remaining_missing_frontier'):
                         summary['bounded_cohort'][key]={k:v for k,v in evidence['cohort'][key].items() if k!='samples'}
+                if config.get('startup_experiment'):
+                    old,new=(read_json(p) for p in (ROOT/config['baseline_bounded'],run.output/'bounded-memory.json'))
+                    c=compare_profiles(old,new)
+                    require(c['before']==c['after'] and old['bounded_memory_cohort']==new['bounded_memory_cohort'],'startup changed bounded policy outcomes')
+                    require({m['name']:m['profiles'] for m in old['modules']}=={m['name']:m['profiles'] for m in new['modules']},'startup changed per-module bounded outcomes')
+                    a=read_json(run.output/'startup-audit.json')
+                    require(a.get('format')=='oot-startup-audit' and all(a.get(k) is False for k in ('guest_code_executed','translation_performed','native_callbacks_registered','runtime_capabilities_granted','startup_abi_proven','initialization_order_proven')),'invalid startup audit scope')
+                    identities=lambda r:{m['name']:tuple(m.get(k) for k in ('base','source_sha256','linked_text_sha256')) for m in r['modules']}
+                    require(identities(a)==identities(new),'startup audit input identities differ')
+                    require(not a['entry_graph']['truncated'],'startup entry audit was truncated')
+                    summary['startup_audit']={'initializer_summary':a['initializer_summary'],'entry_instructions':a['entry_graph']['instruction_count'],'static_frontier':a['entry_graph']['frontier_counts']}
             run.action("comparison", compare)
+            if config.get('startup_experiment'):
+                experiments={}
+                for mode in ('cmake','gcc'):
+                    folder=run.output/('startup-'+mode)
+                    run.command('startup-experiment-'+mode,py+['tools/build_startup.py',prepared,'--output',folder,'--compiler',mode,'--execute','--expand-targets','64','--limit','100000000','--quantum','10000'],env)
+                    r=read_json(folder/'run.json');last=r['iterations'][-1];e=last['execution']
+                    require(r['status']=='diagnostic-complete' and r['game_code_executed'] is True and r['startup_completed'] is False and r['switch2_startup_abi_proven'] is False,'invalid startup experiment scope')
+                    require(e['retired']>0 and e['status']==2 and e['error']==config['startup_expected_error'],'startup experiment did not reach its declared diagnostic boundary')
+                    require(e.get('get_info_request')==config.get('startup_expected_get_info'),'startup stopped at a different service request')
+                    require(e.get('relative_relocation_probes',0)>0 and e['relative_relocation_probes']==e['relative_relocations_matching_offline_link'],'raw rtld self-relocation differs from independent offline expected values')
+                    experiments[mode]={k:e[k] for k in ('status','error','pc','retired','word','service','startup_completed','relative_relocation_probes','relative_relocations_matching_offline_link')}
+                    experiments[mode]['trace_sha256']=e['trace_sha256']
+                    if 'get_info_request' in e:experiments[mode]['get_info_request']=e['get_info_request']
+                    experiments[mode]['compiler']=last['compiler']
+                require(all(experiments['cmake'][k]==experiments['gcc'][k] for k in ('status','error','pc','retired','word','service','trace_sha256')),'native compilers reached different startup prefixes')
+                summary['startup_experiments']=experiments
         def publish_summary():
             (run.output/"summary.json").write_text(json.dumps(summary, indent=2)+"\n", encoding="utf-8")
             lines = ["# Milestone validation", "", f"Milestone: {config['name']}", "", f"Python tests: {summary['python_tests']}; CTest groups: {summary['ctest_groups']}; native comparisons per compiler: {summary['native_trials_per_compiler']}."]
@@ -319,7 +358,7 @@ def execute(config, output, native_only=False):
                 clusters, frontier = summary['memory_clusters'], summary['memory_callee_frontier']
                 lines += ['', f"Memory policies: {summary['memory_profiles']}; newly accepted roots: {clusters['newly_accepted_roots']}; distinct upgraded frame edges: {clusters['unique_frame_call_edges']}.",
                     '', f"Remaining callee frontier: {frontier['dependency_blocked_roots']} blocked roots, {frontier['unique_missing_targets']} unique missing targets, {frontier['unique_caller_target_edges']} distinct caller/target edges. Root references overlap."]
-            lines += ["", "All executed code is synthetic. Static game analysis grants no runtime capabilities. See run.json for final status and per-stage logs."]
+            lines += ["", ("Native regression execution is synthetic. Separate opt-in startup experiments execute selected original instructions under an experimental process model; startup is not complete." if 'startup_experiments' in summary else "All executed code is synthetic.")+" Static game analysis grants no runtime capabilities. See run.json for final status and per-stage logs."]
             if 'memory_callee_profiles' in summary:
                 cohort=summary['memory_callee_cohort']
                 lines += ['',f"Memory callees: {summary['memory_callee_profiles']}; newly accepted roots: {cohort['newly_accepted_roots']}; used memory leaves: {cohort['unique_used_memory_leaves']}; distinct upgraded closure edges: {cohort['unique_call_edges']}."]

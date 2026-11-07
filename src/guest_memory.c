@@ -2,6 +2,7 @@
 #define NOMINMAX
 #include <windows.h>
 #include "guest_memory.h"
+#include <string.h>
 
 /* One total order per linked backend instance. Never call external code while
  * holding this nonrecursive lock. Caller-owned state/fault views stay separate.
@@ -67,11 +68,11 @@ static const OotGuestRegion *find_region(const OotGuestMemory *memory, uint64_t 
     return NULL;
 }
 
-static int check(OotGuestMemory *memory, uint64_t address, unsigned size, unsigned access)
+static int check_limit(OotGuestMemory *memory, uint64_t address, unsigned size, unsigned access, unsigned limit)
 {
     unsigned index;
     if (memory != NULL) memory->fault = (OotMemoryFault){0};
-    if (memory == NULL || !memory->valid || size == 0 || size > 16)
+    if (memory == NULL || !memory->valid || size == 0 || size > limit)
         return fail(memory, address, size, access, OOT_MEMORY_CONFIGURATION, address);
     if ((uint64_t)(size - 1) > UINT64_MAX - address)
         return fail(memory, address, size, access, OOT_MEMORY_ADDRESS_WRAP, address);
@@ -83,6 +84,11 @@ static int check(OotGuestMemory *memory, uint64_t address, unsigned size, unsign
             return fail(memory, address, size, access, OOT_MEMORY_PERMISSION, address + index);
     }
     return 1;
+}
+
+static int check(OotGuestMemory *memory, uint64_t address, unsigned size, unsigned access)
+{
+    return check_limit(memory,address,size,access,16);
 }
 
 int oot_memory_probe(OotGuestMemory *memory, uint64_t address, unsigned size, unsigned access)
@@ -207,6 +213,44 @@ int oot_memory_load_rcpc(OotGuestMemory *memory, uint64_t address, unsigned size
     else if (address % size || (sp_base && address % 16))
         ok = fail(memory, address, size, OOT_MEMORY_READ, OOT_MEMORY_ALIGNMENT, address);
     else ok = load(memory, address, size, value);
+    ReleaseSRWLockExclusive(&transfer_lock);
+    return ok;
+}
+
+int oot_memory_load_record(OotGuestMemory *memory, uint64_t address, uint8_t *bytes, unsigned size)
+{
+    uint8_t captured[OOT_MEMORY_RECORD_LIMIT];
+    unsigned i;
+    int ok;
+    AcquireSRWLockExclusive(&transfer_lock);
+    ok = bytes ? check_limit(memory,address,size,OOT_MEMORY_READ,OOT_MEMORY_RECORD_LIMIT) :
+        fail(memory,address,size,OOT_MEMORY_READ,OOT_MEMORY_CONFIGURATION,address);
+    if (ok) {
+        for (i = 0; i < size; ++i) {
+            const OotGuestRegion *r = find_region(memory,address+i);
+            captured[i] = r->data[(size_t)(address+i-r->base)];
+        }
+        memcpy(bytes,captured,size);
+    }
+    ReleaseSRWLockExclusive(&transfer_lock);
+    return ok;
+}
+
+int oot_memory_store_record(OotGuestMemory *memory, uint64_t address, const uint8_t *bytes, unsigned size)
+{
+    uint8_t captured[OOT_MEMORY_RECORD_LIMIT];
+    unsigned i;
+    int ok;
+    AcquireSRWLockExclusive(&transfer_lock);
+    ok = bytes ? check_limit(memory,address,size,OOT_MEMORY_WRITE,OOT_MEMORY_RECORD_LIMIT) :
+        fail(memory,address,size,OOT_MEMORY_WRITE,OOT_MEMORY_CONFIGURATION,address);
+    if (ok) {
+        memcpy(captured,bytes,size);
+        for (i = 0; i < size; ++i) {
+            const OotGuestRegion *r = find_region(memory,address+i);
+            r->data[(size_t)(address+i-r->base)] = captured[i];
+        }
+    }
     ReleaseSRWLockExclusive(&transfer_lock);
     return ok;
 }

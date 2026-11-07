@@ -12,6 +12,8 @@ Read and write permissions are independent. A region with zero permissions is a 
 
 `oot_memory_load_pair` and `oot_memory_store_pair` transfer two 4-byte or two 8-byte elements. The complete 8/16-byte request is preflighted before committing either element. Pair-load outputs must be nonnull and distinct. Scalar APIs still reject 16-byte requests.
 
+Separate host-service helpers `oot_memory_load_record` and `oot_memory_store_record` copy 1-64 bytes under the same backend lock. Every byte is preflighted before a destination buffer or guest byte changes. The startup QueryMemory service uses them for its complete 40-byte output record. These are service record copies, not new guest instruction forms or widened scalar/pair/probe permissions; the preceding instruction/probe limits remain unchanged.
+
 ## Fault and retirement contract
 
 The last transfer fault records its starting address, first rejected byte, byte width, access kind, and reason: unmapped, permission, address wrap, invalid configuration, or the ordered-load subset's alignment restriction. Successful transfers clear the previous fault. The generated entry point also clears stale fault state before checking its instruction budget.

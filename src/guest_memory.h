@@ -74,4 +74,15 @@ OOT_MEMORY_API int oot_memory_load_pair(OotGuestMemory *memory, uint64_t address
 OOT_MEMORY_API int oot_memory_store_pair(OotGuestMemory *memory, uint64_t address, unsigned element_size,
                                         uint64_t first, uint64_t second);
 
+#define OOT_MEMORY_RECORD_LIMIT 64u
+/* Separate bounded service-record transfers; scalar/pair/probe limits remain
+ * unchanged. The complete 1-64-byte record shares the same backend lock and
+ * whole-transfer preflight. Failure preserves every destination byte, including
+ * a native load output. Native buffers must be private, stable and nonaliasing
+ * with guest backing/metadata for the call. */
+OOT_MEMORY_API int oot_memory_load_record(OotGuestMemory *memory, uint64_t address,
+    uint8_t *bytes, unsigned size);
+OOT_MEMORY_API int oot_memory_store_record(OotGuestMemory *memory, uint64_t address,
+    const uint8_t *bytes, unsigned size);
+
 #endif

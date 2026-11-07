@@ -1,0 +1,85 @@
+#ifndef OOT_STARTUP_DISPATCH_H
+#define OOT_STARTUP_DISPATCH_H
+
+#include "startup_context.h"
+#include "pauth.h"
+
+#define OOT_STARTUP_DISPATCH_VERSION 1u
+#define OOT_STARTUP_RAW_IMAGE 1u
+#define OOT_STARTUP_MAX_INSTRUCTIONS 16384u
+#define OOT_STARTUP_MAX_SPANS 256u
+#define OOT_STARTUP_MAX_RETIRED UINT64_C(100000000)
+
+typedef int (*OotStartupRun)(OotArm64State *, OotGuestMemory *, const OotPauth *, uint64_t, uint64_t *);
+enum OotStartupInstructionKind {
+    OOT_STARTUP_NORMAL = 0, OOT_STARTUP_BRANCH = 1, OOT_STARTUP_INDIRECT = 2,
+    OOT_STARTUP_SVC = 3, OOT_STARTUP_UNSUPPORTED = 4
+};
+/* Direct branches use next_a=target and next_b=fallthrough (both target for
+ * unconditional branches). Indirect targets use two zero fields. Normal/SVC
+ * instructions use pc+4 twice; explicit unsupported stops use pc twice. */
+typedef struct OotStartupInstruction {
+    uint64_t pc;
+    uint32_t word, kind;
+    uint64_t next_a, next_b;
+    OotStartupRun run;
+} OotStartupInstruction;
+typedef struct OotStartupSpan {
+    uint64_t entry;
+    uint32_t size;
+    uint8_t sha256[32];
+} OotStartupSpan;
+typedef struct OotStartupProgram {
+    uint32_t version, flags;
+    uint64_t entry;
+    uint8_t body_sha256[32];
+    const OotStartupInstruction *instructions;
+    size_t instruction_count;
+    const OotStartupSpan *spans;
+    size_t span_count;
+} OotStartupProgram;
+
+enum OotStartupStatus {
+    OOT_STARTUP_READY = 0, OOT_STARTUP_YIELDED = 1, OOT_STARTUP_STOPPED = 2,
+    OOT_STARTUP_REJECTED = 3, OOT_STARTUP_CONTRACT_FAULT = 4
+};
+enum OotStartupError {
+    OOT_STARTUP_OK = 0, OOT_STARTUP_BAD_ARGUMENT = 1, OOT_STARTUP_BAD_PROGRAM = 2,
+    OOT_STARTUP_BAD_IMAGE = 3, OOT_STARTUP_BAD_CODE = 4, OOT_STARTUP_BAD_STATE = 5,
+    OOT_STARTUP_REENTRY = 6, OOT_STARTUP_NO_ACTIVE = 7,
+    OOT_STARTUP_UNSUPPORTED_WORD = 8, OOT_STARTUP_UNSUPPORTED_SERVICE = 9,
+    OOT_STARTUP_UNREGISTERED_TARGET = 10, OOT_STARTUP_MEMORY_FAULT = 11,
+    OOT_STARTUP_RETIREMENT_LIMIT = 12, OOT_STARTUP_BAD_CALLBACK = 13,
+    OOT_STARTUP_BAD_SERVICE = 14
+};
+enum OotStartupEvent { OOT_STARTUP_TRACE_STEP = 0, OOT_STARTUP_TRACE_SERVICE = 1, OOT_STARTUP_TRACE_STOP = 2 };
+typedef struct OotStartupTrace {
+    uint64_t pc, next_pc, retired;
+    uint32_t word, event, error, service;
+} OotStartupTrace;
+typedef void (*OotStartupTraceSink)(const OotStartupTrace *, void *);
+typedef struct OotStartupReport {
+    uint64_t pc, retired;
+    uint32_t status, error, word, service;
+} OotStartupReport;
+typedef struct OotStartupDispatcher OotStartupDispatcher;
+
+/* Separate trusted-native startup prefix contract. The raw-image flag is an
+ * explicit compilation/provenance declaration, bound to the package body hash;
+ * it does not infer a startup ABI from arbitrary image bytes. All code metadata
+ * is copied. Image, context and PAC lifetimes are retained. Single-threaded;
+ * callbacks and trace sinks may not reenter or destroy an executing session. */
+OOT_MEMORY_API OotStartupDispatcher *oot_startup_dispatch_create(OotRuntimeImage *image,
+    OotStartupContext *context, OotPauth *pauth, const OotStartupProgram *program,
+    uint64_t retirement_limit, uint32_t *error);
+OOT_MEMORY_API int oot_startup_dispatch_destroy(OotStartupDispatcher *dispatcher);
+OOT_MEMORY_API int oot_startup_dispatch_begin(OotStartupDispatcher *dispatcher,
+    const OotArm64State *state, OotStartupReport *report);
+OOT_MEMORY_API int oot_startup_dispatch_run(OotStartupDispatcher *dispatcher,
+    OotArm64State *state, uint64_t budget, OotStartupTraceSink trace, void *user,
+    OotStartupReport *report);
+/* Abort discards the session checkpoint, not retired effects or the image's
+ * one-shot startup claim. A new startup requires a freshly reopened image. */
+OOT_MEMORY_API int oot_startup_dispatch_abort(OotStartupDispatcher *dispatcher);
+
+#endif
