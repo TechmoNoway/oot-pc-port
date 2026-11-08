@@ -97,7 +97,12 @@ def _entry_evidence(module, syntax):
                 cross_module_initialization_order_proven=False)
 
 
-def _entry_graph(modules, entry, syntax, max_instructions, linked=True, extra_entries=(), sdk=False):
+def _entry_graph(modules, entry, syntax, max_instructions, linked=True, extra_entries=(), sdk=False, native_entries=()):
+    require(isinstance(native_entries,(list,tuple)) and len(native_entries)<=64 and
+            len(set(native_entries))==len(native_entries) and
+            all(type(pc) is int and _owner(modules,pc) is not None for pc in native_entries) and
+            (sdk or not native_entries),'invalid native SDK boundaries')
+    native_entries=set(native_entries)
     require(isinstance(extra_entries, (list, tuple)) and len(extra_entries) <= (1024 if sdk else 256),
             "too many additional startup entries")
     require(all(type(pc) is int and _owner(modules, pc) is not None for pc in extra_entries),
@@ -157,10 +162,13 @@ def _entry_graph(modules, entry, syntax, max_instructions, linked=True, extra_en
                 row["plt_snapshot"] = bridges[pc]
         elif flow == RETURN:
             row["return_boundary"] = True
+        if pc in native_entries:
+            row.update(semantic_supported=False,native_boundary=True)
+            reason='native_sdk_boundary'
         if reason:
             frontier.append(dict(address=pc, module=module.name, kind=reason,
                                  word=word, mnemonic=mnemonic, distance=distance))
-        if (not reason and flow != RETURN) or (sdk and (mnemonic == "svc" or flow == INDIRECT_CALL)):
+        if pc not in native_entries and ((not reason and flow != RETURN) or (sdk and (mnemonic == "svc" or flow == INDIRECT_CALL))):
             targets = [direct_target(word, pc)] if flow == JUMP else (
                 [direct_target(word, pc), pc + 4] if flow in (CALL, CONDITIONAL) else [pc + 4])
             row["edges"] = targets
@@ -183,7 +191,7 @@ def _entry_graph(modules, entry, syntax, max_instructions, linked=True, extra_en
                 complete_function_closure_proven=False)
 
 
-def audit_entry(linker, max_instructions=8192, extra_entries=(), sdk=False):
+def audit_entry(linker, max_instructions=8192, extra_entries=(), sdk=False, native_entries=()):
     """Inspect raw or linked entry text; unresolved data never becomes a target."""
     require(type(max_instructions) is int and 1 <= max_instructions <= MAX_INSTRUCTIONS,
             "startup instruction limit must be 1-65536")
@@ -200,7 +208,7 @@ def audit_entry(linker, max_instructions=8192, extra_entries=(), sdk=False):
                     for m in modules],
                 entry_evidence=_entry_evidence(modules[0], syntax),
                 entry_graph=_entry_graph(modules, modules[0].base, syntax, max_instructions,
-                                         linked=linker.applied, extra_entries=extra_entries, sdk=sdk))
+                                         linked=linker.applied, extra_entries=extra_entries, sdk=sdk,native_entries=native_entries))
 
 
 def audit_startup(linker, max_instructions=8192, sample_limit=32):

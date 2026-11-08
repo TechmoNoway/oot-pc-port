@@ -28,9 +28,9 @@ def owner(modules, pc):
     return matches[0]
 
 
-def selection(linker, max_instructions=8192, extra_entries=(), sdk=False):
+def selection(linker, max_instructions=8192, extra_entries=(), sdk=False, native_entries=()):
     require(not linker.started and not linker.applied, 'startup requires fresh raw, unrelocated images')
-    audit = audit_entry(linker, max_instructions, extra_entries, sdk=sdk)
+    audit = audit_entry(linker, max_instructions, extra_entries, sdk=sdk,native_entries=native_entries)
     nodes = {n['address']: dict(n) for n in audit['entry_graph']['nodes']}
     limit = 65536 if sdk else 16384
     require(nodes and len(nodes) <= limit, 'invalid startup selection size')
@@ -52,7 +52,11 @@ def selection(linker, max_instructions=8192, extra_entries=(), sdk=False):
     return audit, [nodes[p] for p in sorted(nodes)]
 
 
-def emit_startup(linker, nodes, package_manifest, config=None, relocation_probes=(), sdk_config=None, sdk_goal=None):
+def emit_startup(linker, nodes, package_manifest, config=None, relocation_probes=(), sdk_config=None, sdk_goal=None, native_functions=(), original_oe_entry=0):
+    require(not native_functions or sdk_config is not None,'native functions require SDK model')
+    require(type(original_oe_entry) is int and (not original_oe_entry or native_functions) and
+        (not original_oe_entry or any(n['address']==original_oe_entry for n in nodes)),
+        'original OE observation requires selected native-profile code')
     cfg = dict(CONTEXT if config is None else config)
     require(set(cfg) == set(CONTEXT) and all(type(x) is int and 0 <= x < 1 << 64 for x in cfg.values()),
             'startup context requires explicit unsigned integer fields')
@@ -71,7 +75,7 @@ def emit_startup(linker, nodes, package_manifest, config=None, relocation_probes
             else:
                 i = decode_pauth_instruction(word,pc)
             kind, a, b = 0, pc+4, pc+4
-            if i.form in ('sdk_system','sdk_atomic'): kind = 5
+            if i.form in ('sdk_system','sdk_atomic','sdk_barrier'): kind = 5
             else: instructions.append(i)
             if i.form == 'branch_immediate': kind,a,b = 1,i.target,i.target
             elif i.form in ('branch_condition','compare_branch','test_branch'): kind,a,b = 1,i.target,pc+4
@@ -119,7 +123,7 @@ def emit_startup(linker, nodes, package_manifest, config=None, relocation_probes
         lines.append(f'    {{{constant(pc)}, {size}, {{'+','.join(f'0x{x:02x}' for x in digest)+'}},')
     digest=bytes.fromhex(package_manifest['body_sha256'])
     lines += ['};', 'static const OotStartupProgram oot_startup_program = {',
-              '    OOT_STARTUP_DISPATCH_VERSION, '+('OOT_STARTUP_RAW_IMAGE | OOT_STARTUP_SDK_RUNTIME' if sdk_config is not None else 'OOT_STARTUP_RAW_IMAGE')+', '+constant(linker.modules[0].base)+',',
+              '    OOT_STARTUP_DISPATCH_VERSION, '+('OOT_STARTUP_RAW_IMAGE | OOT_STARTUP_SDK_RUNTIME | OOT_STARTUP_NATIVE_RUNTIME' if native_functions else 'OOT_STARTUP_RAW_IMAGE | OOT_STARTUP_SDK_RUNTIME' if sdk_config is not None else 'OOT_STARTUP_RAW_IMAGE')+', '+constant(linker.modules[0].base)+',',
               '    {'+','.join(f'0x{x:02x}' for x in digest)+'},',
               f'    oot_startup_words, {len(rows)}, oot_startup_spans, {len(spans)}', '};',
               'OOT_LIFT_EXPORT const OotStartupProgram *oot_startup_compiled_program(void) { return &oot_startup_program; }',
@@ -130,7 +134,9 @@ def emit_startup(linker, nodes, package_manifest, config=None, relocation_probes
                 'main_thread_id','main_thread_priority','main_thread_core')
         require(set(sdk_config)==set(fields) and all(type(sdk_config[k]) is int and 0 <= sdk_config[k] < 1<<64 for k in fields), 'invalid SDK model fields')
         # Real entropy is supplied privately at execution, never compiled into C.
-        lines += ['static const OotSdkConfig oot_sdk_config = { OOT_SDK_CONTEXT_VERSION, OOT_SDK_PROCESS_INFO | OOT_SDK_NO_REMOTE_ARENA | OOT_SDK_MAIN_THREAD | OOT_SDK_NO_ALIAS_EXTRA | OOT_SDK_PAGE_ALLOCATION | OOT_SDK_OBSERVED_MAIN_TLR, {0,0,0,0}, '+', '.join(constant(sdk_config[k]) for k in fields)+' };',
+        flags='OOT_SDK_PROCESS_INFO | OOT_SDK_NO_REMOTE_ARENA | OOT_SDK_MAIN_THREAD | OOT_SDK_NO_ALIAS_EXTRA | OOT_SDK_PAGE_ALLOCATION | OOT_SDK_OBSERVED_MAIN_TLR'
+        if native_functions:flags+=' | OOT_SDK_NATIVE_FUNCTIONS'
+        lines += ['static const OotSdkConfig oot_sdk_config = { OOT_SDK_CONTEXT_VERSION, '+flags+', {0,0,0,0}, '+', '.join(constant(sdk_config[k]) for k in fields)+' };',
                   'const OotSdkConfig *oot_startup_compiled_sdk_config(void) { return &oot_sdk_config; }']
     else:
         lines += ['const OotSdkConfig *oot_startup_compiled_sdk_config(void) { return NULL; }']
@@ -142,6 +148,15 @@ def emit_startup(linker, nodes, package_manifest, config=None, relocation_probes
                   'const OotSdkGoal *oot_startup_compiled_sdk_goal(void) { return &oot_sdk_goal; }']
     else:
         lines += ['const OotSdkGoal *oot_startup_compiled_sdk_goal(void) { return NULL; }']
+    if native_functions:
+        lines += ['static const OotNativeFunction oot_native_functions[] = {']
+        for f in native_functions:
+            digest=bytes.fromhex(f['body_sha256'])
+            lines += ['    {OOT_NATIVE_FUNCTION_VERSION, '+str(f['handler_id'])+', '+constant(f['entry'])+', '+str(f['size'])+', {'+','.join(f'0x{x:02x}' for x in digest)+'}},']
+        lines += ['};',f'const OotNativeFunction *oot_startup_compiled_native_functions(size_t *count) {{ *count={len(native_functions)}; return oot_native_functions; }}']
+    else:
+        lines += ['const OotNativeFunction *oot_startup_compiled_native_functions(size_t *count) { *count=0; return NULL; }']
+    lines += ['uint64_t oot_startup_compiled_original_oe_entry(void) { return '+constant(original_oe_entry)+'; }']
     if relocation_probes:
         lines += ['static const OotStartupProbe oot_startup_probes[] = {']
         lines += [f'    {{{constant(a)}, {constant(v)}}},' for a,v in relocation_probes]
@@ -154,7 +169,7 @@ def emit_startup(linker, nodes, package_manifest, config=None, relocation_probes
         image_phase='raw-before-rtld-relocation',function_identity_proven=False,
         initializers_automatically_invoked=False, sdk_runtime=sdk_config is not None,
         sdk_model=sdk_config, sdk_remote_arena='absent' if sdk_config is not None else None,
-        sdk_goal_bound=sdk_goal is not None)
+        sdk_goal_bound=sdk_goal is not None,native_functions=len(native_functions))
 
 
 def relative_probes(raw, linked):
@@ -191,16 +206,26 @@ def startup_page_regions(modules):
     return result
 
 
-def prepare_bundle(linker, output, max_instructions=8192, extra_entries=(), config=None, stack_size=STACK_SIZE, shared_package=None, sdk_metadata=None):
+def prepare_bundle(linker, output, max_instructions=8192, extra_entries=(), config=None, stack_size=STACK_SIZE, shared_package=None, sdk_metadata=None, native_sdk=False):
     output=build_destination(Path(output))
     require(not output.exists(), 'choose a fresh startup bundle directory')
     sdk = sdk_metadata is not None
+    require(type(native_sdk) is bool and (not native_sdk or sdk),'native SDK requires verified SDK metadata')
     entry,nodes=selection(linker,max_instructions,extra_entries,sdk=sdk)
     # Audit relocation and initializer targets on an independent copy. The bytes
     # packaged for the original loader are deliberately not those linked bytes.
     verified=deepcopy(linker)
     require(verified.apply()['link_complete'], 'startup preparation requires a complete independent offline link')
     linked_audit=audit_startup(verified,max_instructions)
+    native_audit=None;native_functions=[];native_entries=();original_oe_entry=0
+    if native_sdk:
+        from native_sdk_audit import audit_native_sdk
+        native_audit=audit_native_sdk(verified)
+        native_functions=native_audit['functions']
+        require(native_audit.get('original_oe_initialize') is not None,'native SDK requires the original OE observation metadata')
+        original_oe_entry=native_audit['original_oe_initialize']['entry']
+        native_entries=tuple(f['entry'] for f in native_functions)
+        entry,nodes=selection(linker,max_instructions,extra_entries,sdk=True,native_entries=native_entries)
     sdk_goal = None
     if sdk:
         from sdk_startup_audit import audit_sdk_startup
@@ -221,7 +246,7 @@ def prepare_bundle(linker, output, max_instructions=8192, extra_entries=(), conf
         targets=[pc for pc in targets if any(m.is_code(pc-m.base) for m in linker.modules)]
         if not targets or len(extra_entries)+len(lookahead)+len(targets)>(1024 if sdk else 256):break
         proposed=lookahead+targets
-        _,more=selection(linker,max_instructions,tuple(extra_entries)+tuple(proposed),sdk=sdk)
+        _,more=selection(linker,max_instructions,tuple(extra_entries)+tuple(proposed),sdk=sdk,native_entries=native_entries)
         updated=dict(merged)
         for n in more:
             if n['address'] not in updated or ('selection_stop' in updated[n['address']] and 'selection_stop' not in n):
@@ -241,6 +266,14 @@ def prepare_bundle(linker, output, max_instructions=8192, extra_entries=(), conf
         thunk=merged[sdk_goal['goal_entry']['thunk_entry']]
         thunk.pop('selection_stop',None)
         thunk['semantic_supported']=True
+    for f in native_functions:
+        pc=f['entry'];m=owner(linker.modules,pc)
+        merged[pc]=dict(address=pc,word=m.unpack('<I',pc-m.base)[0],semantic_supported=False,
+            native_boundary=True,selection_stop='native SDK function boundary')
+    if original_oe_entry and original_oe_entry not in merged:
+        m=owner(linker.modules,original_oe_entry)
+        merged[original_oe_entry]=dict(address=original_oe_entry,word=m.unpack('<I',original_oe_entry-m.base)[0],
+            semantic_supported=False,selection_stop='unselected continuation')
     nodes=[merged[p] for p in sorted(merged)]
     package,manifest=pack_regions(startup_page_regions(linker.modules),verified.report(),STACK_BASE,stack_size)
     manifest.update(format='oot-raw-startup-memory',schema_version=1,
@@ -255,7 +288,7 @@ def prepare_bundle(linker, output, max_instructions=8192, extra_entries=(), conf
         sdk_config.update(aslr_base=0,aslr_size=1<<39,alias_base=0x5000000000,alias_size=0x80000000,
             total_memory=manifest['backing_bytes']+config['tls_size']+config['heap_capacity'],
             main_thread_id=1,main_thread_priority=sdk_metadata['main_thread_priority'],main_thread_core=sdk_metadata['main_thread_core'])
-    source,summary=emit_startup(linker,nodes,manifest,config,probes,sdk_config,sdk_goal)
+    source,summary=emit_startup(linker,nodes,manifest,config,probes,sdk_config,sdk_goal,native_functions,original_oe_entry)
     summary['relative_relocation_probes']=len(probes)
     summary['linked_plt_lookahead_targets']=len(lookahead)
     output.mkdir(parents=True)
@@ -269,7 +302,7 @@ def prepare_bundle(linker, output, max_instructions=8192, extra_entries=(), conf
     report=dict(schema_version=1,format='oot-startup-bundle',guest_code_executed=False,
         game_translation_performed=True,native_callbacks_registered=False,
         source_sha256=hashlib.sha256(source.encode()).hexdigest(),selection=summary,
-        package=manifest,entry_audit=entry,initializer_audit=linked_audit,sdk_audit=sdk_goal,sdk_npdm=sdk_metadata,
+        package=manifest,entry_audit=entry,initializer_audit=linked_audit,sdk_audit=sdk_goal,sdk_npdm=sdk_metadata,native_audit=native_audit,
         static_plt_lookahead=dict(entries=lookahead,live_targets_proven=False,
             scope='diagnostic linked-snapshot code selection; original stub instructions and runtime target checks remain active'),
         selection_boundaries=[dict(address=n['address'],word=n['word'],reason=n['selection_stop']) for n in nodes if 'selection_stop' in n])

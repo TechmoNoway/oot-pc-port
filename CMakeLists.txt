@@ -101,7 +101,7 @@ else()
 endif()
 target_link_libraries(oot-pc-port PRIVATE oot-runtime-image)
 
-add_library(oot-startup STATIC src/startup_context.c src/startup_dispatch.c)
+add_library(oot-startup STATIC src/startup_context.c src/startup_dispatch.c src/sdk_native.c)
 target_link_libraries(oot-startup PUBLIC oot-runtime-image oot-pauth oot-leaf-dispatch)
 target_include_directories(oot-startup PUBLIC src)
 if(MSVC)

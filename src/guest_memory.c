@@ -277,3 +277,36 @@ int oot_memory_store_record(OotGuestMemory *memory, uint64_t address, const uint
     ReleaseSRWLockExclusive(&transfer_lock);
     return ok;
 }
+
+int oot_memory_load_native_input(OotGuestMemory *memory, uint64_t address, uint8_t *bytes, unsigned size)
+{
+    uint8_t captured[OOT_MEMORY_NATIVE_INPUT_LIMIT];
+    unsigned i;
+    int ok;
+    AcquireSRWLockExclusive(&transfer_lock);
+    ok = bytes ? check_limit(memory,address,size,OOT_MEMORY_READ,OOT_MEMORY_NATIVE_INPUT_LIMIT) :
+        fail(memory,address,size,OOT_MEMORY_READ,OOT_MEMORY_CONFIGURATION,address);
+    if (ok) {
+        for (i=0;i<size;++i) {
+            const OotGuestRegion *r=find_region(memory,address+i);
+            captured[i]=r->data[(size_t)(address+i-r->base)];
+        }
+        memcpy(bytes,captured,size);
+    }
+    ReleaseSRWLockExclusive(&transfer_lock);
+    return ok;
+}
+
+int oot_memory_barrier(OotGuestMemory *memory, uint32_t option)
+{
+    int ok;
+    AcquireSRWLockExclusive(&transfer_lock);
+    if (!memory || memory->valid!=1 || option>15 || !(option & 3u))
+        ok=fail(memory,0,0,0,OOT_MEMORY_CONFIGURATION,0);
+    else {
+        memory->fault=(OotMemoryFault){0};
+        ok=1;
+    }
+    ReleaseSRWLockExclusive(&transfer_lock);
+    return ok;
+}

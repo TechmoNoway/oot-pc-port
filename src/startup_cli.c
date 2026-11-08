@@ -14,6 +14,8 @@ const OotStartupConfig *oot_startup_compiled_config(void);
 const OotStartupProbe *oot_startup_compiled_probes(size_t *count);
 const OotSdkConfig *oot_startup_compiled_sdk_config(void);
 const OotSdkGoal *oot_startup_compiled_sdk_goal(void);
+const OotNativeFunction *oot_startup_compiled_native_functions(size_t *count);
+uint64_t oot_startup_compiled_original_oe_entry(void);
 
 typedef struct TraceFile {
     FILE *file;
@@ -21,6 +23,8 @@ typedef struct TraceFile {
     uint8_t buffer[65536];
     size_t used;
     uint64_t rows, steps;
+    uint64_t original_oe_entry;
+    int original_oe_seen;
     int failed, compact;
 } TraceFile;
 
@@ -39,6 +43,8 @@ static void write_trace(const OotStartupTrace *r, void *user)
         ",\"error\":%" PRIu32 ",\"service\":%" PRIu32 "}\n",
         r->pc,r->next_pc,r->retired,r->word,r->event,r->error,r->service);
     if (out->failed) return;
+    if (out->original_oe_entry && r->pc==out->original_oe_entry && r->event==OOT_STARTUP_TRACE_STEP)
+        out->original_oe_seen=1;
     if (size<0 || (size_t)size>=sizeof(row)) { out->failed=1; return; }
     if (out->used+(size_t)size>sizeof(out->buffer)) flush_hash(out);
     memcpy(out->buffer+out->used,row,(size_t)size);out->used+=(size_t)size;
@@ -82,8 +88,10 @@ int oot_startup_cli(int argc, char **argv)
     int result=1;
     size_t probe_count=0,probe_matches=0;
     const OotStartupProgram *program=oot_startup_compiled_program();
+    trace.original_oe_entry=oot_startup_compiled_original_oe_entry();
     const OotSdkConfig *compiled_sdk=oot_startup_compiled_sdk_config();
     OotSdkConfig sdk={0};
+    int native_stop=0;
     uint64_t maximum=compiled_sdk ? OOT_STARTUP_SDK_MAX_RETIRED : OOT_STARTUP_MAX_RETIRED;
     if (argc < 5 || strcmp(argv[3],"--trace")) goto usage;
     package=argv[2]; trace_path=argv[4];
@@ -126,9 +134,17 @@ int oot_startup_cli(int argc, char **argv)
     if (!context) { fprintf(stderr,"Startup context rejected: %" PRIu32 "\n",error); goto cleanup; }
     pauth=oot_pauth_create(OOT_PAUTH_QARMA5_VA39,NULL);
     if (!pauth) { fputs("Startup PAC context failed.\n",stderr); goto cleanup; }
-    dispatcher=compiled_sdk ? oot_startup_dispatch_create_sdk(image,context,pauth,program,limit,&error) :
+    dispatcher=oot_startup_context_native_enabled(context) ? oot_startup_dispatch_create_native(image,context,pauth,program,limit,&error) :
+        compiled_sdk ? oot_startup_dispatch_create_sdk(image,context,pauth,program,limit,&error) :
         oot_startup_dispatch_create(image,context,pauth,program,limit,&error);
     if (!dispatcher) { fprintf(stderr,"Startup selection rejected: %" PRIu32 "\n",error); goto cleanup; }
+    if (oot_startup_context_native_enabled(context)) {
+        size_t count=0;
+        const OotNativeFunction *functions=oot_startup_compiled_native_functions(&count);
+        if (!oot_startup_dispatch_set_native_functions(dispatcher,functions,count,&error)) {
+            fprintf(stderr,"Native SDK bindings rejected: %" PRIu32 "\n",error); goto cleanup;
+        }
+    }
     if (compiled_sdk && !oot_startup_dispatch_set_sdk_goal(dispatcher,oot_startup_compiled_sdk_goal(),&error)) {
         fprintf(stderr,"SDK goal rejected: %" PRIu32 "\n",error); goto cleanup;
     }
@@ -170,7 +186,14 @@ int oot_startup_cli(int argc, char **argv)
         ",\"relative_relocation_probes\":%zu,\"relative_relocations_matching_offline_link\":%zu",
         report.status,report.error,report.pc,report.retired,report.word,report.service,
         report.retired ? "true":"false",probe_count,probe_matches);
-    if (report.service==0x29)
+    if (oot_startup_context_native_enabled(context)) {
+        size_t count=0;
+        const OotNativeFunction *functions=oot_startup_compiled_native_functions(&count);
+        for (size_t i=0;i<count;++i)
+            if (report.pc>=functions[i].entry && report.pc-functions[i].entry<functions[i].size &&
+                report.service==functions[i].id) native_stop=1;
+    }
+    if (report.service==0x29 && !native_stop)
         printf(",\"get_info_request\":{\"info_id\":%" PRIu64 ",\"handle\":%" PRIu32 ",\"sub_id\":%" PRIu64 "}",
             state.x[1],(uint32_t)state.x[2],state.x[3]);
     printf(",\"sdk_runtime\":%s,\"sdk_stages_completed\":%" PRIu32
@@ -178,12 +201,21 @@ int oot_startup_cli(int argc, char **argv)
         compiled_sdk ? "true":"false",oot_startup_dispatch_sdk_stages_completed(dispatcher),
         report.error==OOT_STARTUP_SDK_INITIALIZED ? "true":"false",
         report.error==OOT_STARTUP_SDK_INITIALIZED ? "true":"false");
-    if (compiled_sdk && report.service==0x1f) {
+    if (compiled_sdk && report.service==0x1f && !native_stop) {
         uint8_t name[4];
         int sm=oot_memory_load_record(oot_startup_context_memory(context),state.x[1],name,sizeof(name)) &&
             !memcmp(name,"sm:",sizeof(name));
         /* Match only this known protocol name; never dump arbitrary guest bytes. */
         printf(",\"named_port\":\"%s\"",sm ? "sm:":"unrecognized");
+    }
+    if (oot_startup_context_native_enabled(context)) {
+        const OotSdkNative *native=oot_startup_context_native(context);
+        printf(",\"native_sdk\":true,\"native_handler_stop\":%s,\"original_oe_initialize_entered\":%s,\"native_calls\":%" PRIu64
+            ",\"native_stats\":{\"calls\":%" PRIu64 ",\"logging_initializations\":%" PRIu64
+            ",\"destination_updates\":%" PRIu64 ",\"log_records\":%" PRIu64 ",\"log_bytes\":%" PRIu64 "}",
+            native_stop ? "true":"false",trace.original_oe_seen ? "true":"false",
+            oot_startup_dispatch_native_calls(dispatcher),native->calls,native->logging_initializations,
+            native->destination_updates,native->log_records,native->log_bytes);
     }
     printf(",\"trace_mode\":\"%s\",\"trace_rows\":%" PRIu64 ",\"trace_steps\":%" PRIu64 ",\"trace_sha256\":\"%s\"",
         trace.compact?"compact":"full",trace.rows,trace.steps,digest_hex);

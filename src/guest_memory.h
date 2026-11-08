@@ -95,4 +95,18 @@ OOT_MEMORY_API int oot_memory_load_record(OotGuestMemory *memory, uint64_t addre
 OOT_MEMORY_API int oot_memory_store_record(OotGuestMemory *memory, uint64_t address,
     const uint8_t *bytes, unsigned size);
 
+#define OOT_MEMORY_NATIVE_INPUT_LIMIT 4096u
+/* A separate read-only native-SDK input operand. Capture the entire bounded
+ * record/payload under the same transfer lock. Failure preserves all output;
+ * native output must be private/nonaliasing. Earlier transfer limits remain. */
+OOT_MEMORY_API int oot_memory_load_native_input(OotGuestMemory *memory, uint64_t address,
+    uint8_t *bytes, unsigned size);
+/* Native-SDK named DMB options 1/2/3,5/6/7,9/10/11,13/14/15 participate in
+ * the same backend transfer lock as every scalar/pair/record/CAS operation.
+ * This Normal-memory total order is stronger than the selected Arm barriers;
+ * it does not model device/MMIO effects, DSB completion or every weak-memory
+ * outcome. No guest bytes or mapping metadata change. Failure records a
+ * zero-sized configuration fault; success clears the caller's fault view. */
+OOT_MEMORY_API int oot_memory_barrier(OotGuestMemory *memory, uint32_t option);
+
 #endif

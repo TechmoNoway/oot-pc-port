@@ -2,7 +2,15 @@
 
 Development is organized around complete capabilities and measured blocker cohorts. A milestone includes its dependent instruction/runtime changes, verifier integration, synthetic native evidence, fresh private surveys, documentation and a reviewed commit/push on `dev`. The assistant completes these substeps autonomously within the authorized scope and reports the result at the milestone boundary. Small instruction families no longer require separate user prompts or separate releases.
 
-## Current milestone: SDK runtime foundation
+## Current milestone: hybrid native SDK logging
+
+The [native SDK boundary](native-sdk.md) retains the checked ARM64 translator and replaces a coherent logging family with owned host implementations. Four native operations cover initialization, destination, default-observer enablement and the common log-emission boundary; nine guarded APIs stop unsupported callbacks and opaque logger objects before effects. SDK functions outside this family remain original. OE initialization is observed through actual original entry retirement and is not replaced with an empty return.
+
+The native configuration checks three separate execution modes on both MSVC and GCC: raw startup, original-SDK startup and hybrid startup. Earlier endpoints and full ordered trace digests remain required. Hybrid evidence binds the current original-export audit, NPDM, goal and private entropy; it must show native host operations, consistent separate retirement/call counters and actual original OE entry evidence. Native functions cannot overlap mandatory original goal markers. Successful logging initialization does not establish platform or application initialization.
+
+The final `build/milestones/native-sdk-v1/` run passes every stage and the source-fingerprint gate: 444 Python tests without skips, seven CTest groups and unchanged prior survey outcomes. All six original-code experiments pass. Both hybrid executables retire 40,400,024 original instructions plus one native logging initialization, match all eight relocation probes and the complete ordered trace digest, and observe original OE entry retirement before stopping at its remaining `sm:` boundary. SDK initialization and game entry stay false. See [native SDK validation](native-sdk.md#validation-and-actual-startup-evidence) for the native/reference checks and exact scope.
+
+## Preceding SDK runtime foundation
 
 The [SDK runtime](sdk-runtime.md) extends the separate original-startup experiment with declared process queries, private entropy, TLS operations, read-only main-thread services and scalar atomic compare/exchange. An original-byte audit binds the observed TLS identity profile and the mandatory stage/nnMain goal. The current foundation endpoint is the real service-manager connection boundary, with SDK initialization and application entry explicitly incomplete. IPC transport, handle/session ownership and service semantics form the next dependency cluster.
 
@@ -24,8 +32,8 @@ From the repository root, with the project environment, MSVC build, GCC and pinn
 
 ```powershell
 .venv\Scripts\python.exe -B tools/run_milestone.py `
-  --config config/milestones/sdk-runtime.json `
-  --output build/milestones/sdk-runtime-v1
+  --config config/milestones/native-sdk.json `
+  --output build/milestones/native-sdk-v1
 ```
 
 Choose a fresh output directory for each run. The configuration selects the native build, prepared inputs, preceding survey baselines, GCC factory test modules, expected report artifacts and an explicit startup diagnostic stop. It contains paths and check selections, never keys or captured game bytes. `--native-only` runs the synthetic portion without private game inputs or baseline files. The full startup configuration includes experimental original-code execution; the separate builder requires `--execute` when used directly.
@@ -35,6 +43,8 @@ The runner configures/builds the pinned host/helper, then runs two independent n
 The startup configuration adds an entry/initializer audit and private raw-image execution with MSVC and GCC. Preparation links a separate audit copy, never the loader's runtime input. Each executable is bound to the exact raw package and original selected words/spans; every expansion iteration restarts on fresh backing. Bounded exact-PLT lookahead preselects potential original callees without approving live targets or omitting the stubs. The runner requires original-code execution to be explicitly reported, startup/ABI proof flags to remain false, matching compiler stop PC/word/service/retired count, the exact declared GetInfo request, independent relative-pointer probes and the full ordered trace SHA-256. Compact logs sample rows while hashing every row. Native contract failures, absent execution or a different diagnostic boundary reject completion.
 
 The SDK configuration also requires a current SDK/NPDM/thread-identity audit, fresh SDK tests on both compilers and a GCC build/run of the complete process-context C self-test. Its configuration names the actual service/known port and required stage-entry count, or explicitly requires the full initialization goal. Matching audit input identities, executable goal metadata and entropy fingerprints are checked. A passed foundation run certifies its declared capability and diagnostic endpoint; the separate `sdk_initialization_completed` and `game_entry_reached` values remain authoritative.
+
+The native configuration adds the original-function/record-layout audit and both hybrid executables. Event 3 represents a whole native operation rather than an original ARM instruction: `trace_steps = retired + native_calls` and `trace_rows = trace_steps + 1`. Both kinds count toward work quota. Host state and the guarded-operation stop kind must match across compilers. Callback/native return checks, copied registry lifetimes, interior/body tampering, incomplete goals and original/native trace equivalence are covered by synthetic tests.
 
 `run.json` records pending/running/passed/failed stage states and log paths. Failures leave their evidence available and produce a nonzero exit. It never marks an incomplete run passed. Stale native artifacts, changed source code during the run, mismatched inputs/models or remaining selected instruction frontiers reject completion. The source fingerprint covers CMake, source, tools, tests and milestone configurations. Reusing an existing output is rejected, so earlier successful evidence cannot silently stand in for a new run.
 

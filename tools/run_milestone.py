@@ -1,4 +1,4 @@
-"""Validate a complete milestone and collect private evidence; never publish or run game code."""
+"""Validate synthetic/static evidence and separately authorized startup experiments."""
 
 import argparse
 from copy import deepcopy
@@ -64,7 +64,8 @@ def startup_evidence(report, expected_error, expected_info=None, sdk_stages=None
                 'SDK stage/completion evidence differs from the declared goal')
     result={k:e[k] for k in ('status','error','pc','retired','word','service','startup_completed',
         'relative_relocation_probes','relative_relocations_matching_offline_link','trace_sha256')}
-    for k in ('get_info_request','named_port','sdk_stages_completed','sdk_initialization_completed','game_entry_reached'):
+    for k in ('get_info_request','named_port','sdk_stages_completed','sdk_initialization_completed','game_entry_reached',
+              'native_sdk','native_calls','native_stats','native_handler_stop','original_oe_initialize_entered'):
         if k in e:result[k]=e[k]
     result['compiler']=last['compiler']
     return result
@@ -249,6 +250,13 @@ def execute(config, output, native_only=False):
     require(type(config.get('bounded_memory_survey',False)) is bool,'invalid bounded scope flag')
     require(type(config.get('startup_experiment',False)) is bool,'invalid startup scope flag')
     require(type(config.get('sdk_experiment',False)) is bool,'invalid SDK scope flag')
+    require(type(config.get('native_experiment',False)) is bool,'invalid native SDK scope flag')
+    if config.get('native_experiment'):
+        require(config.get('sdk_experiment') is True and isinstance(config.get('baseline_sdk'),str),'native SDK requires prior SDK evidence')
+        require(type(config.get('native_expected_error')) is int and config['native_expected_error'] in (8,9,10,11,12,15,18,19),'native SDK requires a declared endpoint')
+        require(type(config.get('native_required_stages')) is int and 0<config['native_required_stages']<=32,'native SDK requires stage count')
+        require(type(config.get('native_min_calls')) is int and config['native_min_calls']>0 and
+                type(config.get('native_handler_stop',False)) is bool,'native SDK requires explicit host-operation evidence')
     if config.get('sdk_experiment'):
         require(config.get('startup_experiment') is True and isinstance(config.get('baseline_startup'),str),'SDK milestone requires prior raw startup evidence')
         require(type(config.get('sdk_expected_error')) is int and config['sdk_expected_error'] in (8,9,10,11,12,15),'SDK requires a declared stop or initialization goal')
@@ -287,6 +295,9 @@ def execute(config, output, native_only=False):
     if not native_only and config.get('sdk_experiment'):
         stages.insert(stages.index('comparison'),'sdk-audit')
         for mode in ('cmake','gcc'):stages.insert(stages.index('summary'),'sdk-experiment-'+mode)
+    if not native_only and config.get('native_experiment'):
+        stages.insert(stages.index('comparison'),'native-sdk-audit')
+        for mode in ('cmake','gcc'):stages.insert(stages.index('summary'),'native-sdk-experiment-'+mode)
     run = MilestoneRun(output, config["name"], stages)
     run.manifest["scope"] = "synthetic native only" if native_only else "synthetic native and static private game analysis"
     if not native_only and config.get('startup_experiment'):
@@ -308,7 +319,7 @@ def execute(config, output, native_only=False):
                 exe=run.output/'sdk-context-test.exe'
                 run.command('gcc-sdk-context-build',[gcc,'-std=c17','-O2','-Wall','-Wextra','-Wpedantic','-Werror',
                     '-D_CRT_SECURE_NO_WARNINGS','-D_WIN32_WINNT=0x0A00','-I',ROOT/'src',ROOT/'tests/startup_context_test.c',
-                    *[ROOT/'src'/(name+'.c') for name in ('startup_context','runtime_image','guest_memory','host_win32')],'-lbcrypt','-o',exe],e)
+                    *[ROOT/'src'/(name+'.c') for name in ('startup_context','runtime_image','guest_memory','host_win32','sdk_native')],'-lbcrypt','-o',exe],e)
                 run.command('gcc-sdk-context-test',[exe,run.output/'sdk-context-test.ootmem'],e)
         with ThreadPoolExecutor(max_workers=2) as pool:
             futures = [pool.submit(msvc), pool.submit(gcc_lane)]
@@ -329,6 +340,8 @@ def execute(config, output, native_only=False):
                 run.command('startup-audit',py+['tools/audit_startup.py',prepared,'--report',run.output/'startup-audit.json'],env)
             if config.get('sdk_experiment'):
                 run.command('sdk-audit',py+['tools/sdk_startup_audit.py',prepared,'--report',run.output/'sdk-audit.json'],env)
+            if config.get('native_experiment'):
+                run.command('native-sdk-audit',py+['tools/native_sdk_audit.py',prepared,'--report',run.output/'native-sdk-audit.json'],env)
             def compare():
                 comparisons = {scope: compare_profiles(read_json(ROOT/config["baseline_"+scope]), read_json(run.output/(scope+".json"))) for scope in ("default", "plt")}
                 audit = read_json(run.output/"callees.json"); compare_baseline(audit, read_json(run.output/"plt.json"))
@@ -407,6 +420,9 @@ def execute(config, output, native_only=False):
                 entropy=run.output/'process-entropy.bin'
                 with entropy.open('xb') as stream:stream.write(os.urandom(32))
                 sdk_experiments={}
+                if config.get('native_experiment'):
+                    sdk_baseline=read_json(ROOT/config['baseline_sdk'])
+                    seeds=sdk_baseline['iterations'][-1]['additional_entries']
                 for mode in ('cmake','gcc'):
                     folder=run.output/('sdk-'+mode)
                     args=py+['tools/build_startup.py',prepared,'--output',folder,'--compiler',mode,'--sdk','--entropy-file',entropy,'--execute','--expand-targets','64','--limit','1000000000','--quantum','10000']
@@ -419,9 +435,38 @@ def execute(config, output, native_only=False):
                             bundle['sdk_audit']['goal_entry']==audit['goal_entry'] and
                             bundle['sdk_audit']['mandatory_stage_entries']==audit['mandatory_stage_entries'],'SDK executable was generated from different goal/metadata evidence')
                     sdk_experiments[mode]=startup_evidence(result,config['sdk_expected_error'],config.get('sdk_expected_get_info'),config['sdk_required_stages'],config.get('sdk_expected_service'),config.get('sdk_expected_port'))
+                    if config.get('native_experiment'):
+                        prior=sdk_baseline['iterations'][-1]['execution']
+                        require(all(sdk_experiments[mode][k]==prior[k] for k in ('status','error','pc','retired','word','service','trace_sha256')),'preceding SDK original prefix changed')
                 require(all(sdk_experiments['cmake'][k]==sdk_experiments['gcc'][k] for k in ('status','error','pc','retired','word','service','trace_sha256','sdk_stages_completed','sdk_initialization_completed')),'native compilers reached different SDK prefixes')
                 summary['sdk_experiments']=sdk_experiments
                 summary['sdk_initialization_completed']=config['sdk_expected_error']==15
+            if config.get('native_experiment'):
+                native_audit=read_json(run.output/'native-sdk-audit.json')
+                native_experiments={}
+                for mode in ('cmake','gcc'):
+                    folder=run.output/('native-sdk-'+mode)
+                    args=py+['tools/build_startup.py',prepared,'--output',folder,'--compiler',mode,'--sdk','--native-sdk',
+                        '--entropy-file',entropy,'--execute','--expand-targets','64','--limit','1000000000','--quantum','10000']
+                    for pc in seeds:args+=['--extra-entry',str(pc)]
+                    run.command('native-sdk-experiment-'+mode,args,env)
+                    result=read_json(folder/'run.json');last=result['iterations'][-1]
+                    bundle=read_json(Path(last['bundle'])/'manifest.json')
+                    require(result['native_sdk'] is True and result['entropy_input_sha256']==hashlib.sha256(entropy.read_bytes()).hexdigest(),'native SDK process model differs')
+                    require(bundle['native_audit']==native_audit and bundle['sdk_npdm']['source_sha256']==audit['npdm']['source_sha256'] and
+                        bundle['sdk_audit']['goal_entry']==audit['goal_entry'],'native SDK input/audit/goal evidence differs')
+                    e=startup_evidence(result,config['native_expected_error'],config.get('native_expected_get_info'),
+                        config['native_required_stages'],config.get('native_expected_service'),config.get('native_expected_port'))
+                    require(e['native_sdk'] is True and e['original_oe_initialize_entered'] is True and e['native_calls']>=config['native_min_calls'] and
+                        e['native_stats']['calls']==e['native_calls'] and e['native_stats']['logging_initializations']>=1,
+                        'native SDK did not perform its required host operations')
+                    require(e['native_handler_stop']==config.get('native_handler_stop',False),'native SDK endpoint kind differs')
+                    native_experiments[mode]=e
+                require(all(native_experiments['cmake'][k]==native_experiments['gcc'][k] for k in
+                    ('status','error','pc','retired','word','service','trace_sha256','native_calls','native_stats','sdk_stages_completed')),
+                    'native SDK compiler execution differs')
+                summary['native_sdk_experiments']=native_experiments
+                summary['sdk_initialization_completed']=config['native_expected_error']==15
         def publish_summary():
             (run.output/"summary.json").write_text(json.dumps(summary, indent=2)+"\n", encoding="utf-8")
             lines = ["# Milestone validation", "", f"Milestone: {config['name']}", "", f"Python tests: {summary['python_tests']}; CTest groups: {summary['ctest_groups']}; native comparisons per compiler: {summary['native_trials_per_compiler']}."]

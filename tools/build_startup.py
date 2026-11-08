@@ -44,7 +44,7 @@ def build_native(bundle, mode, native_cache=None):
         require(Path(compiler).is_file(),'GCC is unavailable')
         exe=bundle/'oot-startup.exe'
         names=('main','startup_cli','startup_context','startup_dispatch','guest_memory',
-               'runtime_image','host_win32','pauth','checked_read')
+               'runtime_image','host_win32','pauth','checked_read','sdk_native')
         run([compiler,'-std=c17','-O2','-Wall','-Wextra','-Wpedantic','-Werror',
              '-DOOT_HAS_STARTUP_PROGRAM','-D_CRT_SECURE_NO_WARNINGS','-D_WIN32_WINNT=0x0A00',
              '-I',ROOT/'src',*[ROOT/'src'/(n+'.c') for n in names],source,'-lbcrypt','-o',exe])
@@ -84,17 +84,18 @@ def execute(exe,bundle,limit,quantum,trace_mode='compact',entropy_file=None):
             digest.update(line.replace(b'\r\n',b'\n'))
             # The native writer has one fixed numeric-only JSON format. Avoid
             # constructing millions of Python dictionaries for its step rows.
-            if b'"event":0,' in line or b'"event":1,' in line:step_count+=1
+            if b'"event":0,' in line or b'"event":1,' in line or b'"event":3,' in line:step_count+=1
             else:last=json.loads(line)
-    require(last is not None and last['event']==2 and last['retired']==report['retired']==report['trace_steps'] and report['trace_rows']==report['trace_steps']+1,
+    require(last is not None and last['event']==2 and last['retired']==report['retired'] and
+            report['retired']+report.get('native_calls',0)==report['trace_steps'] and report['trace_rows']==report['trace_steps']+1,
             'startup trace does not reproduce the retired prefix')
-    if trace_mode=='full':require(step_count==report['retired'] and digest.hexdigest()==report['trace_sha256'],'full trace digest differs from the native all-row digest')
-    else:require(step_count<=report['retired'] and report['trace_mode']=='compact','invalid compact trace')
+    if trace_mode=='full':require(step_count==report['trace_steps'] and digest.hexdigest()==report['trace_sha256'],'full trace digest differs from the native all-row digest')
+    else:require(step_count<=report['trace_steps'] and report['trace_mode']=='compact','invalid compact trace')
     report.update(last_transition=last,trace_file=str(trace),stored_trace_sha256=digest.hexdigest(),exit_code=r.returncode)
     return report
 
 
-def run(prepared,output,compiler='cmake',execute_code=False,expand_targets=0,limit=1000000,quantum=1000,initial_entries=(),trace_mode='compact',sdk=False,entropy_file=None):
+def run(prepared,output,compiler='cmake',execute_code=False,expand_targets=0,limit=1000000,quantum=1000,initial_entries=(),trace_mode='compact',sdk=False,entropy_file=None,native_sdk=False):
     require(os.name=='nt','native startup builds require Windows')
     output=build_destination(output)
     require(not output.exists(),'choose a fresh startup output directory')
@@ -103,6 +104,7 @@ def run(prepared,output,compiler='cmake',execute_code=False,expand_targets=0,lim
     require(trace_mode in ('full','compact'),'invalid startup trace mode')
     require(execute_code or not expand_targets,'target expansion requires explicit execution')
     require(sdk or entropy_file is None,'private SDK entropy requires SDK opt-in')
+    require(type(native_sdk) is bool and (not native_sdk or sdk),'native SDK requires SDK opt-in')
     if entropy_file is not None:
         entropy_file=build_destination(entropy_file)
         require(len(entropy_file.read_bytes())==32,'SDK entropy input must contain exactly 32 bytes')
@@ -122,7 +124,7 @@ def run(prepared,output,compiler='cmake',execute_code=False,expand_targets=0,lim
             require(npdm is not None,'SDK runtime requires verified NPDM metadata')
             sdk_metadata=inspect_sdk_npdm(npdm)
         manifest=prepare_bundle(raw,bundle,extra_entries=extras,
-            max_instructions=32768 if sdk else 8192,sdk_metadata=sdk_metadata,
+            max_instructions=32768 if sdk else 8192,sdk_metadata=sdk_metadata,native_sdk=native_sdk,
             shared_package=output/'iteration-00/startup.ootmem' if index else None,
             **({'stack_size':metadata['main_thread_stack_size']} if metadata else {}))
         manifest['npdm']=metadata
@@ -162,7 +164,7 @@ def run(prepared,output,compiler='cmake',execute_code=False,expand_targets=0,lim
     final=dict(schema_version=1,format='oot-startup-experiment',status='diagnostic-complete',
         process_abi='experimental',switch2_startup_abi_proven=False,
         startup_completed=False,game_code_executed=bool(execute_code and any(r['execution']['retired'] for r in iterations)),
-        sdk_runtime=sdk,sdk_initialization_completed=bool(execute_code and iterations[-1]['execution'].get('sdk_initialization_completed')),
+        sdk_runtime=sdk,native_sdk=native_sdk,sdk_initialization_completed=bool(execute_code and iterations[-1]['execution'].get('sdk_initialization_completed')),
         entropy_input_sha256=hashlib.sha256(entropy_file.read_bytes()).hexdigest() if entropy_file else None,
         iterations=iterations)
     (output/'run.json').write_text(json.dumps(final,indent=2)+'\n',encoding='utf-8')
@@ -179,10 +181,11 @@ def main():
     p.add_argument('--limit',type=int,default=1000000);p.add_argument('--quantum',type=int,default=1000)
     p.add_argument('--trace-mode',choices=('compact','full'),default='compact')
     p.add_argument('--sdk',action='store_true',help='explicit opt-in experimental SDK process model and initialization goal')
+    p.add_argument('--native-sdk',action='store_true',help='separate original-body-bound native SDK function profile; requires --sdk')
     p.add_argument('--entropy-file',type=Path,help='private 32-byte process entropy under ignored build/')
     a=p.parse_args()
     try:
-        r=run(a.prepared,a.output,a.compiler,a.execute,a.expand_targets,a.limit,a.quantum,a.extra_entry,a.trace_mode,a.sdk,a.entropy_file)
+        r=run(a.prepared,a.output,a.compiler,a.execute,a.expand_targets,a.limit,a.quantum,a.extra_entry,a.trace_mode,a.sdk,a.entropy_file,a.native_sdk)
         last=r['iterations'][-1]
         print(json.dumps(dict(output=str(a.output),status=r['status'],iterations=len(r['iterations']),
             game_code_executed=r['game_code_executed'],startup_completed=False,

@@ -3,10 +3,13 @@
 
 #include "startup_context.h"
 #include "pauth.h"
+#include "sdk_native.h"
 
 #define OOT_STARTUP_DISPATCH_VERSION 1u
 #define OOT_STARTUP_RAW_IMAGE 1u
 #define OOT_STARTUP_SDK_RUNTIME 2u
+#define OOT_STARTUP_NATIVE_RUNTIME 4u
+#define OOT_STARTUP_MAX_NATIVE_FUNCTIONS 64u
 #define OOT_STARTUP_MAX_INSTRUCTIONS 16384u
 #define OOT_STARTUP_MAX_SPANS 256u
 #define OOT_STARTUP_MAX_RETIRED UINT64_C(100000000)
@@ -58,9 +61,11 @@ enum OotStartupError {
     OOT_STARTUP_UNREGISTERED_TARGET = 10, OOT_STARTUP_MEMORY_FAULT = 11,
     OOT_STARTUP_RETIREMENT_LIMIT = 12, OOT_STARTUP_BAD_CALLBACK = 13,
     OOT_STARTUP_BAD_SERVICE = 14, OOT_STARTUP_SDK_INITIALIZED = 15,
-    OOT_STARTUP_BAD_SDK_GOAL = 16
+    OOT_STARTUP_BAD_SDK_GOAL = 16, OOT_STARTUP_BAD_NATIVE_FUNCTION = 17,
+    OOT_STARTUP_NATIVE_INTERIOR = 18, OOT_STARTUP_NATIVE_FAULT = 19
 };
-enum OotStartupEvent { OOT_STARTUP_TRACE_STEP = 0, OOT_STARTUP_TRACE_SERVICE = 1, OOT_STARTUP_TRACE_STOP = 2 };
+enum OotStartupEvent { OOT_STARTUP_TRACE_STEP = 0, OOT_STARTUP_TRACE_SERVICE = 1, OOT_STARTUP_TRACE_STOP = 2,
+    OOT_STARTUP_TRACE_NATIVE = 3 };
 typedef struct OotStartupTrace {
     uint64_t pc, next_pc, retired;
     uint32_t word, event, error, service;
@@ -96,6 +101,22 @@ OOT_MEMORY_API OotStartupDispatcher *oot_startup_dispatch_create(OotRuntimeImage
 OOT_MEMORY_API OotStartupDispatcher *oot_startup_dispatch_create_sdk(OotRuntimeImage *image,
     OotStartupContext *context, OotPauth *pauth, const OotStartupProgram *program,
     uint64_t retirement_limit, uint32_t *error);
+/* Separate hybrid profile: flags RAW_IMAGE|SDK_RUNTIME|NATIVE_RUNTIME and a
+ * native-enabled SDK context. Descriptors select trusted built-in handler IDs,
+ * never guest-address casts or serialized native pointers. */
+OOT_MEMORY_API OotStartupDispatcher *oot_startup_dispatch_create_native(OotRuntimeImage *image,
+    OotStartupContext *context, OotPauth *pauth, const OotStartupProgram *program,
+    uint64_t work_limit, uint32_t *error);
+/* Install copied, sorted, disjoint original-body bindings before begin. Body
+ * hashes remain checked across yields. Goal/stage entries may not be covered.
+ * Calls intercept only canonical entries, before PAC or original retirement;
+ * entering an interior stops. Both original instructions and native calls
+ * consume work/quantum, but native calls never increment retired or stages. */
+/* The incoming LR must be a distinct, canonical, selected return entry; its
+ * exact original word and the replacement body are checked before effects. */
+OOT_MEMORY_API int oot_startup_dispatch_set_native_functions(OotStartupDispatcher *dispatcher,
+    const OotNativeFunction *functions, size_t count, uint32_t *error);
+OOT_MEMORY_API uint64_t oot_startup_dispatch_native_calls(const OotStartupDispatcher *dispatcher);
 /* Install a copied goal only before begin on an idle SDK dispatcher. Without a
  * goal SDK execution remains a diagnostic prefix, never completed startup. */
 OOT_MEMORY_API int oot_startup_dispatch_set_sdk_goal(OotStartupDispatcher *dispatcher,

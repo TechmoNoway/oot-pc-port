@@ -3,6 +3,7 @@
 
 #include "arm64_lift.h"
 #include "runtime_image.h"
+#include "sdk_native.h"
 
 #define OOT_STARTUP_CONTEXT_VERSION 1u
 #define OOT_STARTUP_DEBUG_LIMIT 4096u
@@ -15,6 +16,7 @@
 #define OOT_SDK_NO_ALIAS_EXTRA 16u
 #define OOT_SDK_PAGE_ALLOCATION 32u
 #define OOT_SDK_OBSERVED_MAIN_TLR 64u
+#define OOT_SDK_NATIVE_FUNCTIONS 128u
 
 typedef struct OotStartupContext OotStartupContext;
 
@@ -95,6 +97,11 @@ OOT_MEMORY_API OotGuestMemory *oot_startup_context_memory(OotStartupContext *con
 OOT_MEMORY_API OotRuntimeImage *oot_startup_context_image(OotStartupContext *context);
 OOT_MEMORY_API uint64_t oot_startup_context_tls_pointer(const OotStartupContext *context);
 OOT_MEMORY_API uint64_t oot_startup_context_heap_size(const OotStartupContext *context);
+OOT_MEMORY_API int oot_startup_context_native_enabled(const OotStartupContext *context);
+/* Borrowed read-only native implementation state; captures stay private. */
+OOT_MEMORY_API const OotSdkNative *oot_startup_context_native(const OotStartupContext *context);
+OOT_MEMORY_API int oot_startup_context_native_call(OotStartupContext *context, uint32_t id,
+    OotArm64State *state, OotSdkNativeReport *report);
 OOT_MEMORY_API int oot_startup_context_initial_state(const OotStartupContext *context,
     uint64_t entry, OotArm64State *state);
 

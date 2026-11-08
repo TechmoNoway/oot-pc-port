@@ -18,6 +18,7 @@ struct OotStartupContext {
     OotRuntimeImage *image;
     OotStartupConfig config;
     OotSdkConfig sdk;
+    OotSdkNative native;
     OotGuestMemory memory;
     OotGuestRegion image_regions[64], regions[STARTUP_REGION_LIMIT];
     uint32_t image_kinds[64];
@@ -108,10 +109,12 @@ static OotStartupContext *create_context(OotRuntimeImage *image,
         !valid_span(config->heap_base,config->heap_capacity)) return NULL;
     if (sdk && (sdk->version != OOT_SDK_CONTEXT_VERSION ||
         sdk->flags & ~(OOT_SDK_EXPLICIT_ENTROPY | OOT_SDK_PROCESS_INFO | OOT_SDK_NO_REMOTE_ARENA |
-            OOT_SDK_MAIN_THREAD | OOT_SDK_NO_ALIAS_EXTRA | OOT_SDK_PAGE_ALLOCATION | OOT_SDK_OBSERVED_MAIN_TLR) ||
+            OOT_SDK_MAIN_THREAD | OOT_SDK_NO_ALIAS_EXTRA | OOT_SDK_PAGE_ALLOCATION | OOT_SDK_OBSERVED_MAIN_TLR | OOT_SDK_NATIVE_FUNCTIONS) ||
         ((sdk->flags & (OOT_SDK_NO_REMOTE_ARENA | OOT_SDK_MAIN_THREAD | OOT_SDK_NO_ALIAS_EXTRA |
             OOT_SDK_PAGE_ALLOCATION | OOT_SDK_OBSERVED_MAIN_TLR)) && !(sdk->flags & OOT_SDK_PROCESS_INFO)) ||
-        ((sdk->flags & OOT_SDK_OBSERVED_MAIN_TLR) && !(sdk->flags & OOT_SDK_MAIN_THREAD)))) return NULL;
+        ((sdk->flags & OOT_SDK_OBSERVED_MAIN_TLR) && !(sdk->flags & OOT_SDK_MAIN_THREAD)) ||
+        ((sdk->flags & OOT_SDK_NATIVE_FUNCTIONS) &&
+         (sdk->flags & (OOT_SDK_MAIN_THREAD | OOT_SDK_PROCESS_INFO)) != (OOT_SDK_MAIN_THREAD | OOT_SDK_PROCESS_INFO)))) return NULL;
     if (sdk && (sdk->flags & OOT_SDK_OBSERVED_MAIN_TLR) &&
         (config->tls_size < 0x114 || config->main_thread_handle > UINT32_C(0x3fffffff))) return NULL;
     if (sdk && (sdk->flags & OOT_SDK_MAIN_THREAD) &&
@@ -176,6 +179,12 @@ static OotStartupContext *create_context(OotRuntimeImage *image,
     c->references = 1; c->config = *config;
     c->fixed_memory = fixed_memory;
     if (sdk) { c->sdk = *sdk; c->sdk_enabled = 1; }
+    if (sdk && (sdk->flags & OOT_SDK_NATIVE_FUNCTIONS)) {
+        const OotNativeConfig native_config={OOT_SDK_NATIVE_VERSION,0,0,1,sdk->main_thread_id};
+        if (!oot_sdk_native_init(&c->native,&native_config)) {
+            free(c); if (error) *error=OOT_STARTUP_CONTEXT_BAD_ARGUMENT; return NULL;
+        }
+    }
     if (!oot_runtime_retain(image)) { free(c); if (error) *error = OOT_STARTUP_CONTEXT_BAD_IMAGE; return NULL; }
     c->image = image; c->image_count = memory->count;
     memcpy(c->image_regions,memory->regions,memory->count*sizeof(*memory->regions));
@@ -247,6 +256,28 @@ OotGuestMemory *oot_startup_context_memory(OotStartupContext *c) { return valid_
 OotRuntimeImage *oot_startup_context_image(OotStartupContext *c) { return c ? c->image : NULL; }
 uint64_t oot_startup_context_tls_pointer(const OotStartupContext *c) { return c ? c->config.tls_base : 0; }
 uint64_t oot_startup_context_heap_size(const OotStartupContext *c) { return c ? c->heap_size : 0; }
+int oot_startup_context_native_enabled(const OotStartupContext *c)
+{ return c && c->sdk_enabled && !!(c->sdk.flags & OOT_SDK_NATIVE_FUNCTIONS); }
+const OotSdkNative *oot_startup_context_native(const OotStartupContext *c)
+{ return oot_startup_context_native_enabled(c) ? &c->native : NULL; }
+
+int oot_startup_context_native_call(OotStartupContext *c, uint32_t id,
+    OotArm64State *state, OotSdkNativeReport *report)
+{
+    OotSdkNative next;
+    OotArm64State result;
+    int status;
+    if (!oot_startup_context_native_enabled(c)) return OOT_NATIVE_UNSUPPORTED;
+    if (!state || !valid_memory(c) || state->pc%4 || state->pc>=STARTUP_ADDRESS_LIMIT ||
+        (state->nzcv & UINT32_C(0x0fffffff))) return OOT_NATIVE_FAULT;
+    status=oot_sdk_native_prepare(&c->native,id,state,&c->memory,&next,&result,report);
+    if (status!=OOT_NATIVE_IMPLEMENTED) return status;
+    if (result.pc!=state->x[30] || result.sp!=state->sp || result.nzcv!=state->nzcv ||
+        memcmp(result.x+1,state->x+1,30*sizeof(*state->x)) ||
+        (!oot_sdk_native_returns_value(id) && result.x[0]!=state->x[0])) return OOT_NATIVE_FAULT;
+    c->native=next; *state=result;
+    return OOT_NATIVE_IMPLEMENTED;
+}
 
 int oot_startup_context_system(OotStartupContext *c, uint32_t word, OotArm64State *state)
 {
@@ -255,6 +286,13 @@ int oot_startup_context_system(OotStartupContext *c, uint32_t word, OotArm64Stat
     if (!c || !state || state->pc >= STARTUP_ADDRESS_LIMIT-4 || state->pc % 4 ||
         (state->nzcv & UINT32_C(0x0fffffff)) || !valid_memory(c)) return OOT_STARTUP_SERVICE_FAULT;
     if (!c->sdk_enabled) return OOT_STARTUP_SERVICE_UNSUPPORTED;
+    if ((word & UINT32_C(0xfffff0ff)) == UINT32_C(0xd50330bf)) {
+        unsigned option=(word>>8)&15u;
+        if (!oot_startup_context_native_enabled(c) || !(option&3u)) return OOT_STARTUP_SERVICE_UNSUPPORTED;
+        if (!oot_memory_barrier(&c->memory,option)) return OOT_STARTUP_SERVICE_FAULT;
+        result=*state; result.pc+=4; *state=result;
+        return OOT_STARTUP_SERVICE_IMPLEMENTED;
+    }
     if ((word & UINT32_C(0xbfa07c00)) == UINT32_C(0x88a07c00)) {
         uint32_t rs = (word >> 16) & 31u, rn = (word >> 5) & 31u;
         unsigned size = word & UINT32_C(0x40000000) ? 8u : 4u;
