@@ -4,6 +4,9 @@
 #include "arm64_lift.h"
 #include "runtime_image.h"
 #include "sdk_native.h"
+#include "native_platform.h"
+#include "native_services.h"
+#include "startup_vector.h"
 
 #define OOT_STARTUP_CONTEXT_VERSION 1u
 #define OOT_STARTUP_DEBUG_LIMIT 4096u
@@ -17,8 +20,16 @@
 #define OOT_SDK_PAGE_ALLOCATION 32u
 #define OOT_SDK_OBSERVED_MAIN_TLR 64u
 #define OOT_SDK_NATIVE_FUNCTIONS 128u
+#define OOT_SDK_INITIALIZATION 256u
 
 typedef struct OotStartupContext OotStartupContext;
+
+typedef struct OotStartupProtectionStats {
+    uint64_t readonly_bytes, locked_bytes, permission_updates, permission_locks;
+} OotStartupProtectionStats;
+OOT_MEMORY_API int oot_startup_context_protection_stats(const OotStartupContext *context,
+    OotStartupProtectionStats *stats);
+
 
 /* Explicit experimental NSO process model, not a recovered Switch 2 ABI.
  * The image supplies a guarded stack. TLS is a zeroed private buffer without
@@ -84,7 +95,9 @@ typedef struct OotStartupServiceReport {
 
 /* Single owner thread; copies config/region metadata and retains its image.
  * All transfers must use this backend instance. Borrowed views and pointers
- * expire at final destroy. No concurrent service or metadata access is allowed. */
+ * expire at final destroy. Heap/protection changes invalidate cached region
+ * records; reacquire the current backend table after each mapping operation.
+ * No concurrent service or metadata access is allowed. */
 OOT_MEMORY_API OotStartupContext *oot_startup_context_create(OotRuntimeImage *image,
     const OotStartupConfig *config, uint32_t *error);
 OOT_MEMORY_API OotStartupContext *oot_startup_context_create_sdk(OotRuntimeImage *image,
@@ -97,6 +110,13 @@ OOT_MEMORY_API OotGuestMemory *oot_startup_context_memory(OotStartupContext *con
 OOT_MEMORY_API OotRuntimeImage *oot_startup_context_image(OotStartupContext *context);
 OOT_MEMORY_API uint64_t oot_startup_context_tls_pointer(const OotStartupContext *context);
 OOT_MEMORY_API uint64_t oot_startup_context_heap_size(const OotStartupContext *context);
+/* Separate initialization provider model; requires native functions. */
+OOT_MEMORY_API int oot_startup_context_init_enabled(const OotStartupContext *context);
+OOT_MEMORY_API int oot_startup_context_handler_valid(const OotStartupContext *context, uint32_t id);
+/* Integer X0 return only. Typed FP providers have separately checked D0 effects. */
+OOT_MEMORY_API int oot_startup_context_returns_value(const OotStartupContext *context, uint32_t id);
+OOT_MEMORY_API const OotNativePlatform *oot_startup_context_platform(const OotStartupContext *context);
+OOT_MEMORY_API const OotNativeServices *oot_startup_context_services(const OotStartupContext *context);
 OOT_MEMORY_API int oot_startup_context_native_enabled(const OotStartupContext *context);
 /* Borrowed read-only native implementation state; captures stay private. */
 OOT_MEMORY_API const OotSdkNative *oot_startup_context_native(const OotStartupContext *context);
@@ -114,6 +134,12 @@ OOT_MEMORY_API int oot_startup_context_initial_state(const OotStartupContext *co
  * other GetInfo, permission changes, exceptions and scheduling stop. */
 OOT_MEMORY_API int oot_startup_context_service(OotStartupContext *context,
     uint32_t id, OotArm64State *state, OotStartupServiceReport *report);
+/* INIT-only bit-preserving SIMD pair transfers. Preview reads but never commits;
+ * the dispatcher compares full GPR and vector results before retirement. */
+OOT_MEMORY_API const OotStartupVectorState *oot_startup_context_vectors(const OotStartupContext *context);
+OOT_MEMORY_API int oot_startup_context_vector_preview(OotStartupContext *context, uint32_t word,
+    const OotArm64State *state, OotArm64State *result, OotStartupVectorState *next);
+OOT_MEMORY_API int oot_startup_context_vector_step(OotStartupContext *context, uint32_t word, OotArm64State *state);
 /* SDK-only TPIDRRO_EL0/TPIDR_EL0 and scalar CAS operations. CAS32/CAS64 use
  * the same serialized backend and complete read/write preflight as other
  * transfers. Supported words retire one instruction; faults retire nothing.

@@ -9,12 +9,17 @@
 #define OOT_STARTUP_RAW_IMAGE 1u
 #define OOT_STARTUP_SDK_RUNTIME 2u
 #define OOT_STARTUP_NATIVE_RUNTIME 4u
+#define OOT_STARTUP_INIT_RUNTIME 8u
+#define OOT_STARTUP_HOST_LINKED 16u
 #define OOT_STARTUP_MAX_NATIVE_FUNCTIONS 64u
+#define OOT_STARTUP_INIT_MAX_NATIVE_FUNCTIONS 4096u
 #define OOT_STARTUP_MAX_INSTRUCTIONS 16384u
 #define OOT_STARTUP_MAX_SPANS 256u
 #define OOT_STARTUP_MAX_RETIRED UINT64_C(100000000)
 #define OOT_STARTUP_SDK_MAX_INSTRUCTIONS 65536u
 #define OOT_STARTUP_SDK_MAX_SPANS 1024u
+#define OOT_STARTUP_INIT_MAX_INSTRUCTIONS 524288u
+#define OOT_STARTUP_INIT_MAX_SPANS 8192u
 #define OOT_STARTUP_SDK_MAX_RETIRED UINT64_C(1000000000)
 #define OOT_STARTUP_SDK_GOAL_VERSION 1u
 #define OOT_STARTUP_SDK_MAX_STAGES 32u
@@ -22,7 +27,7 @@
 typedef int (*OotStartupRun)(OotArm64State *, OotGuestMemory *, const OotPauth *, uint64_t, uint64_t *);
 enum OotStartupInstructionKind {
     OOT_STARTUP_NORMAL = 0, OOT_STARTUP_BRANCH = 1, OOT_STARTUP_INDIRECT = 2,
-    OOT_STARTUP_SVC = 3, OOT_STARTUP_UNSUPPORTED = 4, OOT_STARTUP_SYSTEM = 5
+    OOT_STARTUP_SVC = 3, OOT_STARTUP_UNSUPPORTED = 4, OOT_STARTUP_SYSTEM = 5, OOT_STARTUP_VECTOR = 6
 };
 /* Direct branches use next_a=target and next_b=fallthrough (both target for
  * unconditional branches). Indirect targets use two zero fields. Normal/SVC
@@ -34,6 +39,13 @@ typedef struct OotStartupInstruction {
     uint64_t next_a, next_b;
     OotStartupRun run;
 } OotStartupInstruction;
+typedef struct OotStartupFastFunction {
+    uint64_t entry;
+    uint32_t size;
+    uint8_t sha256[32];
+    OotStartupRun run;
+} OotStartupFastFunction;
+
 typedef struct OotStartupSpan {
     uint64_t entry;
     uint32_t size;
@@ -88,6 +100,17 @@ typedef struct OotSdkGoal {
     const uint64_t *stages;
 } OotSdkGoal;
 
+/* Host boot requires complete original DT_INIT bodies, not registration flags.
+ * Source-bound body entry and authenticated return delimit actual completion. */
+typedef struct OotStartupConstructor {
+    uint64_t entry, body_entry, return_pc;
+    uint32_t size;
+    uint8_t sha256[32];
+} OotStartupConstructor;
+OOT_MEMORY_API int oot_startup_dispatch_set_constructors(OotStartupDispatcher *dispatcher,
+    const OotStartupConstructor *constructors, size_t count);
+OOT_MEMORY_API uint32_t oot_startup_dispatch_constructors_completed(const OotStartupDispatcher *dispatcher);
+
 /* Separate trusted-native startup prefix contract. The raw-image flag is an
  * explicit compilation/provenance declaration, bound to the package body hash;
  * it does not infer a startup ABI from arbitrary image bytes. All code metadata
@@ -107,8 +130,24 @@ OOT_MEMORY_API OotStartupDispatcher *oot_startup_dispatch_create_sdk(OotRuntimeI
 OOT_MEMORY_API OotStartupDispatcher *oot_startup_dispatch_create_native(OotRuntimeImage *image,
     OotStartupContext *context, OotPauth *pauth, const OotStartupProgram *program,
     uint64_t work_limit, uint32_t *error);
+/* Separate initialization profile: flags 15 and an initialization-enabled
+ * native SDK context. Up to 4096 copied function bindings may intercept exact
+ * entries outside the selected instruction table. Each complete body is
+ * checked at registration and again before its actual call. Program spans
+ * retain their per-quantum checks; the earlier native profile still requires
+ * selected entries, its 64-function cap and all-body checks across yields. */
+OOT_MEMORY_API OotStartupDispatcher *oot_startup_dispatch_create_init(OotRuntimeImage *image,
+    OotStartupContext *context, OotPauth *pauth, const OotStartupProgram *program,
+    uint64_t work_limit, uint32_t *error);
+OOT_MEMORY_API int oot_startup_dispatch_set_fast_functions(OotStartupDispatcher *dispatcher,
+    const OotStartupFastFunction *functions, size_t count);
+OOT_MEMORY_API uint64_t oot_startup_dispatch_host_steps(const OotStartupDispatcher *dispatcher);
+OOT_MEMORY_API uint64_t oot_startup_dispatch_fast_calls(const OotStartupDispatcher *dispatcher);
+OOT_MEMORY_API OotStartupDispatcher *oot_startup_dispatch_create_host(OotRuntimeImage *image,
+    OotStartupContext *context,OotPauth *pauth,const OotStartupProgram *program,
+    uint64_t limit,uint32_t *error);
 /* Install copied, sorted, disjoint original-body bindings before begin. Body
- * hashes remain checked across yields. Goal/stage entries may not be covered.
+ * hashes follow the profile's checks above. Goal/stage entries may not be covered.
  * Calls intercept only canonical entries, before PAC or original retirement;
  * entering an interior stops. Both original instructions and native calls
  * consume work/quantum, but native calls never increment retired or stages. */

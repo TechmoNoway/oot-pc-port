@@ -77,6 +77,25 @@ OOT_MEMORY_API int oot_memory_load_rcpc(OotGuestMemory *memory, uint64_t address
  * order does not model every permitted weak-memory outcome or guest threads. */
 OOT_MEMORY_API int oot_memory_compare_exchange(OotGuestMemory *memory, uint64_t address,
     unsigned size, unsigned sp_base, uint64_t expected, uint64_t desired, uint64_t *observed);
+/* Initialization-only LDADD W/X backend: one naturally aligned complete
+ * READ|WRITE transfer under the same lock as every other backend access.
+ * Return the old zero-extended value and add modulo the selected width.
+ * Failure preserves output and all bytes. The stronger serialized Normal-
+ * memory order covers admitted relaxed/acquire-release variants, without a
+ * claim of exhaustive weak-memory equivalence. observed must be private and
+ * nonaliasing with backing/metadata; SP bases require 16-byte alignment. */
+OOT_MEMORY_API int oot_memory_fetch_add(OotGuestMemory *memory, uint64_t address,
+    unsigned size, unsigned sp_base, uint64_t addend, uint64_t *observed);
+/* Same W/X preflight, serialization and fault isolation, with old|operand. */
+OOT_MEMORY_API int oot_memory_fetch_or(OotGuestMemory *memory,uint64_t address,
+    unsigned size,unsigned sp_base,uint64_t operand,uint64_t *observed);
+OOT_MEMORY_API int oot_memory_fetch_clear(OotGuestMemory *memory,uint64_t address,
+    unsigned size,unsigned sp_base,uint64_t operand,uint64_t *observed);
+/* Separate naturally aligned STLR B/H/W/X backend. No read permission is
+ * needed; the complete little-endian write is serialized with all transfers.
+ * All bytes remain unchanged on faults. Earlier scalar limits are unchanged. */
+OOT_MEMORY_API int oot_memory_store_release(OotGuestMemory *memory, uint64_t address,
+    unsigned size, unsigned sp_base, uint64_t value);
 /* Paired 4/8-byte elements use whole-pair preflight; outputs must be distinct.
  * No element, register output, or writeback is committed on a rejected pair. */
 OOT_MEMORY_API int oot_memory_load_pair(OotGuestMemory *memory, uint64_t address, unsigned element_size,

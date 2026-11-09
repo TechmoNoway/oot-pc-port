@@ -240,6 +240,51 @@ int oot_memory_compare_exchange(OotGuestMemory *memory, uint64_t address,
     return ok;
 }
 
+static int fetch_update(OotGuestMemory *memory, uint64_t address,
+    unsigned size, unsigned sp_base, uint64_t operand, uint64_t *observed,unsigned operation)
+{
+    int ok;
+    const unsigned access=OOT_MEMORY_READ | OOT_MEMORY_WRITE;
+    AcquireSRWLockExclusive(&transfer_lock);
+    if (!memory || memory->valid!=1 || !observed || sp_base>1 || (size!=4 && size!=8))
+        ok=fail(memory,address,size,access,OOT_MEMORY_CONFIGURATION,address);
+    else if (address%size || (sp_base && address%16))
+        ok=fail(memory,address,size,access,OOT_MEMORY_ALIGNMENT,address);
+    else {
+        ok=check(memory,address,size,access);
+        if (ok) {
+            uint64_t old=read_bytes(memory,address,size);
+            /* Unsigned host addition and byte truncation provide exact W/X
+             * modulo arithmetic, including an arbitrary high addend. */
+            write_bytes(memory,address,size,operation==1 ? old|operand:operation==2 ? old&~operand:old+operand);
+            *observed=old;
+        }
+    }
+    ReleaseSRWLockExclusive(&transfer_lock);
+    return ok;
+}
+
+int oot_memory_fetch_add(OotGuestMemory *memory,uint64_t address,unsigned size,unsigned sp_base,uint64_t operand,uint64_t *observed)
+{ return fetch_update(memory,address,size,sp_base,operand,observed,0); }
+int oot_memory_fetch_or(OotGuestMemory *memory,uint64_t address,unsigned size,unsigned sp_base,uint64_t operand,uint64_t *observed)
+{ return fetch_update(memory,address,size,sp_base,operand,observed,1); }
+int oot_memory_fetch_clear(OotGuestMemory *memory,uint64_t address,unsigned size,unsigned sp_base,uint64_t operand,uint64_t *observed)
+{ return fetch_update(memory,address,size,sp_base,operand,observed,2); }
+
+int oot_memory_store_release(OotGuestMemory *memory, uint64_t address,
+    unsigned size, unsigned sp_base, uint64_t value)
+{
+    int ok;
+    AcquireSRWLockExclusive(&transfer_lock);
+    if (!memory || memory->valid!=1 || sp_base>1 || (size!=1 && size!=2 && size!=4 && size!=8))
+        ok=fail(memory,address,size,OOT_MEMORY_WRITE,OOT_MEMORY_CONFIGURATION,address);
+    else if (address%size || (sp_base && address%16))
+        ok=fail(memory,address,size,OOT_MEMORY_WRITE,OOT_MEMORY_ALIGNMENT,address);
+    else ok=store(memory,address,size,value);
+    ReleaseSRWLockExclusive(&transfer_lock);
+    return ok;
+}
+
 int oot_memory_load_record(OotGuestMemory *memory, uint64_t address, uint8_t *bytes, unsigned size)
 {
     uint8_t captured[OOT_MEMORY_RECORD_LIMIT];

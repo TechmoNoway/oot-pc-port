@@ -2,7 +2,15 @@
 
 Development is organized around complete capabilities and measured blocker cohorts. A milestone includes its dependent instruction/runtime changes, verifier integration, synthetic native evidence, fresh private surveys, documentation and a reviewed commit/push on `dev`. The assistant completes these substeps autonomously within the authorized scope and reports the result at the milestone boundary. Small instruction families no longer require separate user prompts or separate releases.
 
-## Current milestone: hybrid native SDK logging
+## Current milestone: SDK initialization and host-linked boot
+
+The [SDK initialization profile](sdk-initialization.md) supplies owned platform and startup providers while retaining original SDK Start, application startup, module constructors and the exact nnMain transition. Its [acceleration extension](startup-acceleration.md) adds sealed split translation units, incremental native builds, checked whole-function leaves and a separate offline-linked boot scaffold. Original rtld text cannot execute on that linked package. Raw flags 1/3/7/15 remain separate diagnostics.
+
+The final `build/milestones/sdk-initialization-v1/` run passes all 36 stages with a matching source fingerprint: 573 Python tests without skips, seven CTest groups and 283,401 common native/reference comparisons per compiler. Fresh static surveys retain all prior outcomes. The six preceding raw/SDK/logging experiments reproduce their original ordered trace digests.
+
+Both new compiler runs complete the three original module constructor bodies exactly once, observe seven required stage entries and stop at the actual original nnMain transition before executing its body. Each retires 1,521,646 original and 51 scaffold instructions, with 15 native calls and 13 accelerated leaf calls. Accelerated and diagnostic single-step execution agree on the complete ordered trace digest for both compilers. This establishes the declared initialization experiment; graphics, filesystem mounts, other SDK consumers and gameplay remain further work.
+
+## Preceding hybrid native SDK logging
 
 The [native SDK boundary](native-sdk.md) retains the checked ARM64 translator and replaces a coherent logging family with owned host implementations. Four native operations cover initialization, destination, default-observer enablement and the common log-emission boundary; nine guarded APIs stop unsupported callbacks and opaque logger objects before effects. SDK functions outside this family remain original. OE initialization is observed through actual original entry retirement and is not replaced with an empty return.
 
@@ -32,8 +40,8 @@ From the repository root, with the project environment, MSVC build, GCC and pinn
 
 ```powershell
 .venv\Scripts\python.exe -B tools/run_milestone.py `
-  --config config/milestones/native-sdk.json `
-  --output build/milestones/native-sdk-v1
+  --config config/milestones/sdk-initialization.json `
+  --output build/milestones/sdk-initialization-v1
 ```
 
 Choose a fresh output directory for each run. The configuration selects the native build, prepared inputs, preceding survey baselines, GCC factory test modules, expected report artifacts and an explicit startup diagnostic stop. It contains paths and check selections, never keys or captured game bytes. `--native-only` runs the synthetic portion without private game inputs or baseline files. The full startup configuration includes experimental original-code execution; the separate builder requires `--execute` when used directly.

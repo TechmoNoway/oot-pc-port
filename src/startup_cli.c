@@ -16,6 +16,8 @@ const OotSdkConfig *oot_startup_compiled_sdk_config(void);
 const OotSdkGoal *oot_startup_compiled_sdk_goal(void);
 const OotNativeFunction *oot_startup_compiled_native_functions(size_t *count);
 uint64_t oot_startup_compiled_original_oe_entry(void);
+const OotStartupFastFunction *oot_startup_compiled_fast_functions(size_t *count);
+const OotStartupConstructor *oot_startup_compiled_constructors(size_t *count);
 
 typedef struct TraceFile {
     FILE *file;
@@ -91,7 +93,7 @@ int oot_startup_cli(int argc, char **argv)
     trace.original_oe_entry=oot_startup_compiled_original_oe_entry();
     const OotSdkConfig *compiled_sdk=oot_startup_compiled_sdk_config();
     OotSdkConfig sdk={0};
-    int native_stop=0;
+    int native_stop=0,fast_functions=0;
     uint64_t maximum=compiled_sdk ? OOT_STARTUP_SDK_MAX_RETIRED : OOT_STARTUP_MAX_RETIRED;
     if (argc < 5 || strcmp(argv[3],"--trace")) goto usage;
     package=argv[2]; trace_path=argv[4];
@@ -104,6 +106,7 @@ int oot_startup_cli(int argc, char **argv)
             if (!strcmp(argv[i+1],"compact")) trace.compact=1;
             else if (strcmp(argv[i+1],"full")) goto usage;
         }
+        else if (!strcmp(argv[i],"--fast-functions") && !strcmp(argv[i+1],"1")) fast_functions=1;
         else goto usage;
     }
     image=oot_runtime_open(package,message,sizeof(message));
@@ -134,7 +137,9 @@ int oot_startup_cli(int argc, char **argv)
     if (!context) { fprintf(stderr,"Startup context rejected: %" PRIu32 "\n",error); goto cleanup; }
     pauth=oot_pauth_create(OOT_PAUTH_QARMA5_VA39,NULL);
     if (!pauth) { fputs("Startup PAC context failed.\n",stderr); goto cleanup; }
-    dispatcher=oot_startup_context_native_enabled(context) ? oot_startup_dispatch_create_native(image,context,pauth,program,limit,&error) :
+    dispatcher=(program->flags&OOT_STARTUP_HOST_LINKED) ? oot_startup_dispatch_create_host(image,context,pauth,program,limit,&error) :
+        oot_startup_context_init_enabled(context) ? oot_startup_dispatch_create_init(image,context,pauth,program,limit,&error) :
+        oot_startup_context_native_enabled(context) ? oot_startup_dispatch_create_native(image,context,pauth,program,limit,&error) :
         compiled_sdk ? oot_startup_dispatch_create_sdk(image,context,pauth,program,limit,&error) :
         oot_startup_dispatch_create(image,context,pauth,program,limit,&error);
     if (!dispatcher) { fprintf(stderr,"Startup selection rejected: %" PRIu32 "\n",error); goto cleanup; }
@@ -147,6 +152,13 @@ int oot_startup_cli(int argc, char **argv)
     }
     if (compiled_sdk && !oot_startup_dispatch_set_sdk_goal(dispatcher,oot_startup_compiled_sdk_goal(),&error)) {
         fprintf(stderr,"SDK goal rejected: %" PRIu32 "\n",error); goto cleanup;
+    }
+    if(program->flags&OOT_STARTUP_HOST_LINKED){size_t n=0;const OotStartupConstructor *c=oot_startup_compiled_constructors(&n);
+        if(!oot_startup_dispatch_set_constructors(dispatcher,c,n)){fputs("Constructor observers rejected.\n",stderr);goto cleanup;}
+    }
+    if(fast_functions){size_t n=0;const OotStartupFastFunction *f=oot_startup_compiled_fast_functions(&n);
+        if(n && !oot_startup_dispatch_set_fast_functions(dispatcher,f,n)){fputs("Fast function registry rejected.\n",stderr);goto cleanup;}
+        if(!oot_startup_context_init_enabled(context))goto cleanup;
     }
     if (!oot_startup_context_initial_state(context,program->entry,&state)) {
         fputs("Startup state initialization rejected.\n",stderr); goto cleanup;
@@ -193,6 +205,12 @@ int oot_startup_cli(int argc, char **argv)
             if (report.pc>=functions[i].entry && report.pc-functions[i].entry<functions[i].size &&
                 report.service==functions[i].id) native_stop=1;
     }
+    if (report.service==0x02 && !native_stop)
+        printf(",\"memory_permission_request\":{\"address\":%" PRIu64 ",\"size\":%" PRIu64 ",\"permission\":%" PRIu32 "}",
+            state.x[0],state.x[1],(uint32_t)state.x[2]);
+    if (report.service==0x03 && !native_stop)
+        printf(",\"memory_attribute_request\":{\"address\":%" PRIu64 ",\"size\":%" PRIu64 ",\"mask\":%" PRIu32 ",\"attribute\":%" PRIu32 "}",
+            state.x[0],state.x[1],(uint32_t)state.x[2],(uint32_t)state.x[3]);
     if (report.service==0x29 && !native_stop)
         printf(",\"get_info_request\":{\"info_id\":%" PRIu64 ",\"handle\":%" PRIu32 ",\"sub_id\":%" PRIu64 "}",
             state.x[1],(uint32_t)state.x[2],state.x[3]);
@@ -217,6 +235,25 @@ int oot_startup_cli(int argc, char **argv)
             oot_startup_dispatch_native_calls(dispatcher),native->calls,native->logging_initializations,
             native->destination_updates,native->log_records,native->log_bytes);
     }
+    if (oot_startup_context_init_enabled(context)) {
+        OotStartupProtectionStats protection={0};
+        (void)oot_startup_context_protection_stats(context,&protection);
+        const OotNativePlatform *platform=oot_startup_context_platform(context);
+        const OotNativeServices *services=oot_startup_context_services(context);
+        printf(",\"sdk_init_providers\":true,\"init_stats\":{\"platform_initialized\":%u,\"platform_calls\":%" PRIu64
+            ",\"platform_initializations\":%" PRIu64 ",\"cpu_boost_mode\":%u,\"service_calls\":%" PRIu64
+            ",\"aoc_initialized\":%u,\"err_initialized\":%u,\"diag_initialized\":%u,\"pctl_initialized\":%u"
+            ",\"fs_mode\":%u,\"local_access_log\":%u,\"result_handled\":%u,\"clock_initialized\":%u,\"heap_size\":%" PRIu64
+            ",\"relro_readonly_bytes\":%" PRIu64 ",\"relro_locked_bytes\":%" PRIu64
+            ",\"permission_updates\":%" PRIu64 ",\"permission_locks\":%" PRIu64 "}",
+            platform->initialized,platform->calls,platform->initialization_calls,platform->cpu_boost_mode,services->calls,
+            services->aoc_initialized,services->err_initialized,services->diag_initialized,services->pctl_initialized,
+            services->fs_mode,services->local_access_log,services->result_handled,services->clock_initialized,
+            oot_startup_context_heap_size(context),protection.readonly_bytes,protection.locked_bytes,
+            protection.permission_updates,protection.permission_locks);
+    }
+    if(program->flags&OOT_STARTUP_HOST_LINKED)printf(",\"host_linked\":true,\"host_scaffold_retired\":%" PRIu64 ",\"original_retired\":%" PRIu64 ",\"constructors_completed\":%" PRIu32,oot_startup_dispatch_host_steps(dispatcher),report.retired-oot_startup_dispatch_host_steps(dispatcher),oot_startup_dispatch_constructors_completed(dispatcher));
+    if(fast_functions)printf(",\"fast_function_calls\":%" PRIu64,oot_startup_dispatch_fast_calls(dispatcher));
     printf(",\"trace_mode\":\"%s\",\"trace_rows\":%" PRIu64 ",\"trace_steps\":%" PRIu64 ",\"trace_sha256\":\"%s\"",
         trace.compact?"compact":"full",trace.rows,trace.steps,digest_hex);
     puts("}");

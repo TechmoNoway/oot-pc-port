@@ -13,6 +13,41 @@ from pauth_lifter import decode_pauth_instruction
 
 FORMAT = "oot-startup-audit"
 MAX_INSTRUCTIONS = 65536
+MAX_INIT_INSTRUCTIONS = 524288
+MAX_INIT_ENTRIES = 16384
+
+def _decode_entry_word(syntax,word,pc,sdk,sdk_init):
+    decoded=next(iter(syntax.engine.disasm(struct.pack('<I',word),pc)),None)
+    mnemonic=decoded.mnemonic if decoded else '.word'
+    operands=decoded.op_str if decoded else ''
+    form,error=None,None
+    try:
+        if sdk_init:
+            from sdk_init_instructions import decode_sdk_init_instruction
+            instruction=decode_sdk_init_instruction(word,pc)
+        elif sdk:
+            from sdk_instructions import decode_sdk_instruction
+            instruction=decode_sdk_instruction(word,pc)
+        else:instruction=decode_pauth_instruction(word,pc)
+        form=instruction.form
+    except InputError as failure:error=str(failure)
+    return mnemonic,operands,flow_kind(word,mnemonic),form,error
+
+class StartupDecodeCache:
+    """Owned in-memory memo of pure decodes, never serialized authority.
+
+    PC, exact original word and profile are all part of the key. Roots, native
+    boundaries, edges, provenance and original-byte reads are rebuilt each time.
+    """
+    def __init__(self,limit=MAX_INIT_INSTRUCTIONS*2):
+        require(type(limit) is int and 1<=limit<=MAX_INIT_INSTRUCTIONS*2,'invalid decode cache capacity')
+        self._rows={};self.limit=limit;self.hits=self.misses=0
+    def decode(self,syntax,word,pc,sdk,sdk_init):
+        key=(word,pc,sdk,sdk_init)
+        if key in self._rows:self.hits+=1;return self._rows[key]
+        self.misses+=1;row=_decode_entry_word(syntax,word,pc,sdk,sdk_init)
+        if len(self._rows)<self.limit:self._rows[key]=row
+        return row
 REFERENCES = [
     {"url": "https://github.com/Atmosphere-NX/Atmosphere/blob/master/docs/components/modules/loader.md",
      "scope": "Switch loader convention: process entry is the first loaded NSO; not a recovered Switch 2 register ABI"},
@@ -97,13 +132,15 @@ def _entry_evidence(module, syntax):
                 cross_module_initialization_order_proven=False)
 
 
-def _entry_graph(modules, entry, syntax, max_instructions, linked=True, extra_entries=(), sdk=False, native_entries=()):
-    require(isinstance(native_entries,(list,tuple)) and len(native_entries)<=64 and
+def _entry_graph(modules, entry, syntax, max_instructions, linked=True, extra_entries=(), sdk=False, native_entries=(), sdk_init=False,decode_cache=None):
+    require(type(sdk_init) is bool,'SDK initialization must be an explicit boolean')
+    require(decode_cache is None or isinstance(decode_cache,StartupDecodeCache),'invalid owned startup decode cache')
+    require(isinstance(native_entries,(list,tuple)) and len(native_entries)<=(4096 if sdk_init else 64) and
             len(set(native_entries))==len(native_entries) and
             all(type(pc) is int and _owner(modules,pc) is not None for pc in native_entries) and
-            (sdk or not native_entries),'invalid native SDK boundaries')
+            (sdk or not native_entries) and (not sdk_init or sdk),'invalid native SDK boundaries')
     native_entries=set(native_entries)
-    require(isinstance(extra_entries, (list, tuple)) and len(extra_entries) <= (1024 if sdk else 256),
+    require(isinstance(extra_entries, (list, tuple)) and len(extra_entries) <= (MAX_INIT_ENTRIES if sdk_init else 1024 if sdk else 256),
             "too many additional startup entries")
     require(all(type(pc) is int and _owner(modules, pc) is not None for pc in extra_entries),
             "additional startup entry is not aligned mapped text")
@@ -126,25 +163,18 @@ def _entry_graph(modules, entry, syntax, max_instructions, linked=True, extra_en
             frontier.append(dict(address=pc, kind="unmapped_code_target", distance=distance))
             continue
         word = module.unpack("<I", pc - module.base)[0]
-        decoded = next(iter(syntax.engine.disasm(struct.pack("<I", word), pc)), None)
-        mnemonic = decoded.mnemonic if decoded else ".word"
-        flow = flow_kind(word, mnemonic)
+        mnemonic,operands,flow,form,semantic_error=(decode_cache.decode(syntax,word,pc,sdk,sdk_init) if decode_cache is not None else
+            _decode_entry_word(syntax,word,pc,sdk,sdk_init))
         row = dict(address=pc, module=module.name, offset=pc - module.base,
                    word=word, mnemonic=mnemonic,
-                   operands=decoded.op_str if decoded else "", distance=distance,
+                   operands=operands, distance=distance,
                    edges=[], semantic_supported=False)
         reason = None
-        try:
-            if sdk:
-                from sdk_instructions import decode_sdk_instruction
-                ins = decode_sdk_instruction(word, pc)
-            else:
-                ins = decode_pauth_instruction(word, pc)
-        except InputError as error:
-            row["semantic_error"] = str(error)
+        if semantic_error is not None:
+            row["semantic_error"] = semantic_error
             reason = "unsupported_semantics"
         else:
-            row.update(semantic_supported=True, form=ins.form)
+            row.update(semantic_supported=True, form=form)
         if mnemonic == "svc":
             svc = (word >> 5) & 0xffff
             row["service_immediate"] = svc
@@ -191,10 +221,11 @@ def _entry_graph(modules, entry, syntax, max_instructions, linked=True, extra_en
                 complete_function_closure_proven=False)
 
 
-def audit_entry(linker, max_instructions=8192, extra_entries=(), sdk=False, native_entries=()):
+def audit_entry(linker, max_instructions=8192, extra_entries=(), sdk=False, native_entries=(), sdk_init=False,decode_cache=None):
     """Inspect raw or linked entry text; unresolved data never becomes a target."""
-    require(type(max_instructions) is int and 1 <= max_instructions <= MAX_INSTRUCTIONS,
-            "startup instruction limit must be 1-65536")
+    require(type(sdk_init) is bool and (not sdk_init or sdk), 'SDK initialization requires explicit SDK mode')
+    require(type(max_instructions) is int and 1 <= max_instructions <= (MAX_INIT_INSTRUCTIONS if sdk_init else MAX_INSTRUCTIONS),
+            "startup instruction limit exceeds its explicit profile")
     require(linker.modules, "startup audit requires modules")
     syntax = Decoder()
     modules = linker.modules
@@ -208,7 +239,7 @@ def audit_entry(linker, max_instructions=8192, extra_entries=(), sdk=False, nati
                     for m in modules],
                 entry_evidence=_entry_evidence(modules[0], syntax),
                 entry_graph=_entry_graph(modules, modules[0].base, syntax, max_instructions,
-                                         linked=linker.applied, extra_entries=extra_entries, sdk=sdk,native_entries=native_entries))
+                                         linked=linker.applied, extra_entries=extra_entries, sdk=sdk,native_entries=native_entries,sdk_init=sdk_init,decode_cache=decode_cache))
 
 
 def audit_startup(linker, max_instructions=8192, sample_limit=32):

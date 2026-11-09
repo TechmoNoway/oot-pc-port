@@ -9,6 +9,7 @@ import shutil
 import secrets
 import subprocess
 import sys
+import time
 
 from input_formats import InputError, require, inspect_npdm
 from lifter_validation import find_cmake
@@ -32,27 +33,64 @@ def prepared_npdm(prepared):
     return raw
 
 
-def build_native(bundle, mode, native_cache=None):
-    source=bundle/'startup.c'
+def build_native(bundle, mode, native_cache=None, sdk_init=False):
+    from startup_sources import cached_sources
+    started=time.perf_counter()
+    native_cache=native_cache or bundle/'native'
+    before_units={p.name:p.stat().st_mtime_ns for p in (native_cache/'sources').glob('*.c')}
+    sources,split=cached_sources(bundle,native_cache)
+    source=next(p for p in sources if p.name=='startup.c')
     log=bundle/'compile.log'
     def run(argv):
         with log.open('a',encoding='utf-8') as stream:
-            r=subprocess.run(list(map(str,argv)),cwd=ROOT,stdout=stream,stderr=subprocess.STDOUT,timeout=300)
+            r=subprocess.run(list(map(str,argv)),cwd=ROOT,stdout=stream,stderr=subprocess.STDOUT,timeout=900 if sdk_init else 300)
         require(r.returncode==0,f'startup compilation failed; see {log}')
     if mode=='gcc':
         compiler=shutil.which('gcc') or 'C:/msys64/ucrt64/bin/gcc.exe'
         require(Path(compiler).is_file(),'GCC is unavailable')
         exe=bundle/'oot-startup.exe'
         names=('main','startup_cli','startup_context','startup_dispatch','guest_memory',
-               'runtime_image','host_win32','pauth','checked_read','sdk_native')
-        run([compiler,'-std=c17','-O2','-Wall','-Wextra','-Wpedantic','-Werror',
-             '-DOOT_HAS_STARTUP_PROGRAM','-D_CRT_SECURE_NO_WARNINGS','-D_WIN32_WINNT=0x0A00',
-             '-I',ROOT/'src',*[ROOT/'src'/(n+'.c') for n in names],source,'-lbcrypt','-o',exe])
+               'runtime_image','host_win32','pauth','checked_read','sdk_native','native_platform','native_services','native_math','startup_vector','startup_float','startup_init_atomic')
+        if split:
+            from concurrent.futures import ThreadPoolExecutor
+            import threading
+            objects=native_cache/'objects';objects.mkdir(parents=True,exist_ok=True)
+            flags=['-std=c17','-O2','-Wall','-Wextra','-Wpedantic','-Werror','-DOOT_HAS_STARTUP_PROGRAM','-D_CRT_SECURE_NO_WARNINGS','-D_WIN32_WINNT=0x0A00','-I',str(ROOT/'src')]
+            headers=b''.join(p.name.encode()+p.read_bytes() for p in sorted((ROOT/'src').glob('*.h')))
+            lift_headers=b''.join((ROOT/'src'/n).read_bytes() for n in ('arm64_lift.h','guest_memory.h','pauth.h'))
+            tool=subprocess.check_output([compiler,'--version'])+hashlib.sha256(Path(compiler).read_bytes()).digest()
+            paths=[ROOT/'src'/(n+'.c') for n in names]+sources
+            def compile_one(path):
+                key=hashlib.sha256(tool+repr(flags).encode()+(lift_headers if path.name.startswith('lift_') else headers)+path.read_bytes()).hexdigest()
+                obj=objects/(path.stem+'-'+key+'.o')
+                reused=obj.exists()
+                if not reused:
+                    partial=obj.with_suffix('.'+secrets.token_hex(6)+'.partial')
+                    try:
+                        run([compiler,*flags,'-c',path,'-o',partial]);partial.replace(obj)
+                    finally:partial.unlink(missing_ok=True)
+                return obj,reused
+            with ThreadPoolExecutor(max_workers=4) as pool:compiled=list(pool.map(compile_one,paths))
+            objs=[p for p,_ in compiled];reused_objects=sum(hit for _,hit in compiled);compiled_objects=len(compiled)-reused_objects
+            response=bundle/'link.rsp'
+            response.write_text('\n'.join('"'+p.resolve().as_posix()+'"' for p in objs)+'\n',encoding='utf-8')
+            run([compiler,'@'+str(response),'-lbcrypt','-o',exe])
+        else:
+            run([compiler,'-std=c17','-O2','-Wall','-Wextra','-Wpedantic','-Werror',
+                 '-DOOT_HAS_STARTUP_PROGRAM','-D_CRT_SECURE_NO_WARNINGS','-D_WIN32_WINNT=0x0A00',
+                 '-I',ROOT/'src',*[ROOT/'src'/(n+'.c') for n in names],*sources,'-lbcrypt','-o',exe])
         identity=subprocess.check_output([compiler,'--version'],text=True).splitlines()[0]
     else:
         cmake=find_cmake();native=native_cache or bundle/'native'
+        native.mkdir(parents=True,exist_ok=True)
+        names='\n'.join(p.resolve().as_posix() for p in sources if p!=source);delimiter='='
+        while ']'+delimiter+']' in names:delimiter+='='
+        parts='set(OOT_STARTUP_PARTS\n'+''.join('['+delimiter+'['+p.resolve().as_posix()+']'+delimiter+']\n' for p in sources if p!=source)+')\n'
+        parts_file=(native/'startup-parts.cmake').resolve()
+        if not parts_file.exists() or parts_file.read_text(encoding='utf-8')!=parts:parts_file.write_text(parts,encoding='utf-8')
+        before_objects={str(p):p.stat().st_mtime_ns for p in native.rglob('*.obj')}
         run([cmake,'-S',ROOT,'-B',native,'-G','Visual Studio 17 2022','-A','x64',
-             '-DOOT_STARTUP_SOURCE='+str(source),'-DPython3_EXECUTABLE='+sys.executable])
+             '-DOOT_STARTUP_SOURCE='+str(source),'-DOOT_STARTUP_PARTS=','-DOOT_STARTUP_PARTS_FILE='+str(parts_file),'-DPython3_EXECUTABLE='+sys.executable])
         run([cmake,'--build',native,'--config','Release','--target','oot-pc-port'])
         exe=native/'Release/oot-pc-port.exe'
         identities=list((native/'CMakeFiles').glob('*/CMakeCCompiler.cmake'))
@@ -62,14 +100,24 @@ def build_native(bundle, mode, native_cache=None):
         require('MSVC' in identity,'startup CMake build must exercise MSVC')
         saved=bundle/'oot-startup.exe'
         shutil.copyfile(exe,saved);exe=saved
+        after_objects=list(native.rglob('*.obj'))
+        compiled_objects=sum(before_objects.get(str(p))!=p.stat().st_mtime_ns for p in after_objects)
+        reused_objects=len(after_objects)-compiled_objects
     require(exe.is_file(),'startup executable was not produced')
+    stats=dict(format='oot-startup-build',compiler=identity,seconds=time.perf_counter()-started,
+        generated_units=len(sources),changed_units=sum(before_units.get(p.name)!=p.stat().st_mtime_ns for p in sources),
+        split_sources=split,source_manifest_sha256=hashlib.sha256((bundle/'sources.json').read_bytes()).hexdigest() if split else None,
+        compiled_objects=compiled_objects if split or mode!='gcc' else None,
+        reused_objects=reused_objects if split or mode!='gcc' else None)
+    (bundle/'build.json').write_text(json.dumps(stats,indent=2)+'\n',encoding='utf-8')
     return exe,identity
 
 
-def execute(exe,bundle,limit,quantum,trace_mode='compact',entropy_file=None):
+def execute(exe,bundle,limit,quantum,trace_mode='compact',entropy_file=None,fast_functions=False):
     trace=bundle/'trace.jsonl'
     args=[str(exe),'--boot-images',str(bundle/'startup.ootmem'),'--trace',str(trace),
           '--limit',str(limit),'--quantum',str(quantum),'--trace-mode',trace_mode]
+    if fast_functions:args+=['--fast-functions','1']
     if entropy_file is not None:args+=['--entropy-file',str(entropy_file)]
     r=subprocess.run(args,capture_output=True,text=True,timeout=600)
     (bundle/'execution.log').write_text(r.stdout+r.stderr,encoding='utf-8')
@@ -95,7 +143,7 @@ def execute(exe,bundle,limit,quantum,trace_mode='compact',entropy_file=None):
     return report
 
 
-def run(prepared,output,compiler='cmake',execute_code=False,expand_targets=0,limit=1000000,quantum=1000,initial_entries=(),trace_mode='compact',sdk=False,entropy_file=None,native_sdk=False):
+def run(prepared,output,compiler='cmake',execute_code=False,expand_targets=0,limit=1000000,quantum=1000,initial_entries=(),trace_mode='compact',sdk=False,entropy_file=None,native_sdk=False,sdk_init=False,host_linked=False,fast_functions=False,native_cache=None):
     require(os.name=='nt','native startup builds require Windows')
     output=build_destination(output)
     require(not output.exists(),'choose a fresh startup output directory')
@@ -105,6 +153,9 @@ def run(prepared,output,compiler='cmake',execute_code=False,expand_targets=0,lim
     require(execute_code or not expand_targets,'target expansion requires explicit execution')
     require(sdk or entropy_file is None,'private SDK entropy requires SDK opt-in')
     require(type(native_sdk) is bool and (not native_sdk or sdk),'native SDK requires SDK opt-in')
+    require(type(sdk_init) is bool and (not sdk_init or native_sdk),'SDK initialization requires native SDK opt-in')
+    require(not host_linked or sdk_init,'host boot requires SDK init')
+    require(not fast_functions or sdk_init,'fast functions require SDK init')
     if entropy_file is not None:
         entropy_file=build_destination(entropy_file)
         require(len(entropy_file.read_bytes())==32,'SDK entropy input must contain exactly 32 bytes')
@@ -112,7 +163,10 @@ def run(prepared,output,compiler='cmake',execute_code=False,expand_targets=0,lim
     if sdk and execute_code and entropy_file is None:
         entropy_file=output/'process-entropy.bin'
         with entropy_file.open('xb') as stream:stream.write(secrets.token_bytes(32))
+    native_cache=build_destination(Path(native_cache)) if native_cache is not None else output/'native-cache'
     extras=list(initial_entries);iterations=[]
+    from startup_audit import StartupDecodeCache
+    decode_cache=StartupDecodeCache() if sdk_init else None
     for index in range(expand_targets+1):
         raw=Linker(load_prepared(prepared))
         bundle=output/f'iteration-{index:02d}'
@@ -124,18 +178,19 @@ def run(prepared,output,compiler='cmake',execute_code=False,expand_targets=0,lim
             require(npdm is not None,'SDK runtime requires verified NPDM metadata')
             sdk_metadata=inspect_sdk_npdm(npdm)
         manifest=prepare_bundle(raw,bundle,extra_entries=extras,
-            max_instructions=32768 if sdk else 8192,sdk_metadata=sdk_metadata,native_sdk=native_sdk,
-            shared_package=output/'iteration-00/startup.ootmem' if index else None,
+            max_instructions=524288 if sdk_init else 32768 if sdk else 8192,sdk_metadata=sdk_metadata,native_sdk=native_sdk,sdk_init=sdk_init,host_linked=host_linked,
+            shared_package=output/'iteration-00/startup.ootmem' if index else None,decode_cache=decode_cache,
             **({'stack_size':metadata['main_thread_stack_size']} if metadata else {}))
         manifest['npdm']=metadata
         manifest['selection']['stack_size_source']='verified-npdm' if metadata else 'explicit-synthetic-default'
         (bundle/'manifest.json').write_text(json.dumps(manifest,indent=2)+'\n',encoding='utf-8')
-        exe,identity=build_native(bundle,compiler,output/'native-cache' if compiler=='cmake' else None)
+        exe,identity=build_native(bundle,compiler,native_cache,sdk_init=sdk_init)
         row=dict(iteration=index,compiler=identity,executable=str(exe),bundle=str(bundle),
+                 build=json.loads((bundle/'build.json').read_text(encoding='utf-8')),
                  executable_sha256=hashlib.sha256(exe.read_bytes()).hexdigest(),
                  additional_entries=list(extras),selection=manifest['selection'])
         if execute_code:
-            report=execute(exe,bundle,limit,quantum,trace_mode,entropy_file)
+            report=execute(exe,bundle,limit,quantum,trace_mode,entropy_file,fast_functions)
             row['execution']=report
         iterations.append(row)
         (output/'run.json').write_text(json.dumps(dict(schema_version=1,format='oot-startup-experiment',
@@ -164,7 +219,7 @@ def run(prepared,output,compiler='cmake',execute_code=False,expand_targets=0,lim
     final=dict(schema_version=1,format='oot-startup-experiment',status='diagnostic-complete',
         process_abi='experimental',switch2_startup_abi_proven=False,
         startup_completed=False,game_code_executed=bool(execute_code and any(r['execution']['retired'] for r in iterations)),
-        sdk_runtime=sdk,native_sdk=native_sdk,sdk_initialization_completed=bool(execute_code and iterations[-1]['execution'].get('sdk_initialization_completed')),
+        sdk_runtime=sdk,native_sdk=native_sdk,sdk_init_providers=sdk_init,host_linked=host_linked,fast_functions=fast_functions,sdk_initialization_completed=bool(execute_code and iterations[-1]['execution'].get('sdk_initialization_completed')),
         entropy_input_sha256=hashlib.sha256(entropy_file.read_bytes()).hexdigest() if entropy_file else None,
         iterations=iterations)
     (output/'run.json').write_text(json.dumps(final,indent=2)+'\n',encoding='utf-8')
@@ -182,10 +237,13 @@ def main():
     p.add_argument('--trace-mode',choices=('compact','full'),default='compact')
     p.add_argument('--sdk',action='store_true',help='explicit opt-in experimental SDK process model and initialization goal')
     p.add_argument('--native-sdk',action='store_true',help='separate original-body-bound native SDK function profile; requires --sdk')
+    p.add_argument('--sdk-init',action='store_true',help='explicit native SDK initialization providers; requires --sdk --native-sdk')
+    p.add_argument('--host-linked',action='store_true')
+    p.add_argument('--fast-functions',action='store_true')
     p.add_argument('--entropy-file',type=Path,help='private 32-byte process entropy under ignored build/')
     a=p.parse_args()
     try:
-        r=run(a.prepared,a.output,a.compiler,a.execute,a.expand_targets,a.limit,a.quantum,a.extra_entry,a.trace_mode,a.sdk,a.entropy_file,a.native_sdk)
+        r=run(a.prepared,a.output,a.compiler,a.execute,a.expand_targets,a.limit,a.quantum,a.extra_entry,a.trace_mode,a.sdk,a.entropy_file,a.native_sdk,a.sdk_init,a.host_linked,a.fast_functions)
         last=r['iterations'][-1]
         print(json.dumps(dict(output=str(a.output),status=r['status'],iterations=len(r['iterations']),
             game_code_executed=r['game_code_executed'],startup_completed=False,
