@@ -120,6 +120,23 @@ OOT_MEMORY_API int oot_memory_store_record(OotGuestMemory *memory, uint64_t addr
  * native output must be private/nonaliasing. Earlier transfer limits remain. */
 OOT_MEMORY_API int oot_memory_load_native_input(OotGuestMemory *memory, uint64_t address,
     uint8_t *bytes, unsigned size);
+#define OOT_MEMORY_SERVICE_WRITE_LIMIT (8u*1024u*1024u)
+#define OOT_MEMORY_SERVICE_PATH_LIMIT 4096u
+typedef struct OotServiceWrite {
+    uint64_t address;
+    const uint8_t *bytes;
+    uint32_t size;
+} OotServiceWrite;
+/* Separate application-service transfers, never instruction/probe grants.
+ * At most two disjoint guest outputs, each <=8 MiB, total <=8 MiB+64.
+ * Whole-range preflight precedes every write under the common transfer lock.
+ * Descriptor/data buffers must be live, immutable, private and nonaliasing with
+ * guest backing or memory metadata. A failure preserves every guest byte. */
+OOT_MEMORY_API int oot_memory_store_service(OotGuestMemory *memory,const OotServiceWrite *writes,unsigned count);
+/* Snapshot a NUL-terminated path under the same lock; capacity includes NUL.
+ * Maximum capacity is 4097. Failure preserves both private native outputs. */
+OOT_MEMORY_API int oot_memory_load_service_path(OotGuestMemory *memory,uint64_t address,
+    char *bytes,unsigned capacity,unsigned *length);
 /* Native-SDK named DMB options 1/2/3,5/6/7,9/10/11,13/14/15 participate in
  * the same backend transfer lock as every scalar/pair/record/CAS operation.
  * This Normal-memory total order is stronger than the selected Arm barriers;

@@ -7,7 +7,74 @@
 #include <string.h>
 _Static_assert(sizeof(float)==4 && sizeof(double)==8 && FLT_RADIX==2 && FLT_EVAL_METHOD==0,"IEEE scalar evaluation required");
 static int bit_length(uint64_t value){int n=0;while(value){++n;value>>=1;}return n;}
+
+int oot_startup_float_from_integer(unsigned width,unsigned source_width,unsigned is_unsigned,
+    uint64_t input,uint64_t *result,uint32_t *exceptions)
+{
+    if(!result || !exceptions || (width!=32 && width!=64) ||
+       (source_width!=32 && source_width!=64) || is_unsigned>1)return 1;
+    uintptr_t a=(uintptr_t)result,b=(uintptr_t)exceptions;
+    if(a<=b ? b-a<sizeof(*result):a-b<sizeof(*exceptions))return 1;
+    uint64_t mask=source_width==32 ? UINT64_C(0xffffffff):UINT64_MAX;
+    input&=mask;
+    unsigned negative=!is_unsigned && !!(input&(UINT64_C(1)<<(source_width-1)));
+    uint64_t magnitude=negative ? (UINT64_C(0)-input)&mask:input,bits=0;uint32_t flags=0;
+    if(magnitude){
+        unsigned fraction=width==32 ? 23:52,bias=width==32 ? 127:1023;
+        unsigned exponent=(unsigned)bit_length(magnitude)-1;
+        uint64_t significand;
+        if(exponent<=fraction)significand=magnitude<<(fraction-exponent);
+        else{
+            unsigned shift=exponent-fraction;
+            uint64_t remainder=magnitude&((UINT64_C(1)<<shift)-1),half=UINT64_C(1)<<(shift-1);
+            significand=magnitude>>shift;
+            if(remainder)flags=16;
+            if(remainder>half || (remainder==half && (significand&1)))++significand;
+            if(significand==(UINT64_C(1)<<(fraction+1))){significand>>=1;++exponent;}
+        }
+        bits=(uint64_t)negative<<(width-1) | (uint64_t)(exponent+bias)<<fraction |
+            (significand&((UINT64_C(1)<<fraction)-1));
+    }
+    *result=bits;*exceptions=flags;return 0;
+}
 typedef struct FloatWide { uint64_t w[4]; } FloatWide;
+int oot_startup_float_to_integer(unsigned width,unsigned destination_width,unsigned is_unsigned,
+    unsigned fpcr,uint64_t input,uint64_t *result,uint32_t *exceptions)
+{
+    if(!result || !exceptions || (width!=32 && width!=64) ||
+       (destination_width!=32 && destination_width!=64) || is_unsigned>1 || (fpcr&~(1u<<24)))return 1;
+    uintptr_t a=(uintptr_t)result,b=(uintptr_t)exceptions;
+    if(a<=b ? b-a<sizeof(*result):a-b<sizeof(*exceptions))return 1;
+    unsigned fraction=width==32 ? 23:52,bias=width==32 ? 127:1023;
+    uint64_t fraction_mask=(UINT64_C(1)<<fraction)-1,exponent_mask=width==32 ? 255u:2047u;
+    unsigned negative=(unsigned)((input>>(width-1))&1u);
+    unsigned exponent=(unsigned)((input>>fraction)&exponent_mask);
+    uint64_t significand=input&fraction_mask,magnitude=0,value=0;
+    uint64_t mask=destination_width==32 ? UINT64_C(0xffffffff):UINT64_MAX;
+    uint64_t bound=is_unsigned ? (negative ? 0:mask):
+        (negative ? UINT64_C(1)<<(destination_width-1):(UINT64_C(1)<<(destination_width-1))-1);
+    uint32_t flags=0;int invalid=0,inexact=0;
+    if(exponent==exponent_mask){
+        flags=1;
+        value=significand ? 0:(negative ? (is_unsigned ? 0:(UINT64_C(1)<<(destination_width-1))):bound);
+    }else if(fpcr && !exponent && significand){flags=128;value=0;}
+    else{
+        if(exponent)significand|=UINT64_C(1)<<fraction;
+        int power=(int)(exponent ? exponent:1)-(int)bias-(int)fraction;
+        if(power>=0){
+            if(power>=64 || significand>(UINT64_MAX>>(unsigned)power))invalid=!!significand;
+            else magnitude=significand<<(unsigned)power;
+        }else{
+            unsigned shift=(unsigned)-power;
+            if(shift>=64){inexact=!!significand;magnitude=0;}
+            else{magnitude=significand>>shift;inexact=!!(significand&((UINT64_C(1)<<shift)-1));}
+        }
+        if(magnitude>bound)invalid=1;
+        if(invalid){flags=1;value=negative ? (is_unsigned ? 0:(UINT64_C(1)<<(destination_width-1))):bound;}
+        else{flags=inexact ? 16u:0;value=negative ? (UINT64_C(0)-magnitude)&mask:magnitude;}
+    }
+    *result=value;*exceptions=flags;return 0;
+}
 static int wide_compare(const FloatWide *a,const FloatWide *b){
     for(int n=3;n>=0;--n)if(a->w[n]!=b->w[n])return a->w[n]<b->w[n] ? -1:1;
     return 0;

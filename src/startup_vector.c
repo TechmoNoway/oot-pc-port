@@ -51,6 +51,9 @@ static unsigned vector_family(uint32_t word)
 }
 
 int oot_startup_vector_kind(uint32_t word) { return vector_family(word)!=0; }
+int oot_startup_application_vector_kind(uint32_t word)
+{ uint32_t fixed=word&UINT32_C(0x7fbefc00);
+  return fixed==UINT32_C(0x1e220000) ? 1:fixed==UINT32_C(0x1e380000) ? 2:0; }
 
 static uint64_t vector_movi(uint32_t word)
 {
@@ -117,9 +120,9 @@ static int vector_fault(OotGuestMemory *memory, uint64_t address, unsigned size,
     return OOT_STARTUP_VECTOR_FAULT;
 }
 
-int oot_startup_vector_prepare(const OotStartupVectorState *state, uint32_t word,
+static int vector_prepare(const OotStartupVectorState *state, uint32_t word,
     const OotArm64State *registers, OotGuestMemory *memory,
-    OotStartupVectorState *next, OotArm64State *result, OotStartupVectorWrite *write)
+    OotStartupVectorState *next, OotArm64State *result, OotStartupVectorWrite *write,int application)
 {
     const void *pointers[]={state,registers,next,result,write};
     const size_t sizes[]={sizeof(*state),sizeof(*registers),sizeof(*next),sizeof(*result),sizeof(*write)};
@@ -133,12 +136,32 @@ int oot_startup_vector_prepare(const OotStartupVectorState *state, uint32_t word
     if (!vector_ownership(pointers,sizes,sizeof(sizes)/sizeof(sizes[0]),memory))
         return OOT_STARTUP_VECTOR_FAULT;
     family=vector_family(word);
+    if(application && oot_startup_application_vector_kind(word))family=19u+(unsigned)oot_startup_application_vector_kind(word);
     if (!family) return OOT_STARTUP_VECTOR_UNSUPPORTED;
     if (registers->pc%4 || registers->pc>=VECTOR_ADDRESS_LIMIT-4 ||
         registers->sp%16 || (registers->nzcv & UINT32_C(0x0fffffff)) || (state->fpcr&~UINT32_C(0x1000000)) ||
         (state->fpsr&~UINT32_C(0x0800009f))) return OOT_STARTUP_VECTOR_FAULT;
     rn=(word>>5)&31u;rt=word&31u;rt2=(word>>10)&31u;
     candidate=*state;output=*registers;output.pc+=4;
+    if(family==20){
+        uint64_t value=0;uint32_t flags=0;
+        unsigned width=(word&UINT32_C(0x400000)) ? 64:32,source_width=(word>>31) ? 64:32;
+        int status=oot_startup_float_from_integer(width,source_width,(word>>16)&1u,
+            oot_arm64_read(registers,rn,source_width,0),&value,&flags);
+        if(status)return status;
+        candidate.fpsr|=flags;memset(candidate.q[rt],0,16);
+        for(unsigned n=0;n<width/8;++n)candidate.q[rt][n]=(uint8_t)(value>>(8*n));
+        *next=candidate;*result=output;*write=planned;return OOT_STARTUP_VECTOR_IMPLEMENTED;
+    }
+    if(family==21){
+        uint64_t input=0,value=0;uint32_t flags=0;
+        unsigned width=(word&UINT32_C(0x400000)) ? 64:32,destination_width=(word>>31) ? 64:32;
+        for(unsigned n=0;n<width/8;++n)input|=(uint64_t)state->q[rn][n]<<(8*n);
+        int status=oot_startup_float_to_integer(width,destination_width,(word>>16)&1u,state->fpcr,input,&value,&flags);
+        if(status)return status;
+        candidate.fpsr|=flags;oot_arm64_write(&output,rt,destination_width,0,value);
+        *next=candidate;*result=output;*write=planned;return OOT_STARTUP_VECTOR_IMPLEMENTED;
+    }
     if(family==16){
         unsigned status=!!(word&32u),read=!!(word&UINT32_C(0x200000));
         uint64_t mask=status ? UINT64_C(0x0800009f):UINT64_C(0x1000000),value;
@@ -323,3 +346,12 @@ int oot_startup_vector_prepare(const OotStartupVectorState *state, uint32_t word
     *next=candidate;*result=output;*write=planned;
     return OOT_STARTUP_VECTOR_IMPLEMENTED;
 }
+
+int oot_startup_vector_prepare(const OotStartupVectorState *state,uint32_t word,
+    const OotArm64State *registers,OotGuestMemory *memory,OotStartupVectorState *next,
+    OotArm64State *result,OotStartupVectorWrite *write)
+{ return vector_prepare(state,word,registers,memory,next,result,write,0); }
+int oot_startup_application_vector_prepare(const OotStartupVectorState *state,uint32_t word,
+    const OotArm64State *registers,OotGuestMemory *memory,OotStartupVectorState *next,
+    OotArm64State *result,OotStartupVectorWrite *write)
+{ return vector_prepare(state,word,registers,memory,next,result,write,1); }

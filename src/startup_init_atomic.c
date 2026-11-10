@@ -13,13 +13,19 @@ int oot_startup_init_atomic_kind(uint32_t word)
     return OOT_STARTUP_INIT_ATOMIC_NONE;
 }
 
-int oot_startup_init_atomic_step(uint32_t word, OotArm64State *registers,
-    OotGuestMemory *memory)
+int oot_startup_application_atomic_kind(uint32_t word)
+{
+    uint32_t add=word&UINT32_C(0xbfe0fc00);
+    return add==UINT32_C(0xb8a00000) ? OOT_STARTUP_APP_LDADDA:
+        add==UINT32_C(0xb8600000) ? OOT_STARTUP_APP_LDADDL:0;
+}
+
+static int atomic_step(uint32_t word, OotArm64State *registers,
+    OotGuestMemory *memory,int kind)
 {
     OotArm64State output;
     uint64_t address,source,old;
     unsigned rn=(word>>5)&31u,rt=word&31u,rs=(word>>16)&31u,size;
-    int kind=oot_startup_init_atomic_kind(word);
     if (!kind) return 1;
     if (!registers || !memory || memory->valid!=1 || registers->pc%4 ||
         registers->pc>=INIT_ATOMIC_ADDRESS_LIMIT-4 || registers->sp%16 ||
@@ -46,3 +52,7 @@ int oot_startup_init_atomic_step(uint32_t word, OotArm64State *registers,
     *registers=output;
     return 0;
 }
+int oot_startup_init_atomic_step(uint32_t word,OotArm64State *registers,OotGuestMemory *memory)
+{ return atomic_step(word,registers,memory,oot_startup_init_atomic_kind(word)); }
+int oot_startup_application_atomic_step(uint32_t word,OotArm64State *registers,OotGuestMemory *memory)
+{ return atomic_step(word,registers,memory,oot_startup_application_atomic_kind(word)); }

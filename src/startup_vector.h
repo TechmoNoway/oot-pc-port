@@ -34,6 +34,9 @@ OOT_MEMORY_API void oot_startup_vector_init(OotStartupVectorState *state);
  * nearest rounding and cumulative FPSR. Other arithmetic/control modes, non-temporal
  * pairs and repeated-destination pair loads remain excluded. */
 OOT_MEMORY_API int oot_startup_vector_kind(uint32_t word);
+/* New non-scaled SCVTF/UCVTF S/D from W/X and FCVTZS/FCVTZU back to W/X;
+ * earlier kind/prepare reject. Kind 1 is from integer, 2 is to integer. */
+OOT_MEMORY_API int oot_startup_application_vector_kind(uint32_t word);
 /* Prepare a private copy and at most one 1/2/4/8/16/32-byte store record. No guest
  * bytes change here. Load operands use one serialized whole-record capture;
  * store probes are preflight only, with an atomic whole-record commit required
@@ -47,5 +50,8 @@ OOT_MEMORY_API int oot_startup_vector_prepare(const OotStartupVectorState *state
     uint32_t word, const OotArm64State *registers, OotGuestMemory *memory,
     OotStartupVectorState *next, OotArm64State *result,
     OotStartupVectorWrite *write);
+OOT_MEMORY_API int oot_startup_application_vector_prepare(const OotStartupVectorState *state,
+    uint32_t word,const OotArm64State *registers,OotGuestMemory *memory,
+    OotStartupVectorState *next,OotArm64State *result,OotStartupVectorWrite *write);
 
 #endif

@@ -18,10 +18,12 @@ from sdk_instructions import decode_sdk_instruction
 XPACLRI=0xd50320ff
 
 
-def sdk_init_atomic_kind(word):
+def sdk_init_atomic_kind(word,application=False):
     if type(word) is not int or not 0<=word<=0xffffffff:return None
     if word&0xbfe0fc00==0xb8200000:return 'ldadd'
     if word&0xbfe0fc00==0xb8e00000:return 'ldaddal'
+    if application and word&0xbfe0fc00==0xb8a00000:return 'ldadda'
+    if application and word&0xbfe0fc00==0xb8600000:return 'ldaddl'
     if word&0xbf20fc00==0xb8203000:return 'ldset'
     if word&0xbf20fc00==0xb8201000:return 'ldclr'
     if word&0x3ffffc00==0x089ffc00:return 'stlr'
@@ -32,8 +34,10 @@ def sdk_init_pointer_kind(word):
     return 'xpaclri' if type(word) is int and word==XPACLRI else None
 
 
-def sdk_init_vector_kind(word):
+def sdk_init_vector_kind(word,application=False):
     if type(word) is not int or not 0<=word<=0xffffffff:return None
+    if application and word&0x7fbefc00==0x1e220000:return 'integer_fp'
+    if application and word&0x7fbefc00==0x1e380000:return 'fp_integer'
     if word&0xffa00c00==0x1e200400:return 'fp_cond_compare'
     if word&0xff800000==0x1f000000:return 'fp_fmadd'
     if word&0xffbffc00==0x1e21c000:return 'fp_sqrt'
@@ -65,17 +69,24 @@ def sdk_init_vector_kind(word):
     return None
 
 
-def decode_sdk_init_instruction(word,pc):
+def decode_sdk_init_instruction(word,pc,application=False):
     require(type(word) is int and 0<=word<=0xffffffff,'initialization instruction must be uint32')
     require(type(pc) is int and 0<=pc<=U64 and pc%4==0,'initialization PC must be aligned uint64')
-    atomic=sdk_init_atomic_kind(word)
+    require(type(application) is bool,'application instruction mode must be explicit')
+    atomic=sdk_init_atomic_kind(word,application)
     if atomic:
         width=(8<<(word>>30)) if atomic=='stlr' else (64 if word>>30==3 else 32)
         return Instruction(pc,word,'sdk_init_atomic',width=width,access_size=width//8,
             rd=word&31,rn=word>>5&31,rm=word>>16&31,
-            operation=('ldadd','ldaddal','stlr','ldset','ldclr').index(atomic))
+            operation=('ldadd','ldaddal','stlr','ldset','ldclr','ldadda','ldaddl').index(atomic))
     if sdk_init_pointer_kind(word):return Instruction(pc,word,'sdk_pointer',width=64,rd=30)
-    vector=sdk_init_vector_kind(word)
+    vector=sdk_init_vector_kind(word,application)
+    if vector=='fp_integer':
+        return Instruction(pc,word,'sdk_init_vector',width=64 if word>>31 else 32,
+            rd=word&31,rn=word>>5&31,immediate=64 if word>>22&1 else 32,condition=word>>16&1,operation=24)
+    if vector=='integer_fp':
+        return Instruction(pc,word,'sdk_init_vector',width=64 if word>>22&1 else 32,
+            rd=word&31,rn=word>>5&31,immediate=64 if word>>31 else 32,condition=word>>16&1,operation=23)
     if vector=='fp_cond_compare':
         return Instruction(pc,word,'sdk_init_vector',width=64 if word>>22&1 else 32,
             rn=word>>5&31,rm=word>>16&31,condition=word>>12&15,nzcv=word&15,operation=22)

@@ -29,13 +29,13 @@ def owner(modules, pc):
     return matches[0]
 
 
-def selection(linker, max_instructions=8192, extra_entries=(), sdk=False, native_entries=(), sdk_init=False,decode_cache=None):
+def selection(linker, max_instructions=8192, extra_entries=(), sdk=False, native_entries=(), sdk_init=False,decode_cache=None,application=False):
     require(not linker.started and not linker.applied, 'startup requires fresh raw, unrelocated images')
     if sdk_init:
         require(type(max_instructions) is int and 1<=max_instructions<=MAX_INIT_INSTRUCTIONS,
                 'SDK initialization selection exceeds its finite row limit')
     graph_limit=min(max_instructions,MAX_INIT_INSTRUCTIONS-16384) if sdk_init else max_instructions
-    audit = audit_entry(linker, graph_limit, extra_entries, sdk=sdk,native_entries=native_entries,sdk_init=sdk_init,decode_cache=decode_cache)
+    audit = audit_entry(linker, graph_limit, extra_entries, sdk=sdk,native_entries=native_entries,sdk_init=sdk_init,decode_cache=decode_cache,application=application)
     nodes = {n['address']: dict(n) for n in audit['entry_graph']['nodes']}
     limit = MAX_INIT_INSTRUCTIONS if sdk_init else 65536 if sdk else 16384
     require(nodes and len(nodes) <= limit, 'invalid startup selection size')
@@ -57,7 +57,9 @@ def selection(linker, max_instructions=8192, extra_entries=(), sdk=False, native
     return audit, [nodes[p] for p in sorted(nodes)]
 
 
-def emit_startup(linker, nodes, package_manifest, config=None, relocation_probes=(), sdk_config=None, sdk_goal=None, native_functions=(), original_oe_entry=0, sdk_init=False, units=None, entry_override=None, host_linked=False, host_constructors=()):
+def emit_startup(linker, nodes, package_manifest, config=None, relocation_probes=(), sdk_config=None, sdk_goal=None, native_functions=(), original_oe_entry=0, sdk_init=False, units=None, entry_override=None, host_linked=False, host_constructors=(), application=False):
+    require(type(application) is bool and (not application or (host_linked and sdk_init and sdk_goal is not None)),
+            'application emission requires host-linked initialization and its original goal')
     require(type(sdk_init) is bool and (not sdk_init or (native_functions and sdk_config is not None)),'SDK initialization requires native providers')
     require(not native_functions or sdk_config is not None,'native functions require SDK model')
     require(type(original_oe_entry) is int and (not original_oe_entry or native_functions) and
@@ -79,7 +81,7 @@ def emit_startup(linker, nodes, package_manifest, config=None, relocation_probes
                 from sdk_instructions import decode_sdk_instruction
                 if sdk_init:
                     from sdk_init_instructions import decode_sdk_init_instruction
-                    i = decode_sdk_init_instruction(word,pc)
+                    i = decode_sdk_init_instruction(word,pc,application=application)
                 else:i = decode_sdk_instruction(word,pc)
             else:
                 i = decode_pauth_instruction(word,pc)
@@ -147,7 +149,7 @@ def emit_startup(linker, nodes, package_manifest, config=None, relocation_probes
         lines.append(f'    {{{constant(pc)}, {size}, {{'+','.join(f'0x{x:02x}' for x in digest)+'}},')
     digest=bytes.fromhex(package_manifest['body_sha256'])
     lines += ['};', 'static const OotStartupProgram oot_startup_program = {',
-              '    OOT_STARTUP_DISPATCH_VERSION, '+('OOT_STARTUP_HOST_LINKED | OOT_STARTUP_SDK_RUNTIME | OOT_STARTUP_NATIVE_RUNTIME | OOT_STARTUP_INIT_RUNTIME' if host_linked else 'OOT_STARTUP_RAW_IMAGE | OOT_STARTUP_SDK_RUNTIME | OOT_STARTUP_NATIVE_RUNTIME | OOT_STARTUP_INIT_RUNTIME' if sdk_init else 'OOT_STARTUP_RAW_IMAGE | OOT_STARTUP_SDK_RUNTIME | OOT_STARTUP_NATIVE_RUNTIME' if native_functions else 'OOT_STARTUP_RAW_IMAGE | OOT_STARTUP_SDK_RUNTIME' if sdk_config is not None else 'OOT_STARTUP_RAW_IMAGE')+', '+constant(entry_override if entry_override is not None else linker.modules[0].base)+',',
+              '    OOT_STARTUP_DISPATCH_VERSION, '+('OOT_STARTUP_APPLICATION | ' if application else '')+('OOT_STARTUP_HOST_LINKED | OOT_STARTUP_SDK_RUNTIME | OOT_STARTUP_NATIVE_RUNTIME | OOT_STARTUP_INIT_RUNTIME' if host_linked else 'OOT_STARTUP_RAW_IMAGE | OOT_STARTUP_SDK_RUNTIME | OOT_STARTUP_NATIVE_RUNTIME | OOT_STARTUP_INIT_RUNTIME' if sdk_init else 'OOT_STARTUP_RAW_IMAGE | OOT_STARTUP_SDK_RUNTIME | OOT_STARTUP_NATIVE_RUNTIME' if native_functions else 'OOT_STARTUP_RAW_IMAGE | OOT_STARTUP_SDK_RUNTIME' if sdk_config is not None else 'OOT_STARTUP_RAW_IMAGE')+', '+constant(entry_override if entry_override is not None else linker.modules[0].base)+',',
               '    {'+','.join(f'0x{x:02x}' for x in digest)+'},',
               f'    oot_startup_words, {len(rows)}, oot_startup_spans, {len(spans)}', '};',
               'OOT_LIFT_EXPORT const OotStartupProgram *oot_startup_compiled_program(void) { return &oot_startup_program; }',
@@ -161,6 +163,7 @@ def emit_startup(linker, nodes, package_manifest, config=None, relocation_probes
         flags='OOT_SDK_PROCESS_INFO | OOT_SDK_NO_REMOTE_ARENA | OOT_SDK_MAIN_THREAD | OOT_SDK_NO_ALIAS_EXTRA | OOT_SDK_PAGE_ALLOCATION | OOT_SDK_OBSERVED_MAIN_TLR'
         if native_functions:flags+=' | OOT_SDK_NATIVE_FUNCTIONS'
         if sdk_init:flags+=' | OOT_SDK_INITIALIZATION'
+        if application:flags+=' | OOT_SDK_APPLICATION'
         lines += ['static const OotSdkConfig oot_sdk_config = { OOT_SDK_CONTEXT_VERSION, '+flags+', {0,0,0,0}, '+', '.join(constant(sdk_config[k]) for k in fields)+' };',
                   'const OotSdkConfig *oot_startup_compiled_sdk_config(void) { return &oot_sdk_config; }']
     else:
@@ -332,18 +335,20 @@ def compact_sdk_init_nodes(entry):
     graph['nodes']=[]
 
 
-def sdk_init_vtable_entries(raw, linked, observed_entries=()):
+def sdk_init_vtable_entries(raw, linked, observed_entries=(), *, module_name="sdk", object_prefix="_ZTVNSt3__1"):
     """Select exact relocation-backed SDK libc++ vtable code-pointer slots.
 
     Original NSO data may become RELRO only after its original protection path.
     These snapshot hints neither seal that memory nor approve live callbacks.
     """
     from sdk_startup_audit import _symbol_record
-    prefix='_ZTVNSt3__1'
+    require((module_name=='sdk' and object_prefix=='_ZTVNSt3__1') or (module_name=='main' and object_prefix is None),
+            'application main selection permits observed neighborhoods only')
+    prefix=object_prefix
     require(not raw.started and not raw.applied and linked.report().get('link_complete') is True,
             'vtable selection requires fresh raw images and a complete independent link')
-    sources=[module for module in raw.modules if module.name=='sdk']
-    snapshots=[module for module in linked.modules if module.name=='sdk']
+    sources=[module for module in raw.modules if module.name==module_name]
+    snapshots=[module for module in linked.modules if module.name==module_name]
     require(len(sources)==len(snapshots)==1,'vtable selection requires exactly one original SDK module')
     source,module=sources[0],snapshots[0]
     require((source.base,source.source_sha256,source.ranges)==(module.base,module.source_sha256,module.ranges) and
@@ -393,7 +398,7 @@ def sdk_init_vtable_entries(raw, linked, observed_entries=()):
         stop=strings.find(b'\0',name_offset)
         require(stop>=0,'vtable original symbol name is unterminated')
         original_name=strings[name_offset:stop].decode('utf-8')
-        if not (original_name.startswith(prefix) or symbol.name.startswith(prefix)):continue
+        if prefix is None or not (original_name.startswith(prefix) or symbol.name.startswith(prefix)):continue
         metadata=_symbol_record(source,index,symbol)
         require(module.symbols[index]==symbol,'vtable linked symbol metadata differs from original bytes')
         if not symbol.section:continue
@@ -465,18 +470,52 @@ def sdk_init_vtable_entries(raw, linked, observed_entries=()):
     entries=sorted(entries)
     return entries,dict(entries=entries,objects=objects,slots=slots,
         unique_potential_targets=len(entries),unrelocated_code_values_ignored=unrelocated,observed_neighbors=neighbors,
-        namespace='SDK libc++ objects and bounded observed code-pointer neighborhoods' if observed_entries else 'SDK defined libc++ std::__1 vtable objects only',
+        namespace=(module_name+' bounded observed code-pointer neighborhoods') if module_name!='sdk' else ('SDK libc++ objects and bounded observed code-pointer neighborhoods' if observed_entries else 'SDK defined libc++ std::__1 vtable objects only'),
         guest_code_executed=False,live_targets_proven=False,runtime_authority_granted=False,
         scope='exact original object and relocation-backed linked pointer selection; original loads and indirect checks remain')
 
 
-def prepare_bundle(linker, output, max_instructions=8192, extra_entries=(), config=None, stack_size=STACK_SIZE, shared_package=None, sdk_metadata=None, native_sdk=False, sdk_init=False, host_linked=False,decode_cache=None):
+def extend_application_selection(linker,merged,application_entry,application_entries,native_entries,linked_targets,decode_cache):
+    # Do not let application discovery redistribute the already-verified
+    # initialization selection or its bounded PLT lookahead.
+    require(isinstance(application_entries,(tuple,list)) and len(application_entries)<=1024,
+            'application diagnostic root limit exceeded')
+    app_roots=tuple(dict.fromkeys((application_entry,*application_entries)))
+    room=min(65536,MAX_INIT_INSTRUCTIONS-len(merged)-512)
+    require(room>=4096,'initialization leaves no bounded application selection room')
+    app_lookahead=[];app_nodes={}
+    for _ in range(8):
+        app_audit,more=selection(linker,room,app_roots+tuple(app_lookahead),sdk=True,
+            native_entries=native_entries,sdk_init=True,decode_cache=decode_cache,application=True)
+        updated=dict(merged)
+        for node in more:
+            pc=node['address']
+            if pc not in updated or ('selection_stop' in updated[pc] and 'selection_stop' not in node) or (not updated[pc].get('semantic_supported') and not updated[pc].get('native_boundary') and node.get('semantic_supported')):updated[pc]=node
+        pcs=sorted(updated)
+        if len(updated)>MAX_INIT_INSTRUCTIONS or 1+sum(b!=a+4 for a,b in zip(pcs,pcs[1:]))>8192:break
+        merged=updated;app_nodes.update({node['address']:node for node in more})
+        targets=sorted({linked_targets[pc] for pc in app_nodes if pc in linked_targets and
+            (linked_targets[pc] not in merged or 'selection_stop' in merged[linked_targets[pc]])})
+        targets=[pc for pc in targets if pc not in app_roots and pc not in app_lookahead and
+            any(m.is_code(pc-m.base) for m in linker.modules)]
+        if not targets:break
+        app_lookahead+=targets
+        if len(app_roots)+len(app_lookahead)>2048:break
+    require(application_entry in merged,'application entry selection is absent')
+    evidence=dict(roots=list(app_roots),selected_rows=len(app_nodes),row_budget=room,
+        static_plt_targets=app_lookahead,original_bytes_only=True,runtime_targets_authorized=False)
+    return merged,evidence
+
+
+def prepare_bundle(linker, output, max_instructions=8192, extra_entries=(), config=None, stack_size=STACK_SIZE, shared_package=None, sdk_metadata=None, native_sdk=False, sdk_init=False, host_linked=False,decode_cache=None,application=False,application_entries=()):
     output=build_destination(Path(output))
     require(not output.exists(), 'choose a fresh startup bundle directory')
     sdk = sdk_metadata is not None
     require(type(native_sdk) is bool and (not native_sdk or sdk),'native SDK requires verified SDK metadata')
     require(type(sdk_init) is bool and (not sdk_init or native_sdk),'SDK initialization requires native SDK')
     require(type(host_linked) is bool and (not host_linked or sdk_init),'host-linked boot requires SDK initialization')
+    require(type(application) is bool and (not application or host_linked),'application execution requires separate host-linked boot')
+    require(application or not application_entries,'application roots require explicit application mode')
     if sdk_init and decode_cache is None:
         from startup_audit import StartupDecodeCache
         decode_cache=StartupDecodeCache()
@@ -496,8 +535,12 @@ def prepare_bundle(linker, output, max_instructions=8192, extra_entries=(), conf
         require(len(extra_entries)<=MAX_INIT_ENTRIES,'constructor and explicit roots exceed SDK initialization limit')
     if native_sdk:
         if sdk_init:
-            from sdk_init_audit import audit_sdk_init
-            native_audit=audit_sdk_init(verified)
+            if application:
+                from application_audit import audit_application
+                native_audit=audit_application(verified)
+            else:
+                from sdk_init_audit import audit_sdk_init
+                native_audit=audit_sdk_init(verified)
         else:
             from native_sdk_audit import audit_native_sdk
             native_audit=audit_native_sdk(verified)
@@ -537,6 +580,13 @@ def prepare_bundle(linker, output, max_instructions=8192, extra_entries=(), conf
         pcs=sorted(updated);spans=1+sum(b!=a+4 for a,b in zip(pcs,pcs[1:]))
         if spans>(8192 if sdk_init else 1024 if sdk else 256):break
         merged=updated;lookahead=proposed
+    application_selection=None
+    application_pointers=None
+    if application:
+        pointer_entries,application_pointers=sdk_init_vtable_entries(linker,verified,application_entries,module_name='main',object_prefix=None)
+        selected_application_entries=tuple(dict.fromkeys((*application_entries,*pointer_entries)))
+        merged,application_selection=extend_application_selection(linker,merged,sdk_goal['goal_entry']['entry'],
+            selected_application_entries,native_entries,linked_targets,decode_cache)
     if sdk_goal:
         # Bind goal markers even before discovery reaches them. These rows stop
         # if reached without all earlier stages; they never skip original code.
@@ -588,7 +638,7 @@ def prepare_bundle(linker, output, max_instructions=8192, extra_entries=(), conf
             total_memory=manifest['backing_bytes']+config['tls_size']+(0x100000000 if sdk_init else config['heap_capacity']),
             main_thread_id=1,main_thread_priority=sdk_metadata['main_thread_priority'],main_thread_core=sdk_metadata['main_thread_core'])
     units={} if sdk_init else None
-    source,summary=emit_startup(emitter,nodes,manifest,config,probes,sdk_config,sdk_goal,native_functions,original_oe_entry,sdk_init,units,entry_override,host_linked,boot['module_order'] if boot else ())
+    source,summary=emit_startup(emitter,nodes,manifest,config,probes,sdk_config,sdk_goal,native_functions,original_oe_entry,sdk_init,units,entry_override,host_linked,boot['module_order'] if boot else (),application)
     summary['sdk_init_providers']=sdk_init
     summary['relative_relocation_probes']=len(probes)
     summary['linked_plt_lookahead_targets']=len(lookahead)
@@ -617,6 +667,15 @@ def prepare_bundle(linker, output, max_instructions=8192, extra_entries=(), conf
         static_plt_lookahead=dict(entries=lookahead,live_targets_proven=False,
             scope='diagnostic linked-snapshot code selection; original stub instructions and runtime target checks remain active'),
         selection_boundaries=[dict(address=n['address'],word=n['word'],reason=n['selection_stop']) for n in nodes if 'selection_stop' in n])
+    if application:
+        report['application_runtime']=True;summary['application_runtime']=True
+        report['application_selection']=application_selection
+        report['application_pointer_selection']=application_pointers
+        report['application_word_boundaries']=[dict(address=n['address'],word=n['word'],
+            module=owner(linker.modules,n['address']).name,
+            source_sha256=owner(linker.modules,n['address']).source_sha256,
+            word_sha256=hashlib.sha256(struct.pack('<I',n['word'])).hexdigest(),
+            semantic_error=n['semantic_error']) for n in nodes if n.get('semantic_error') and not n.get('native_boundary')]
     if host_linked:
         manifest.update(image_phase='host-offline-linked',offline_link_applied_to_package=True)
         summary.update(image_phase='host-offline-linked',host_linked=True)

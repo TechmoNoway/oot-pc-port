@@ -355,3 +355,68 @@ int oot_memory_barrier(OotGuestMemory *memory, uint32_t option)
     ReleaseSRWLockExclusive(&transfer_lock);
     return ok;
 }
+
+static int service_range(OotGuestMemory *memory,uint64_t address,unsigned size,unsigned access)
+{
+    uint64_t done=0;
+    if(!memory || memory->valid!=1 || memory->count>4096 || (memory->count && !memory->regions) || !size)
+        return fail(memory,address,size,access,OOT_MEMORY_CONFIGURATION,address);
+    if((uint64_t)(size-1)>UINT64_MAX-address)return fail(memory,address,size,access,OOT_MEMORY_ADDRESS_WRAP,address);
+    while(done<size){
+        const OotGuestRegion *r=find_region(memory,address+done);
+        if(!r)return fail(memory,address,size,access,OOT_MEMORY_UNMAPPED,address+done);
+        if((r->permissions&access)!=access)return fail(memory,address,size,access,OOT_MEMORY_PERMISSION,address+done);
+        uint64_t step=r->size-(address+done-r->base);
+        if(step>size-done)step=size-done;
+        done+=step;
+    }return 1;
+}
+
+int oot_memory_store_service(OotGuestMemory *memory,const OotServiceWrite *writes,unsigned count)
+{
+    OotServiceWrite captured[2];unsigned total=0;int ok=0;
+    AcquireSRWLockExclusive(&transfer_lock);
+    if(memory)memory->fault=(OotMemoryFault){0};
+    if(!writes || !count || count>2){fail(memory,0,0,OOT_MEMORY_WRITE,OOT_MEMORY_CONFIGURATION,0);goto done;}
+    memcpy(captured,writes,count*sizeof(*writes));
+    for(unsigned n=0;n<count;++n){
+        OotServiceWrite *w=captured+n;
+        if(!w->bytes || !w->size || w->size>OOT_MEMORY_SERVICE_WRITE_LIMIT ||
+           w->size>OOT_MEMORY_SERVICE_WRITE_LIMIT+64-total){fail(memory,w->address,w->size,OOT_MEMORY_WRITE,OOT_MEMORY_CONFIGURATION,w->address);goto done;}
+        if(!service_range(memory,w->address,w->size,OOT_MEMORY_WRITE))goto done;
+        total+=w->size;
+        for(unsigned k=0;k<n;++k){
+            uint64_t a=w->address,b=captured[k].address;
+            if(a<=b ? b-a<w->size:a-b<captured[k].size){fail(memory,a,w->size,OOT_MEMORY_WRITE,OOT_MEMORY_CONFIGURATION,a);goto done;}
+        }
+    }
+    for(unsigned n=0;n<count;++n){
+        unsigned done_bytes=0;OotServiceWrite *w=captured+n;
+        while(done_bytes<w->size){
+            const OotGuestRegion *r=find_region(memory,w->address+done_bytes);
+            size_t at=(size_t)(w->address+done_bytes-r->base),step=(size_t)r->size-at;
+            if(step>w->size-done_bytes)step=w->size-done_bytes;
+            memcpy(r->data+at,w->bytes+done_bytes,step);done_bytes+=(unsigned)step;
+        }
+    }ok=1;
+done:ReleaseSRWLockExclusive(&transfer_lock);return ok;
+}
+
+int oot_memory_load_service_path(OotGuestMemory *memory,uint64_t address,char *bytes,unsigned capacity,unsigned *length)
+{
+    char captured[OOT_MEMORY_SERVICE_PATH_LIMIT+1];unsigned n;int ok=0;
+    AcquireSRWLockExclusive(&transfer_lock);
+    if(memory)memory->fault=(OotMemoryFault){0};
+    if(!bytes || !length || !capacity || capacity>sizeof(captured)){
+        fail(memory,address,capacity,OOT_MEMORY_READ,OOT_MEMORY_CONFIGURATION,address);goto done;
+    }
+    for(n=0;n<capacity;++n){
+        if(n>UINT64_MAX-address){fail(memory,address,capacity,OOT_MEMORY_READ,OOT_MEMORY_ADDRESS_WRAP,address);goto done;}
+        if(!service_range(memory,address+n,1,OOT_MEMORY_READ))goto done;
+        const OotGuestRegion *r=find_region(memory,address+n);
+        captured[n]=(char)r->data[(size_t)(address+n-r->base)];
+        if(!captured[n]){memcpy(bytes,captured,n+1);*length=n;ok=1;goto done;}
+    }
+    fail(memory,address,capacity,OOT_MEMORY_READ,OOT_MEMORY_CONFIGURATION,address);
+done:ReleaseSRWLockExclusive(&transfer_lock);return ok;
+}

@@ -11,6 +11,7 @@
 #define OOT_STARTUP_NATIVE_RUNTIME 4u
 #define OOT_STARTUP_INIT_RUNTIME 8u
 #define OOT_STARTUP_HOST_LINKED 16u
+#define OOT_STARTUP_APPLICATION 32u
 #define OOT_STARTUP_MAX_NATIVE_FUNCTIONS 64u
 #define OOT_STARTUP_INIT_MAX_NATIVE_FUNCTIONS 4096u
 #define OOT_STARTUP_MAX_INSTRUCTIONS 16384u
@@ -146,6 +147,14 @@ OOT_MEMORY_API uint64_t oot_startup_dispatch_fast_calls(const OotStartupDispatch
 OOT_MEMORY_API OotStartupDispatcher *oot_startup_dispatch_create_host(OotRuntimeImage *image,
     OotStartupContext *context,OotPauth *pauth,const OotStartupProgram *program,
     uint64_t limit,uint32_t *error);
+/* Separate flags-62 application prefix: retain the complete initialization
+ * goal, then continue through its original entry instead of stopping there. */
+OOT_MEMORY_API OotStartupDispatcher *oot_startup_dispatch_create_application(OotRuntimeImage *image,
+    OotStartupContext *context,OotPauth *pauth,const OotStartupProgram *program,
+    uint64_t limit,uint32_t *error);
+OOT_MEMORY_API int oot_startup_dispatch_initialization_reached(const OotStartupDispatcher *dispatcher);
+OOT_MEMORY_API int oot_startup_dispatch_application_entry_retired(const OotStartupDispatcher *dispatcher);
+OOT_MEMORY_API uint64_t oot_startup_dispatch_post_entry_retired(const OotStartupDispatcher *dispatcher);
 /* Install copied, sorted, disjoint original-body bindings before begin. Body
  * hashes follow the profile's checks above. Goal/stage entries may not be covered.
  * Calls intercept only canonical entries, before PAC or original retirement;

@@ -7,6 +7,8 @@
 #include "native_platform.h"
 #include "native_services.h"
 #include "startup_vector.h"
+#include "application_services.h"
+#include "native_romfs.h"
 
 #define OOT_STARTUP_CONTEXT_VERSION 1u
 #define OOT_STARTUP_DEBUG_LIMIT 4096u
@@ -21,8 +23,18 @@
 #define OOT_SDK_OBSERVED_MAIN_TLR 64u
 #define OOT_SDK_NATIVE_FUNCTIONS 128u
 #define OOT_SDK_INITIALIZATION 256u
+#define OOT_SDK_APPLICATION 512u
 
 typedef struct OotStartupContext OotStartupContext;
+OOT_MEMORY_API int oot_startup_context_application_enabled(const OotStartupContext *context);
+OOT_MEMORY_API const OotApplicationServices *oot_startup_context_application_services(const OotStartupContext *context);
+typedef struct OotApplicationThreadState {
+    uint32_t priority,core;
+    uint64_t affinity,priority_updates,affinity_updates;
+    uint32_t ideal_core,reserved;
+} OotApplicationThreadState;
+/* One owned logical guest thread, not Windows priority/affinity or scheduling. */
+OOT_MEMORY_API int oot_startup_context_application_thread(const OotStartupContext *context,OotApplicationThreadState *out);
 
 typedef struct OotStartupProtectionStats {
     uint64_t readonly_bytes, locked_bytes, permission_updates, permission_locks;
@@ -112,6 +124,10 @@ OOT_MEMORY_API uint64_t oot_startup_context_tls_pointer(const OotStartupContext 
 OOT_MEMORY_API uint64_t oot_startup_context_heap_size(const OotStartupContext *context);
 /* Separate initialization provider model; requires native functions. */
 OOT_MEMORY_API int oot_startup_context_init_enabled(const OotStartupContext *context);
+/* Bind once before dispatch retains this application context. Index identity is
+ * compiled into the diagnostic executable; guest input cannot choose its seal. */
+OOT_MEMORY_API int oot_startup_context_set_romfs(OotStartupContext *context,const char *path,const uint8_t seal[32]);
+OOT_MEMORY_API int oot_startup_context_romfs_stats(const OotStartupContext *context,OotRomFsStats *out);
 OOT_MEMORY_API int oot_startup_context_handler_valid(const OotStartupContext *context, uint32_t id);
 /* Integer X0 return only. Typed FP providers have separately checked D0 effects. */
 OOT_MEMORY_API int oot_startup_context_returns_value(const OotStartupContext *context, uint32_t id);
@@ -134,8 +150,8 @@ OOT_MEMORY_API int oot_startup_context_initial_state(const OotStartupContext *co
  * other GetInfo, permission changes, exceptions and scheduling stop. */
 OOT_MEMORY_API int oot_startup_context_service(OotStartupContext *context,
     uint32_t id, OotArm64State *state, OotStartupServiceReport *report);
-/* INIT-only bit-preserving SIMD pair transfers. Preview reads but never commits;
- * the dispatcher compares full GPR and vector results before retirement. */
+/* Initialization-owned vector bank; application additions require their own
+ * profile. Preview never commits; compare complete GPR/vector state before retirement. */
 OOT_MEMORY_API const OotStartupVectorState *oot_startup_context_vectors(const OotStartupContext *context);
 OOT_MEMORY_API int oot_startup_context_vector_preview(OotStartupContext *context, uint32_t word,
     const OotArm64State *state, OotArm64State *result, OotStartupVectorState *next);

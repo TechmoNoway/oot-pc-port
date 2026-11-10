@@ -40,8 +40,8 @@ From the repository root, with the project environment, MSVC build, GCC and pinn
 
 ```powershell
 .venv\Scripts\python.exe -B tools/run_milestone.py `
-  --config config/milestones/sdk-initialization.json `
-  --output build/milestones/sdk-initialization-v1
+  --config config/milestones/application-content.json `
+  --output build/milestones/application-content-v1
 ```
 
 Choose a fresh output directory for each run. The configuration selects the native build, prepared inputs, preceding survey baselines, GCC factory test modules, expected report artifacts and an explicit startup diagnostic stop. It contains paths and check selections, never keys or captured game bytes. `--native-only` runs the synthetic portion without private game inputs or baseline files. The full startup configuration includes experimental original-code execution; the separate builder requires `--execute` when used directly.
@@ -63,3 +63,26 @@ The native configuration adds the original-function/record-layout audit and both
 The next work is selected from measured entry-path stops and the dependency audit. Startup services, module/import initialization and remaining semantics must be established for the actual path rather than inferred from global helper counts. Broader loops, layouts and call closures keep explicit opt-in contracts. Graphics/shaders, input, audio and other host systems require their own usable boundaries and integrated evidence before gameplay.
 
 Each milestone should produce an assessable capability, with implementation, verification and status update completed together. Existing PAC/memory/ownership constraints and the no-game-execution scope of earlier profiles/surveys stay in force. Explicit original-code experiments keep their own declared boundaries and evidence. Ask for user input when a material scope choice, missing input or external blocker prevents sound progress; routine implementation choices stay inside the milestone.
+
+
+## Application and content milestone
+
+The separate application configuration preserves all prior raw/SDK/logging
+prefixes and complete host initialization, then executes the original nnMain
+body on a fresh linked image. Its original-export audit adds the owned
+notification policy and read-only RomFS family. Preparation uses
+`tools/prepare_romfs.py` to verify the selected NUP's content and produce a
+private index/cache under `build/`; raw bytes remain in the NUP.
+
+`--romfs-index` is application-only. The builder checks its exact original
+catalog/ExeFS/NPDM provenance and compiles its full index seal into the CLI
+object. Provider handles own bounded read-only views, and unsupported consumers
+remain guarded. No extracted assets or generated bindings belong in Git.
+The final runner checks entry-instruction retirement, the initialization
+checkpoint, actual thread/mount effects, input/index/generated/executable seals,
+old baselines and fast/single-step trace agreement on MSVC/GCC. A declared
+post-entry diagnostic remains separate from gameplay. The configuration names
+one exact unsupported export or original instruction word. An instruction
+endpoint additionally requires its original selected-row/module/word-hash
+provenance; an arbitrary budget stop, memory fault or missing selection cannot
+substitute for the measured capability boundary.

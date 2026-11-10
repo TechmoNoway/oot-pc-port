@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import struct
 import subprocess
 import sys
 from threading import Lock
@@ -112,6 +113,74 @@ def host_init_evidence(report,bundle,stages,minimum_calls):
         evidence['host_scaffold_retired']+evidence['original_retired']==evidence['retired'],
         'host scaffolding and original retirement counts differ')
     return evidence
+
+
+def application_evidence(report,bundle,baseline,stages,minimum_post_entry,expected_symbol,romfs_input=None,expected_word=None):
+    """A verified post-entry diagnostic is progress, never a playable game."""
+    require(report.get('format')=='oot-startup-experiment' and report.get('status')=='diagnostic-complete' and
+        report.get('application_runtime') is True and report.get('host_linked') is True and
+        report.get('startup_completed') is False and report.get('switch2_startup_abi_proven') is False and
+        report.get('game_code_executed') is True,'invalid application experiment scope')
+    old=baseline['iterations'][-1]['execution'];e=report['iterations'][-1]['execution']
+    require(old.get('error')==15 and old.get('sdk_initialization_completed') is True and
+        baseline.get('host_linked') is True,'application baseline is not completed host initialization')
+    require(e.get('status')==2,'application did not reach a diagnostic boundary')
+    if expected_word is None:
+        require(isinstance(expected_symbol,str) and expected_symbol and e.get('error')==9 and
+            e.get('native_handler_stop') is True and e.get('service')==31,
+            'application did not reach its declared unsupported export boundary')
+    else:
+        require(expected_symbol is None and type(expected_word) is int and 0<=expected_word<=0xffffffff and
+            e.get('error')==8 and e.get('native_handler_stop') is False and e.get('service')==0 and
+            e.get('word')==expected_word,'application did not reach its declared original instruction frontier')
+        words=[r for r in bundle.get('application_word_boundaries',[]) if r['address']==int(e['pc'],16)]
+        require(len(words)==1 and words[0]['word']==expected_word and words[0].get('semantic_error') and
+            words[0]['word_sha256']==hashlib.sha256(struct.pack('<I',expected_word)).hexdigest() and
+            any(m['name']==words[0]['module'] and m['source_sha256']==words[0]['source_sha256'] for m in
+                bundle.get('entry_audit',{}).get('modules',[])),
+            'application instruction frontier lacks original selected-word/source provenance')
+    require(e.get('sdk_initialization_completed') is True and e.get('game_entry_reached') is True and
+        e.get('application_entry_retired') is True and e.get('sdk_stages_completed')==stages and
+        report.get('sdk_initialization_completed') is True,'application execution lacks its original initialization/entry proof')
+    require(type(minimum_post_entry) is int and minimum_post_entry>0 and
+        e.get('post_entry_retired',0)>=minimum_post_entry and e['retired']-old['retired']==e['post_entry_retired'],
+        'application prefix does not retain the complete initialization retirement checkpoint')
+    require(e.get('constructors_completed')==len(bundle.get('host_boot',{}).get('module_order',[]))==old.get('constructors_completed') and
+        e['constructors_completed']>0 and e.get('host_scaffold_retired')==old.get('host_scaffold_retired') and
+        e.get('original_retired',0)+e['host_scaffold_retired']==e['retired'],'application original/scaffold/constructor accounting differs')
+    require(bundle.get('package',{}).get('image_phase')=='host-offline-linked' and
+        bundle['host_boot'].get('original_rtld_execution_allowed') is False,'application lost its separate linked boot provenance')
+    if expected_word is None:
+        rows=[f for f in bundle.get('native_audit',{}).get('functions',[]) if expected_symbol in f.get('names',[])]
+        require(len(rows)==1 and rows[0]['handler_id']==31 and int(e['pc'],16)==rows[0]['entry'] and
+            e['word']==rows[0]['entry_word'],'application stopped at a different original export')
+    policy=e.get('application_services',{})
+    require(policy.get('policy_calls',0)>=1 and policy.get('graphics_notifications')==1 and
+        policy.get('language_calls',0)>=1 and policy.get('language_code')==int.from_bytes(b'en-US\0\0\0','little') and
+        e.get('native_calls',0)>=old['native_calls']+policy['policy_calls']+policy['language_calls'],'application lacks owned post-entry policy effects')
+    thread=e.get('application_thread',{})
+    require(thread.get('priority_updates',0)>=1 and thread.get('affinity_updates',0)>=1 and
+        thread.get('priority')==44 and thread.get('core')==0 and thread.get('affinity')==1 and
+        thread.get('ideal_core')==0xffffffff,'application lacks coherent observed main-thread updates')
+    if romfs_input is not None:
+        fs=e.get('romfs',{})
+        require(bundle.get('romfs_input',{}).get('index_sha256')==romfs_input['index_sha256'] and
+            fs.get('files')==romfs_input['files'] and fs.get('directories')==romfs_input['directories'] and
+            fs.get('cache_bytes')==romfs_input['cached_bytes'] and fs.get('mounted')==1 and
+            fs.get('mount_calls')==1 and fs.get('open_calls',0)>=4 and fs.get('read_calls',0)>=4 and
+            fs.get('bytes_read',0)>=3427 and fs.get('verified_files',0)>=4,
+            'application lacks the real sealed RomFS mount and original file reads')
+    require(e.get('native_stats',{}).get('calls')==e['native_calls'] and
+        e.get('trace_steps')==e['retired']+e['native_calls'] and e.get('trace_rows')==e['trace_steps']+1 and
+        e.get('relative_relocation_probes',0)>0 and e['relative_relocation_probes']==e.get('relative_relocations_matching_offline_link'),
+        'application trace/native/linked-pointer accounting differs')
+    stats=e.get('init_stats',{})
+    require(all(stats.get(k)==1 for k in ('platform_initialized','aoc_initialized','err_initialized','diag_initialized',
+        'pctl_initialized','fs_mode','local_access_log','result_handled','clock_initialized')) and
+        stats.get('heap_size')==old['init_stats']['heap_size'] and
+        stats.get('relro_readonly_bytes',0)>=old['init_stats']['relro_readonly_bytes'] and
+        stats.get('relro_locked_bytes',0)>=old['init_stats']['relro_locked_bytes'],'application lost required initialized provider/memory state')
+    return e
 
 
 def compare_profiles(before, after):
@@ -295,6 +364,17 @@ def execute(config, output, native_only=False):
     require(type(config.get('sdk_experiment',False)) is bool,'invalid SDK scope flag')
     require(type(config.get('native_experiment',False)) is bool,'invalid native SDK scope flag')
     require(type(config.get('sdk_init_experiment',False)) is bool,'invalid SDK initialization scope flag')
+    require(type(config.get('application_experiment',False)) is bool,'invalid application scope flag')
+    if config.get('application_experiment'):
+        require(config.get('sdk_init_experiment') is True and config.get('sdk_init_host_linked') is True and
+            config.get('sdk_init_fast_functions') is True,'application milestone requires the complete preceding host initialization lane')
+        require(all(isinstance(config.get(k),str) and config[k] for k in
+            ('baseline_sdk_init','application_seed_report','application_romfs_index')),'application provenance configuration is absent')
+        guard=config.get('application_expected_guard');word=config.get('application_expected_word')
+        require((isinstance(guard,str) and bool(guard) and word is None) or
+            (guard is None and type(word) is int and 0<=word<=0xffffffff),'application requires one exact declared export or instruction endpoint')
+        require(type(config.get('application_min_post_entry')) is int and config['application_min_post_entry']>0,
+            'application requires a positive measured post-entry capability')
     if config.get('sdk_init_experiment'):
         require(type(config.get('sdk_init_host_linked',False)) is bool and type(config.get('sdk_init_fast_functions',False)) is bool,
                 'invalid SDK initialization acceleration flags')
@@ -356,6 +436,9 @@ def execute(config, output, native_only=False):
     if not native_only and config.get('sdk_init_experiment'):
         stages.insert(stages.index('comparison'),'sdk-init-audit')
         for mode in ('cmake','gcc'):stages.insert(stages.index('summary'),'sdk-init-experiment-'+mode)
+    if not native_only and config.get('application_experiment'):
+        stages.insert(stages.index('comparison'),'application-audit')
+        for mode in ('cmake','gcc'):stages.insert(stages.index('summary'),'application-experiment-'+mode)
     run = MilestoneRun(output, config["name"], stages)
     run.manifest["scope"] = "synthetic native only" if native_only else "synthetic native and static private game analysis"
     if not native_only and config.get('startup_experiment'):
@@ -377,7 +460,7 @@ def execute(config, output, native_only=False):
                 exe=run.output/'sdk-context-test.exe'
                 run.command('gcc-sdk-context-build',[gcc,'-std=c17','-O2','-Wall','-Wextra','-Wpedantic','-Werror',
                     '-D_CRT_SECURE_NO_WARNINGS','-D_WIN32_WINNT=0x0A00','-I',ROOT/'src',ROOT/'tests/startup_context_test.c',
-                    *[ROOT/'src'/(name+'.c') for name in ('startup_context','runtime_image','guest_memory','host_win32','sdk_native','native_platform','native_services','native_math','startup_vector','startup_float','startup_init_atomic')],'-lbcrypt','-o',exe],e)
+                    *[ROOT/'src'/(name+'.c') for name in ('startup_context','runtime_image','guest_memory','host_win32','sdk_native','native_platform','native_services','native_math','startup_vector','startup_float','startup_init_atomic','application_services','native_romfs')],'-lbcrypt','-o',exe],e)
                 run.command('gcc-sdk-context-test',[exe,run.output/'sdk-context-test.ootmem'],e)
         with ThreadPoolExecutor(max_workers=2) as pool:
             futures = [pool.submit(msvc), pool.submit(gcc_lane)]
@@ -402,6 +485,8 @@ def execute(config, output, native_only=False):
                 run.command('native-sdk-audit',py+['tools/native_sdk_audit.py',prepared,'--report',run.output/'native-sdk-audit.json'],env)
             if config.get('sdk_init_experiment'):
                 run.command('sdk-init-audit',py+['tools/sdk_init_audit.py',prepared,'--report',run.output/'sdk-init-audit.json'],env)
+            if config.get('application_experiment'):
+                run.command('application-audit',py+['tools/application_audit.py',prepared,'--report',run.output/'application-audit.json'],env)
             def compare():
                 comparisons = {scope: compare_profiles(read_json(ROOT/config["baseline_"+scope]), read_json(run.output/(scope+".json"))) for scope in ("default", "plt")}
                 audit = read_json(run.output/"callees.json"); compare_baseline(audit, read_json(run.output/"plt.json"))
@@ -609,6 +694,65 @@ def execute(config, output, native_only=False):
                         'native compiler host-boot completion evidence differs')
                 summary['sdk_init_experiments']=init_experiments
                 summary['sdk_initialization_completed']=True
+            if config.get('application_experiment'):
+                baseline=read_json(ROOT/config['baseline_sdk_init'])
+                baseline_e=baseline['iterations'][-1]['execution']
+                # Preserve the previous complete initialization, in addition to
+                # the six earlier raw/SDK/logging prefix baselines above.
+                baseline_keys=('status','error','pc','retired','word','service','trace_sha256','trace_steps','trace_rows',
+                    'native_calls','native_stats','sdk_stages_completed','sdk_initialization_completed','init_stats',
+                    'original_retired','host_scaffold_retired','constructors_completed','fast_function_calls')
+                require(all(all(e.get(k)==baseline_e.get(k) for k in baseline_keys) for e in init_experiments.values()),
+                    'the preceding complete initialization prefix changed')
+                app_audit=read_json(run.output/'application-audit.json')
+                seed=read_json(ROOT/config['application_seed_report']);prior=seed['iterations'][-1]
+                require(seed.get('application_runtime') is True and seed.get('host_linked') is True,'application seeds have a different execution profile')
+                provenance=read_json(Path(prior['bundle'])/'manifest.json')
+                require(provenance['sdk_npdm']['source_sha256']==audit['npdm']['source_sha256'] and
+                    provenance['sdk_audit']['goal_entry']==audit['goal_entry'],'application seeds refer to different original input')
+                app_experiments={}
+                from build_startup import validated_romfs_input
+                romfs_index=build_destination(ROOT/config['application_romfs_index'])
+                romfs_input=validated_romfs_input(prepared,romfs_index)
+                app_keys=('status','error','pc','retired','word','service','trace_sha256','trace_steps','trace_rows',
+                    'native_calls','native_stats','sdk_stages_completed','sdk_initialization_completed','game_entry_reached',
+                    'init_stats','original_retired','host_scaffold_retired','constructors_completed',
+                    'application_entry_retired','post_entry_retired','application_services','application_thread','romfs')
+                for mode in ('cmake','gcc'):
+                    folder=run.output/('application-'+mode)
+                    args=py+['tools/build_startup.py',prepared,'--output',folder,'--compiler',mode,'--sdk','--native-sdk',
+                        '--sdk-init','--host-linked','--application','--fast-functions','--execute','--entropy-file',entropy,
+                        '--native-cache',run.output/('sdk-init-'+mode)/'native-cache','--romfs-index',romfs_index,
+                        '--expand-targets','64','--limit','1000000000','--quantum','10000']
+                    for pc in prior['additional_entries']:args+=['--extra-entry',str(pc)]
+                    for pc in prior['application_entries']:args+=['--app-entry',str(pc)]
+                    run.command('application-experiment-'+mode,args,env)
+                    result=read_json(folder/'run.json');last=result['iterations'][-1]
+                    bundle=read_json(Path(last['bundle'])/'manifest.json')
+                    require(bundle['native_audit']==app_audit and bundle['sdk_audit']['goal_entry']==audit['goal_entry'] and
+                        bundle['sdk_npdm']['source_sha256']==audit['npdm']['source_sha256'] and
+                        result['entropy_input_sha256']==hashlib.sha256(entropy.read_bytes()).hexdigest(),
+                        'application input/goal/provider/entropy evidence differs')
+                    from startup_sources import cached_sources
+                    cached_sources(Path(last['bundle']),folder/'source-verification')
+                    require(last['build']['source_manifest_sha256']==hashlib.sha256((Path(last['bundle'])/'sources.json').read_bytes()).hexdigest() and
+                        last['build'].get('romfs_index_sha256')==romfs_input['index_sha256'] and
+                        last['build'].get('romfs_binding_sha256')==hashlib.sha256((run.output/('sdk-init-'+mode)/'native-cache/romfs_binding.h').read_bytes()).hexdigest() and
+                        last['executable_sha256']==hashlib.sha256(Path(last['executable']).read_bytes()).hexdigest(),
+                        'application executable or generated source seal differs')
+                    e=application_evidence(result,bundle,baseline,config['sdk_init_required_stages'],
+                        config['application_min_post_entry'],config.get('application_expected_guard'),romfs_input,
+                        expected_word=config.get('application_expected_word'))
+                    require(e.get('fast_function_calls',0)>0,'application experiment did not exercise accelerated leaves')
+                    diagnostic=folder/'diagnostic';diagnostic.mkdir()
+                    shutil.copyfile(Path(last['bundle'])/'startup.ootmem',diagnostic/'startup.ootmem')
+                    reference=execute_startup(Path(last['executable']),diagnostic,1000000000,10000,'compact',entropy,False,romfs_index=romfs_index)
+                    (diagnostic/'report.json').write_text(json.dumps(reference,indent=2)+'\n',encoding='utf-8')
+                    require(all(e.get(k)==reference.get(k) for k in app_keys),'application acceleration differs from diagnostic single-step execution')
+                    app_experiments[mode]=e
+                require(all(app_experiments['cmake'].get(k)==app_experiments['gcc'].get(k) for k in app_keys),
+                    'native compilers reached different original application prefixes or provider states')
+                summary['application_experiments']=app_experiments
         def publish_summary():
             (run.output/"summary.json").write_text(json.dumps(summary, indent=2)+"\n", encoding="utf-8")
             lines = ["# Milestone validation", "", f"Milestone: {config['name']}", "", f"Python tests: {summary['python_tests']}; CTest groups: {summary['ctest_groups']}; native comparisons per compiler: {summary['native_trials_per_compiler']}."]
@@ -619,6 +763,10 @@ def execute(config, output, native_only=False):
                     '', f"Remaining callee frontier: {frontier['dependency_blocked_roots']} blocked roots, {frontier['unique_missing_targets']} unique missing targets, {frontier['unique_caller_target_edges']} distinct caller/target edges. Root references overlap."]
             startup_scope=("The native SDK initialization profile reached the original nnMain transition and stopped before its body. Gameplay remains unimplemented."
                 if summary.get('sdk_initialization_completed') else "Startup is not complete.")
+            if 'application_experiments' in summary:
+                app=summary['application_experiments']['cmake'];fs=app['romfs']
+                startup_scope=('The separate application profile executes the original nnMain body and reaches its declared unsupported boundary. '
+                    f"It retires {app['post_entry_retired']} post-entry instructions, mounts verified content and reads {fs['bytes_read']} bytes in {fs['read_calls']} file operations. Gameplay remains unimplemented.")
             lines += ["", (("Native regression execution is synthetic. Separate opt-in startup experiments execute selected original instructions under an experimental process model. "+startup_scope)
                 if 'startup_experiments' in summary else "All executed code is synthetic.")+" Static game analysis grants no runtime capabilities. See run.json for final status and per-stage logs."]
             if 'memory_callee_profiles' in summary:

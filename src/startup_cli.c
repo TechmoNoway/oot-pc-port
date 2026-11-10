@@ -8,6 +8,10 @@
 #include <windows.h>
 #include <bcrypt.h>
 
+#ifdef OOT_ROMFS_BINDING_HEADER
+#include OOT_ROMFS_BINDING_HEADER
+#endif
+
 #ifdef OOT_HAS_STARTUP_PROGRAM
 const OotStartupProgram *oot_startup_compiled_program(void);
 const OotStartupConfig *oot_startup_compiled_config(void);
@@ -74,7 +78,7 @@ int oot_startup_cli(int argc, char **argv)
     fputs("This executable has no compiled startup selection. Use tools/build_startup.py to prepare a private raw-image build.\n",stderr);
     return 2;
 #else
-    const char *package=NULL, *trace_path=NULL, *entropy_path=NULL;
+    const char *package=NULL, *trace_path=NULL, *entropy_path=NULL, *romfs_path=NULL;
     uint64_t limit=1000000,quantum=1000;
     uint32_t error=0;
     char message[192];
@@ -101,6 +105,7 @@ int oot_startup_cli(int argc, char **argv)
         if (i+1==argc) goto usage;
         if (!strcmp(argv[i],"--limit")) { if (!parse_limit(argv[i+1],&limit,maximum)) goto usage; }
         else if (!strcmp(argv[i],"--quantum")) { if (!parse_limit(argv[i+1],&quantum,maximum)) goto usage; }
+        else if (!strcmp(argv[i],"--romfs-index") && (program->flags&OOT_STARTUP_APPLICATION)) romfs_path=argv[i+1];
         else if (!strcmp(argv[i],"--entropy-file") && compiled_sdk) entropy_path=argv[i+1];
         else if (!strcmp(argv[i],"--trace-mode")) {
             if (!strcmp(argv[i+1],"compact")) trace.compact=1;
@@ -135,9 +140,29 @@ int oot_startup_cli(int argc, char **argv)
         SecureZeroMemory(sdk.entropy,sizeof(sdk.entropy));
     } else context=oot_startup_context_create(image,oot_startup_compiled_config(),&error);
     if (!context) { fprintf(stderr,"Startup context rejected: %" PRIu32 "\n",error); goto cleanup; }
+    if(romfs_path) {
+#ifdef OOT_ROMFS_INPUT_SHA256
+        const char *hex=OOT_ROMFS_INPUT_SHA256;uint8_t seal[32];
+        if(strlen(hex)!=64)goto cleanup;
+        for(unsigned i=0;i<32;++i){unsigned value=0;
+            for(unsigned j=0;j<2;++j){char ch=hex[i*2+j];unsigned digit;
+                if(ch>='0' && ch<='9')digit=(unsigned)(ch-'0');
+                else if(ch>='a' && ch<='f')digit=(unsigned)(ch-'a')+10;
+                else goto cleanup;
+                value=value*16+digit;
+            }seal[i]=(uint8_t)value;
+        }
+        if(!oot_startup_context_set_romfs(context,romfs_path,seal)){
+            fputs("Prepared RomFS identity or backing rejected.\n",stderr);goto cleanup;
+        }
+#else
+        fputs("Executable has no compiled RomFS input identity.\n",stderr);goto cleanup;
+#endif
+    }
     pauth=oot_pauth_create(OOT_PAUTH_QARMA5_VA39,NULL);
     if (!pauth) { fputs("Startup PAC context failed.\n",stderr); goto cleanup; }
-    dispatcher=(program->flags&OOT_STARTUP_HOST_LINKED) ? oot_startup_dispatch_create_host(image,context,pauth,program,limit,&error) :
+    dispatcher=(program->flags&OOT_STARTUP_APPLICATION) ? oot_startup_dispatch_create_application(image,context,pauth,program,limit,&error) :
+        (program->flags&OOT_STARTUP_HOST_LINKED) ? oot_startup_dispatch_create_host(image,context,pauth,program,limit,&error) :
         oot_startup_context_init_enabled(context) ? oot_startup_dispatch_create_init(image,context,pauth,program,limit,&error) :
         oot_startup_context_native_enabled(context) ? oot_startup_dispatch_create_native(image,context,pauth,program,limit,&error) :
         compiled_sdk ? oot_startup_dispatch_create_sdk(image,context,pauth,program,limit,&error) :
@@ -217,8 +242,8 @@ int oot_startup_cli(int argc, char **argv)
     printf(",\"sdk_runtime\":%s,\"sdk_stages_completed\":%" PRIu32
         ",\"sdk_initialization_completed\":%s,\"game_entry_reached\":%s",
         compiled_sdk ? "true":"false",oot_startup_dispatch_sdk_stages_completed(dispatcher),
-        report.error==OOT_STARTUP_SDK_INITIALIZED ? "true":"false",
-        report.error==OOT_STARTUP_SDK_INITIALIZED ? "true":"false");
+        (report.error==OOT_STARTUP_SDK_INITIALIZED || oot_startup_dispatch_initialization_reached(dispatcher)) ? "true":"false",
+        (report.error==OOT_STARTUP_SDK_INITIALIZED || oot_startup_dispatch_initialization_reached(dispatcher)) ? "true":"false");
     if (compiled_sdk && report.service==0x1f && !native_stop) {
         uint8_t name[4];
         int sm=oot_memory_load_record(oot_startup_context_memory(context),state.x[1],name,sizeof(name)) &&
@@ -254,6 +279,21 @@ int oot_startup_cli(int argc, char **argv)
     }
     if(program->flags&OOT_STARTUP_HOST_LINKED)printf(",\"host_linked\":true,\"host_scaffold_retired\":%" PRIu64 ",\"original_retired\":%" PRIu64 ",\"constructors_completed\":%" PRIu32,oot_startup_dispatch_host_steps(dispatcher),report.retired-oot_startup_dispatch_host_steps(dispatcher),oot_startup_dispatch_constructors_completed(dispatcher));
     if(fast_functions)printf(",\"fast_function_calls\":%" PRIu64,oot_startup_dispatch_fast_calls(dispatcher));
+    if(program->flags&OOT_STARTUP_APPLICATION)printf(",\"application_runtime\":true,\"application_entry_retired\":%s,\"post_entry_retired\":%" PRIu64,
+        oot_startup_dispatch_application_entry_retired(dispatcher) ? "true":"false",oot_startup_dispatch_post_entry_retired(dispatcher));
+    if(program->flags&OOT_STARTUP_APPLICATION){
+        const OotApplicationServices *app=oot_startup_context_application_services(context);
+        printf(",\"application_services\":{\"policy_calls\":%" PRIu64 ",\"graphics_notifications\":%u,\"language_code\":%" PRIu64 ",\"language_calls\":%" PRIu64 "}",app->policy_calls,app->graphics_notifications,app->language_code,app->language_calls);
+        OotApplicationThreadState thread={0};
+        if(oot_startup_context_application_thread(context,&thread))printf(",\"application_thread\":{\"priority\":%u,\"core\":%u,\"ideal_core\":%u,\"affinity\":%" PRIu64 ",\"priority_updates\":%" PRIu64 ",\"affinity_updates\":%" PRIu64 "}",
+            thread.priority,thread.core,thread.ideal_core,thread.affinity,thread.priority_updates,thread.affinity_updates);
+        OotRomFsStats fs={0};
+        if(oot_startup_context_romfs_stats(context,&fs))printf(",\"romfs\":{\"files\":%" PRIu64 ",\"directories\":%" PRIu64 ",\"cache_bytes\":%" PRIu64 ",\"mount_calls\":%" PRIu64 ",\"open_calls\":%" PRIu64 ",\"read_calls\":%" PRIu64 ",\"bytes_read\":%" PRIu64 ",\"verified_files\":%" PRIu64 ",\"missing_paths\":%" PRIu64 ",\"mounted\":%u,\"open_handles\":%u}",
+            fs.files,fs.directories,fs.cache_bytes,fs.mount_calls,fs.open_calls,fs.read_calls,fs.bytes_read,fs.verified_files,fs.missing_paths,fs.mounted,fs.open_handles);
+        printf(",\"application_stop_arguments\":[");
+        for(unsigned n=0;n<8;++n)printf("%s%" PRIu64,n ? ",":"",state.x[n]);
+        printf("]");
+    }
     printf(",\"trace_mode\":\"%s\",\"trace_rows\":%" PRIu64 ",\"trace_steps\":%" PRIu64 ",\"trace_sha256\":\"%s\"",
         trace.compact?"compact":"full",trace.rows,trace.steps,digest_hex);
     puts("}");

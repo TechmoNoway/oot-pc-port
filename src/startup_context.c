@@ -24,6 +24,9 @@ struct OotStartupContext {
     OotSdkNative native;
     OotNativePlatform platform;
     OotNativeServices services;
+    OotRomFs *romfs;
+    OotApplicationServices application;
+    OotApplicationThreadState application_thread;
     OotStartupVectorState vectors;
     OotGuestMemory memory;
     OotGuestRegion image_regions[STARTUP_IMAGE_VIEW_LIMIT], regions[STARTUP_REGION_LIMIT];
@@ -94,6 +97,7 @@ void oot_startup_context_destroy(OotStartupContext *c)
     if (!c || --c->references) return;
     if (c->tls) (void)host_memory_release(c->tls);
     if (c->heap) (void)host_memory_release(c->heap);
+    oot_romfs_close(c->romfs);
     SecureZeroMemory(c->sdk.entropy,sizeof(c->sdk.entropy));
     oot_runtime_close(c->image);
     free(c);
@@ -125,13 +129,14 @@ static OotStartupContext *create_context(OotRuntimeImage *image,
         !valid_span(config->heap_base,config->heap_capacity)) return NULL;
     if (sdk && (sdk->version != OOT_SDK_CONTEXT_VERSION ||
         sdk->flags & ~(OOT_SDK_EXPLICIT_ENTROPY | OOT_SDK_PROCESS_INFO | OOT_SDK_NO_REMOTE_ARENA |
-            OOT_SDK_MAIN_THREAD | OOT_SDK_NO_ALIAS_EXTRA | OOT_SDK_PAGE_ALLOCATION | OOT_SDK_OBSERVED_MAIN_TLR | OOT_SDK_NATIVE_FUNCTIONS | OOT_SDK_INITIALIZATION) ||
+            OOT_SDK_MAIN_THREAD | OOT_SDK_NO_ALIAS_EXTRA | OOT_SDK_PAGE_ALLOCATION | OOT_SDK_OBSERVED_MAIN_TLR | OOT_SDK_NATIVE_FUNCTIONS | OOT_SDK_INITIALIZATION | OOT_SDK_APPLICATION) ||
         ((sdk->flags & (OOT_SDK_NO_REMOTE_ARENA | OOT_SDK_MAIN_THREAD | OOT_SDK_NO_ALIAS_EXTRA |
             OOT_SDK_PAGE_ALLOCATION | OOT_SDK_OBSERVED_MAIN_TLR)) && !(sdk->flags & OOT_SDK_PROCESS_INFO)) ||
         ((sdk->flags & OOT_SDK_OBSERVED_MAIN_TLR) && !(sdk->flags & OOT_SDK_MAIN_THREAD)) ||
         ((sdk->flags & OOT_SDK_NATIVE_FUNCTIONS) &&
          (sdk->flags & (OOT_SDK_MAIN_THREAD | OOT_SDK_PROCESS_INFO)) != (OOT_SDK_MAIN_THREAD | OOT_SDK_PROCESS_INFO)))) return NULL;
     if (sdk && (sdk->flags & OOT_SDK_INITIALIZATION) && !(sdk->flags & OOT_SDK_NATIVE_FUNCTIONS)) return NULL;
+    if (sdk && (sdk->flags & OOT_SDK_APPLICATION) && !(sdk->flags & OOT_SDK_INITIALIZATION)) return NULL;
     if (sdk && (sdk->flags & OOT_SDK_OBSERVED_MAIN_TLR) &&
         (config->tls_size < 0x114 || config->main_thread_handle > UINT32_C(0x3fffffff))) return NULL;
     if (sdk && (sdk->flags & OOT_SDK_MAIN_THREAD) &&
@@ -196,6 +201,11 @@ static OotStartupContext *create_context(OotRuntimeImage *image,
     c->references = 1; c->config = *config;
     c->fixed_memory = fixed_memory;
     if (sdk) { c->sdk = *sdk; c->sdk_enabled = 1; }
+    if (sdk && (sdk->flags & OOT_SDK_APPLICATION)) {
+        c->application.version=1;c->application.language_code=OOT_APPLICATION_DEFAULT_LANGUAGE;
+        c->application_thread=(OotApplicationThreadState){(uint32_t)sdk->main_thread_priority,(uint32_t)sdk->main_thread_core,
+            UINT64_C(1)<<sdk->main_thread_core,0,0,(uint32_t)sdk->main_thread_core,0};
+    }
     if (sdk && (sdk->flags & OOT_SDK_NATIVE_FUNCTIONS)) {
         const OotNativeConfig native_config={OOT_SDK_NATIVE_VERSION,0,0,1,sdk->main_thread_id};
         if (!oot_sdk_native_init(&c->native,&native_config)) {
@@ -306,11 +316,25 @@ uint64_t oot_startup_context_tls_pointer(const OotStartupContext *c) { return c 
 uint64_t oot_startup_context_heap_size(const OotStartupContext *c) { return c ? c->heap_size : 0; }
 int oot_startup_context_init_enabled(const OotStartupContext *c)
 { return c && c->sdk_enabled && !!(c->sdk.flags & OOT_SDK_INITIALIZATION); }
+int oot_startup_context_application_enabled(const OotStartupContext *c)
+{ return oot_startup_context_init_enabled(c) && !!(c->sdk.flags & OOT_SDK_APPLICATION); }
+const OotApplicationServices *oot_startup_context_application_services(const OotStartupContext *c)
+{ return oot_startup_context_application_enabled(c) ? &c->application:NULL; }
+int oot_startup_context_application_thread(const OotStartupContext *c,OotApplicationThreadState *out)
+{ if(!out || !oot_startup_context_application_enabled(c))return 0;*out=c->application_thread;return 1; }
+int oot_startup_context_set_romfs(OotStartupContext *c,const char *path,const uint8_t seal[32])
+{
+    if(!oot_startup_context_application_enabled(c) || c->references!=1 || c->romfs || c->heap_size || !path || !seal)return 0;
+    c->romfs=oot_romfs_open_index(path,c->sdk.program_id,seal);return c->romfs!=NULL;
+}
+int oot_startup_context_romfs_stats(const OotStartupContext *c,OotRomFsStats *out)
+{ return oot_startup_context_application_enabled(c) && oot_romfs_stats(c->romfs,out); }
 int oot_startup_context_handler_valid(const OotStartupContext *c, uint32_t id)
 { return oot_startup_context_native_enabled(c) && (oot_sdk_native_handler_valid(id) ||
+    (oot_startup_context_application_enabled(c) && (id==OOT_APPLICATION_GRAPHICS_NOTIFICATIONS || id==OOT_APPLICATION_DESIRED_LANGUAGE || oot_romfs_handler_valid(id))) ||
     (oot_startup_context_init_enabled(c) && (id==OOT_NATIVE_MATH_LOG || id==OOT_NATIVE_OS_GET_SYSTEM_TICK || oot_native_platform_handler_valid(id) || oot_native_services_handler_valid(id)))); }
 int oot_startup_context_returns_value(const OotStartupContext *c, uint32_t id)
-{ return oot_startup_context_init_enabled(c) && (id==OOT_NATIVE_OS_GET_SYSTEM_TICK || oot_native_platform_returns_value(id) || oot_native_services_returns_value(id)); }
+{ return (oot_startup_context_application_enabled(c) && (id==OOT_APPLICATION_DESIRED_LANGUAGE || oot_romfs_returns_value(id))) || (oot_startup_context_init_enabled(c) && (id==OOT_NATIVE_OS_GET_SYSTEM_TICK || oot_native_platform_returns_value(id) || oot_native_services_returns_value(id))); }
 const OotNativePlatform *oot_startup_context_platform(const OotStartupContext *c)
 { return oot_startup_context_init_enabled(c) ? &c->platform : NULL; }
 const OotNativeServices *oot_startup_context_services(const OotStartupContext *c)
@@ -327,6 +351,7 @@ int oot_startup_context_native_call(OotStartupContext *c, uint32_t id,
     OotArm64State result;
     OotNativePlatform platform={0};
     OotNativeServices services={0};
+    OotApplicationServices application={0};
     OotNativePlatformReport platform_report={0};
     OotNativePlatformWrite platform_write={0};
     OotNativeServicesWrite services_write={0};
@@ -344,6 +369,16 @@ int oot_startup_context_native_call(OotStartupContext *c, uint32_t id,
         (state->nzcv & UINT32_C(0x0fffffff))) {
         if (report) *report=(OotNativeReport){OOT_NATIVE_FAULT,id,OOT_NATIVE_BAD_STATE,0};
         return OOT_NATIVE_FAULT;
+    }
+    if(oot_startup_context_application_enabled(c) && oot_romfs_handler_valid(id)) {
+        if(!c->romfs)return OOT_NATIVE_UNSUPPORTED;
+        if(c->native.calls==UINT64_MAX){
+            if(report)*report=(OotNativeReport){OOT_NATIVE_FAULT,id,OOT_NATIVE_LIMIT,0};
+            return OOT_NATIVE_FAULT;
+        }
+        status=oot_romfs_call(c->romfs,id,state,&c->memory,report);
+        if(status==OOT_NATIVE_IMPLEMENTED)++c->native.calls;
+        return status;
     }
     if(oot_startup_context_init_enabled(c) && id==OOT_NATIVE_MATH_LOG){
         uint64_t input,output;
@@ -374,6 +409,10 @@ int oot_startup_context_native_call(OotStartupContext *c, uint32_t id,
         ++c->native.calls;*state=result;
         if(report)*report=(OotNativeReport){OOT_NATIVE_IMPLEMENTED,id,OOT_NATIVE_OK,0};
         return OOT_NATIVE_IMPLEMENTED;
+    } else if (oot_startup_context_application_enabled(c) && (id==OOT_APPLICATION_GRAPHICS_NOTIFICATIONS || id==OOT_APPLICATION_DESIRED_LANGUAGE)) {
+        provider=3;
+        status=oot_application_services_prepare(&c->application,id,c->platform.initialized,state,&application,&result);
+        if(report)*report=(OotNativeReport){(uint32_t)status,id,status==OOT_NATIVE_FAULT ? OOT_NATIVE_BAD_STATE:OOT_NATIVE_OK,0};
     } else if (oot_startup_context_init_enabled(c) && oot_native_platform_handler_valid(id)) {
         provider=1;
         status=oot_native_platform_prepare(&c->platform,id,state,&c->memory,&platform,&result,&platform_write,&platform_report);
@@ -406,6 +445,7 @@ int oot_startup_context_native_call(OotStartupContext *c, uint32_t id,
     }
     if (provider==1) c->platform=platform;
     else if (provider==2) c->services=services;
+    else if (provider==3) c->application=application;
     if (provider) ++c->native.calls;
     else c->native=next;
     *state=result;
@@ -420,7 +460,7 @@ int oot_startup_context_vector_preview(OotStartupContext *c, uint32_t word,
     OotStartupVectorWrite write;
     if (!oot_startup_context_init_enabled(c)) return OOT_STARTUP_SERVICE_UNSUPPORTED;
     if (!valid_memory(c)) return OOT_STARTUP_SERVICE_FAULT;
-    return oot_startup_vector_prepare(&c->vectors,word,state,&c->memory,next,result,&write);
+    return (oot_startup_context_application_enabled(c) ? oot_startup_application_vector_prepare:oot_startup_vector_prepare)(&c->vectors,word,state,&c->memory,next,result,&write);
 }
 int oot_startup_context_vector_step(OotStartupContext *c, uint32_t word, OotArm64State *state)
 {
@@ -430,7 +470,7 @@ int oot_startup_context_vector_step(OotStartupContext *c, uint32_t word, OotArm6
     int status;
     if (!oot_startup_context_init_enabled(c)) return OOT_STARTUP_SERVICE_UNSUPPORTED;
     if (!valid_memory(c) || !state) return OOT_STARTUP_SERVICE_FAULT;
-    status=oot_startup_vector_prepare(&c->vectors,word,state,&c->memory,&next,&result,&write);
+    status=(oot_startup_context_application_enabled(c) ? oot_startup_application_vector_prepare:oot_startup_vector_prepare)(&c->vectors,word,state,&c->memory,&next,&result,&write);
     if (status!=OOT_STARTUP_SERVICE_IMPLEMENTED) return status;
     if (result.sp%16 || result.sp<oot_runtime_stack_base(c->image) ||
         result.sp>oot_runtime_stack_pointer(c->image)) return OOT_STARTUP_SERVICE_FAULT;
@@ -447,6 +487,10 @@ int oot_startup_context_system(OotStartupContext *c, uint32_t word, OotArm64Stat
     if (!c || !state || state->pc >= STARTUP_ADDRESS_LIMIT-4 || state->pc % 4 ||
         (state->nzcv & UINT32_C(0x0fffffff)) || !valid_memory(c)) return OOT_STARTUP_SERVICE_FAULT;
     if (!c->sdk_enabled) return OOT_STARTUP_SERVICE_UNSUPPORTED;
+    if (oot_startup_application_atomic_kind(word)) {
+        if (!oot_startup_context_application_enabled(c)) return OOT_STARTUP_SERVICE_UNSUPPORTED;
+        return oot_startup_application_atomic_step(word,state,&c->memory);
+    }
     if (oot_startup_init_atomic_kind(word)) {
         if (!oot_startup_context_init_enabled(c)) return OOT_STARTUP_SERVICE_UNSUPPORTED;
         return oot_startup_init_atomic_step(word,state,&c->memory);
@@ -725,18 +769,43 @@ int oot_startup_context_service(OotStartupContext *c, uint32_t id,
     case 0x0c: /* GetThreadPriority: w1=handle; w0=result,w1=priority. */
         if (!main_thread_handle(c,state->x[1]))
             return service_result(out,id,OOT_STARTUP_SERVICE_UNSUPPORTED,OOT_STARTUP_CONTEXT_OK);
-        result.x[0] = 0; result.x[1] = c->sdk.main_thread_priority;
+        result.x[0] = 0; result.x[1] = oot_startup_context_application_enabled(c) ? c->application_thread.priority:c->sdk.main_thread_priority;
+        break;
+    case 0x0d: /* Application-only owned main-thread priority. */
+        if(!oot_startup_context_application_enabled(c) || !main_thread_handle(c,state->x[0]) ||
+           (uint32_t)state->x[1]>=64 || !(c->sdk.priority_mask&(UINT64_C(1)<<(uint32_t)state->x[1])))
+            return service_result(out,id,OOT_STARTUP_SERVICE_UNSUPPORTED,OOT_STARTUP_CONTEXT_OK);
+        if(state->sp%16 || c->application_thread.priority_updates==UINT64_MAX)
+            return service_result(out,id,OOT_STARTUP_SERVICE_FAULT,OOT_STARTUP_CONTEXT_BAD_ARGUMENT);
+        c->application_thread.priority=(uint32_t)state->x[1];++c->application_thread.priority_updates;
+        result.x[0]=0;
         break;
     case 0x0e: /* GetThreadCoreMask: w2=handle; w0=result,w1=ideal,x2=affinity. */
         if (!main_thread_handle(c,state->x[2]))
             return service_result(out,id,OOT_STARTUP_SERVICE_UNSUPPORTED,OOT_STARTUP_CONTEXT_OK);
-        result.x[0] = 0; result.x[1] = c->sdk.main_thread_core;
-        result.x[2] = UINT64_C(1) << c->sdk.main_thread_core;
+        result.x[0] = 0; result.x[1] = oot_startup_context_application_enabled(c) ? c->application_thread.ideal_core:c->sdk.main_thread_core;
+        result.x[2] = oot_startup_context_application_enabled(c) ? c->application_thread.affinity:UINT64_C(1) << c->sdk.main_thread_core;
         break;
+    case 0x0f: { /* Concrete ideal or observed DontCare (-1), not scheduling. */
+        uint32_t ideal=(uint32_t)state->x[1],active=c->application_thread.core;
+        if(!oot_startup_context_application_enabled(c) || !main_thread_handle(c,state->x[0]) ||
+           (ideal>=64 && ideal!=UINT32_MAX) || !state->x[2] || (state->x[2]&~c->sdk.core_mask) ||
+           (ideal<64 && !(state->x[2]&(UINT64_C(1)<<ideal))))
+            return service_result(out,id,OOT_STARTUP_SERVICE_UNSUPPORTED,OOT_STARTUP_CONTEXT_OK);
+        if(state->sp%16 || c->application_thread.affinity_updates==UINT64_MAX)
+            return service_result(out,id,OOT_STARTUP_SERVICE_FAULT,OOT_STARTUP_CONTEXT_BAD_ARGUMENT);
+        if(ideal<64)active=ideal;
+        else if(!(state->x[2]&(UINT64_C(1)<<active))){
+            active=63;while(!(state->x[2]&(UINT64_C(1)<<active)))--active;
+        }
+        c->application_thread.core=active;c->application_thread.ideal_core=ideal;c->application_thread.affinity=state->x[2];
+        ++c->application_thread.affinity_updates;result.x[0]=0;
+        break;
+    }
     case 0x10: /* GetCurrentProcessorNumber returns w0 directly. */
         if (!c->sdk_enabled || !(c->sdk.flags & OOT_SDK_MAIN_THREAD))
             return service_result(out,id,OOT_STARTUP_SERVICE_UNSUPPORTED,OOT_STARTUP_CONTEXT_OK);
-        result.x[0] = c->sdk.main_thread_core;
+        result.x[0] = oot_startup_context_application_enabled(c) ? c->application_thread.core:c->sdk.main_thread_core;
         break;
     case 0x1e: /* GetSystemTick; frequency is an explicit process-model input. */
         if (!c->config.tick_frequency)

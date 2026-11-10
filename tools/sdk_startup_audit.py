@@ -72,12 +72,17 @@ def _symbol_record(module, index, symbol):
     """Check parsed metadata against its actual dynamic symbol and string bytes."""
     data = module.read(module.dynamic[6] + index * 24, 24)
     name, info, other, section, value, size = struct.unpack("<IBBHQQ", data)
-    strings = module.read(module.dynamic[5], module.dynamic[10])
-    require(name < len(strings), "SDK audit: symbol string exceeds original table")
-    end = strings.find(b"\0", name)
+    # Validate the complete original table range, then read just this name.
+    # Copying a multi-megabyte string table for every relocated symbol made
+    # callback-neighborhood audits needlessly quadratic in table bytes.
+    strings_begin,strings_size=module.dynamic[5],module.dynamic[10]
+    module.check_range(strings_begin,strings_size)
+    require(name < strings_size, "SDK audit: symbol string exceeds original table")
+    start=strings_begin+name
+    end = module.image.find(b"\0", start,strings_begin+strings_size)
     require(end >= 0, "SDK audit: symbol string has no terminator")
     try:
-        actual_name = strings[name:end].decode("utf-8")
+        actual_name = bytes(module.image[start:end]).decode("utf-8")
     except UnicodeDecodeError:
         require(False, "SDK audit: invalid symbol string encoding")
     require((actual_name, info >> 4, info & 15, other & 3, section, value, size) ==
@@ -87,7 +92,7 @@ def _symbol_record(module, index, symbol):
     return dict(index=index, binding=symbol.binding, kind=symbol.kind,
                 visibility=symbol.visibility, section=symbol.section,
                 value=symbol.value, size=symbol.size, record_sha256=_sha(data),
-                name_sha256=_sha(strings[name:end + 1]))
+                name_sha256=_sha(module.image[start:end + 1]))
 
 
 def _stage(modules, stage_id, expected_module, name, syntax):
