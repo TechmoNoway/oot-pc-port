@@ -318,3 +318,46 @@ static baselines passed. Its matching implementation/configuration fingerprint i
 `73babecba98a5534d153da6259332095c9b0d9ec5a14a4b221b576bfb03a523a`.
 This capability does not establish gameplay, applet-resource ownership, graphics
 or guest scheduling support. The guarded resource getter is the next design input.
+
+CAS commit `977149f` is verified on origin/dev. The run above certifies that
+checkpoint, not subsequent resource-identity working-tree changes. The next
+[design](superpowers/specs/2026-11-13-application-resource-identity-design.md)
+retains the existing native process identity and all earlier profile boundaries;
+its subsequently measured original progress and fresh full validation are
+recorded below.
+
+## Measured application resource identity
+
+The application-only provider exposes the existing initialized platform's logical
+process identity through both source-proved applet/am getter entries. It owns
+no console applet client or graphics object. The earlier INIT registry, program
+flags, integer ABI2 and application-state layout remain unchanged. Both compilers
+pass the real generated callback/quota/full-vector checks and 43 focused tests;
+the rebuilt host/context passes six native CTest groups. Source/GOT/census and
+native-progress mutation/CLI tests also pass.
+
+Both bounded original pilots and full single-step replays match. The first
+getter is a native event at the former guard's exact retirement checkpoint,
+with no original instruction retired by that native call. Replacing that event
+with the historical guard STOP in the prefix hash reproduces the entire prior
+native trace SHA-256. Every successful getter event is source-bound and matches
+the reported logical owner1, active state and query count1.
+
+They retire 1,833,240 total instructions: 1,833,189 original and 51 scaffold,
+with 51 native calls and 311,543 post-entry instructions. All three constructors,
+seven stages, four verified reads and 3,427 bytes remain intact. Complete trace:
+`c00c495530695e89661396ca5b3d1e61d93e0657733a957990b7343718a3fb1f`.
+
+The next real boundary is the guarded
+`nn::am::GetGraphicsSupervisor(Out<NativeHandle>)` API. A graphics handle and
+its consumers require real ownership and their own source-proved ABI; returning
+an arbitrary value is not support. Private pilots are under
+`build/application-resource-pilots/*-v1/`. The new
+`config/milestones/application-resource-identity.json` freezes that endpoint.
+The fresh `build/milestones/application-resource-identity-v2/` run passes all
+42 stages: 672 Python tests without skips, seven CTest groups and 283,401 common
+native/reference comparisons per compiler. Earlier surveys and startup profiles,
+both full native progress proofs and the final current-source fingerprint pass.
+The common matrix compiles independent generated units after a reproduced
+monolithic compiler timeout, retaining every case and existing timeout. This
+remains a graphics-supervisor boundary, not gameplay.

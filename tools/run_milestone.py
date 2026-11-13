@@ -123,6 +123,15 @@ def application_endpoint(expected_symbol,expected_word,expected_svc):
     require(expected_svc is None or type(expected_svc) is int and 0<=expected_svc<=65535,'invalid application SVC endpoint')
 
 
+def validate_resource_progress_config(config):
+    if 'application_resource_progress_baseline' not in config and config.get('name')!='application-resource-identity':return
+    require(config.get('application_experiment') is True,'resource progress requires the application profile')
+    require(isinstance(config.get('application_resource_progress_baseline'),str) and
+            bool(config['application_resource_progress_baseline']),'resource progress requires its native frontier baseline')
+    require(type(config.get('application_resource_owner')) is int and config['application_resource_owner']==1,
+            'resource progress requires the declared logical process owner 1')
+
+
 def application_evidence(report,bundle,baseline,stages,minimum_post_entry,expected_symbol,romfs_input=None,expected_word=None,expected_svc=None):
     """A verified post-entry diagnostic is progress, never a playable game."""
     require(report.get('format')=='oot-startup-experiment' and report.get('status')=='diagnostic-complete' and
@@ -383,6 +392,7 @@ def execute(config, output, native_only=False):
     require(type(config.get('native_experiment',False)) is bool,'invalid native SDK scope flag')
     require(type(config.get('sdk_init_experiment',False)) is bool,'invalid SDK initialization scope flag')
     require(type(config.get('application_experiment',False)) is bool,'invalid application scope flag')
+    validate_resource_progress_config(config)
     if config.get('application_experiment'):
         require(config.get('sdk_init_experiment') is True and config.get('sdk_init_host_linked') is True and
             config.get('sdk_init_fast_functions') is True,'application milestone requires the complete preceding host initialization lane')
@@ -736,7 +746,7 @@ def execute(config, output, native_only=False):
                 app_keys=('status','error','pc','retired','word','service','trace_sha256','trace_steps','trace_rows',
                     'native_calls','native_stats','sdk_stages_completed','sdk_initialization_completed','game_entry_reached',
                     'init_stats','original_retired','host_scaffold_retired','constructors_completed',
-                    'application_entry_retired','post_entry_retired','application_services','application_thread','romfs',
+                    'application_entry_retired','post_entry_retired','application_services','application_thread','application_resource','romfs',
                     'native_handler_stop','relative_relocation_probes','relative_relocations_matching_offline_link')
                 for mode in ('cmake','gcc'):
                     folder=run.output/('application-'+mode)
@@ -769,20 +779,30 @@ def execute(config, output, native_only=False):
                     reference=execute_startup(Path(last['executable']),diagnostic,1000000000,10000,'compact',entropy,False,romfs_index=romfs_index)
                     (diagnostic/'report.json').write_text(json.dumps(reference,indent=2)+'\n',encoding='utf-8')
                     require(all(e.get(k)==reference.get(k) for k in app_keys),'application acceleration differs from diagnostic single-step execution')
-                    if config.get('application_progress_baseline'):
-                        from application_frontier import verify_progress_trace
-                        old_report=read_json(build_destination(ROOT/config['application_progress_baseline']))
-                        old_last=old_report['iterations'][-1]
-                        old_bundle=read_json(build_destination(Path(old_last['bundle'])/'manifest.json'))
+                    if config.get('application_progress_baseline') or config.get('application_resource_progress_baseline'):
+                        from application_frontier import verify_progress_trace,verify_resource_progress_trace,verify_full_trace
                         full_dir=folder/'progress-full';full_dir.mkdir()
                         shutil.copyfile(Path(last['bundle'])/'startup.ootmem',full_dir/'startup.ootmem')
                         full=execute_startup(Path(last['executable']),full_dir,1000000000,10000,'full',entropy,False,romfs_index=romfs_index)
                         (full_dir/'report.json').write_text(json.dumps(full,indent=2)+'\n',encoding='utf-8')
                         require(all(e.get(k)==full.get(k) for k in app_keys),'full application replay differs from compact execution')
-                        proof=verify_progress_trace(Path(full['trace_file']),old_last['execution'],old_bundle,bundle)
-                        require(proof['trace_sha256']==full['trace_sha256'],'application full trace changed during progress verification')
-                        (full_dir/'progress.json').write_text(json.dumps(proof,indent=2)+'\n',encoding='utf-8')
-                        summary.setdefault('application_progress',{})[mode]=proof
+                        if config.get('application_progress_baseline'):
+                            old_report=read_json(build_destination(ROOT/config['application_progress_baseline']))
+                            old_last=old_report['iterations'][-1]
+                            old_bundle=read_json(build_destination(Path(old_last['bundle'])/'manifest.json'))
+                            proof=verify_progress_trace(Path(full['trace_file']),old_last['execution'],old_bundle,bundle)
+                            require(proof['trace_sha256']==full['trace_sha256'],'application full trace changed during progress verification')
+                            (full_dir/'progress.json').write_text(json.dumps(proof,indent=2)+'\n',encoding='utf-8')
+                            summary.setdefault('application_progress',{})[mode]=proof
+                        if config.get('application_resource_progress_baseline'):
+                            old_report=read_json(build_destination(ROOT/config['application_resource_progress_baseline']))
+                            old_last=old_report['iterations'][-1]
+                            old_bundle=read_json(build_destination(Path(old_last['bundle'])/'manifest.json'))
+                            verify_full_trace(Path(full['trace_file']),full)
+                            proof=verify_resource_progress_trace(Path(full['trace_file']),old_last['execution'],old_bundle,bundle,
+                                                                 full,config['application_resource_owner'])
+                            (full_dir/'resource-progress.json').write_text(json.dumps(proof,indent=2)+'\n',encoding='utf-8')
+                            summary.setdefault('application_resource_progress',{})[mode]=proof
                     app_experiments[mode]=e
                 require(all(app_experiments['cmake'].get(k)==app_experiments['gcc'].get(k) for k in app_keys),
                     'native compilers reached different original application prefixes or provider states')

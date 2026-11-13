@@ -16,7 +16,8 @@ class Services(Structure):
 class ApplicationServicesTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        source=f'#include "{(ROOT/"src/application_services.c").as_posix()}"\n'
+        source=('#define separate oot_test_platform_separate\n#include "native_platform.c"\n#undef separate\n'
+                f'#include "{(ROOT/"src/application_services.c").as_posix()}"\n')
         cls.lib,_=compile_library([],os.environ.get('OOT_LIFTER_COMPILER','cmake'),extra_source=source)
         cls.prepare=cls.lib.oot_application_services_prepare
         cls.prepare.argtypes=[POINTER(Services),c_uint32,c_uint32,POINTER(State),POINTER(Services),POINTER(State)]

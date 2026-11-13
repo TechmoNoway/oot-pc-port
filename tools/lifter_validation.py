@@ -165,7 +165,7 @@ def find_cmake():
     return str(path)
 
 
-def compile_library(programs, mode="cmake", extra_source="", startup=False):
+def compile_library(programs, mode="cmake", extra_source="", startup=False, *, split_programs=False):
     parent = ROOT / "build/lifter-validation"
     parent.mkdir(parents=True, exist_ok=True)
     directory = Path(tempfile.mkdtemp(prefix=f"{mode}-", dir=parent))
@@ -181,7 +181,18 @@ def compile_library(programs, mode="cmake", extra_source="", startup=False):
             code += "\n" + emit_frame_descriptor(program.data, program.base, program.frame_leaves, f"oot_lift_{program.name}")
         chunks.append(code)
         reports.append(report)
-    source.write_text("\n".join(chunks) + "\n" + extra_source, encoding="utf-8")
+    if split_programs:
+        # Bound each compiler invocation without dropping cases or increasing
+        # its timeout. Each emitted program owns its exports and descriptors.
+        sources=[]
+        for index,chunk in enumerate(chunks):
+            unit=directory/f"lifted-{index:03d}.c"
+            unit.write_text(chunk,encoding="utf-8");sources.append(unit)
+        if extra_source:
+            unit=directory/'extra.c';unit.write_text(extra_source,encoding="utf-8");sources.append(unit)
+    else:
+        source.write_text("\n".join(chunks) + "\n" + extra_source, encoding="utf-8")
+        sources=[source]
 
     def run(command):
         result = subprocess.run(command, capture_output=True, text=True, timeout=180)
@@ -193,19 +204,28 @@ def compile_library(programs, mode="cmake", extra_source="", startup=False):
         compiler = shutil.which("gcc")
         require(compiler is not None, "gcc is not available on PATH")
         library = directory / ("lifted.dll" if os.name == "nt" else "lifted.so")
-        run([compiler, "-std=c17", "-O2", "-Wall", "-Wextra", "-Wpedantic", "-Werror", "-shared",
+        command=[compiler, "-std=c17", "-O2", "-Wall", "-Wextra", "-Wpedantic", "-Werror",
              "-DOOT_MEMORY_SHARED_EXPORTS", "-D_CRT_SECURE_NO_WARNINGS", "-D_WIN32_WINNT=0x0A00",
-             "-I", str(ROOT / "src"), str(source), str(ROOT / "src/guest_memory.c"),
+             "-I", str(ROOT / "src")]
+        inputs=[*map(str,sources), str(ROOT / "src/guest_memory.c"),
              str(ROOT / "src/runtime_image.c"), str(ROOT / "src/host_win32.c"), str(ROOT / "src/leaf_dispatch.c"),
              str(ROOT / "src/frame_dispatch.c"), str(ROOT / "src/stack_dispatch.c"), str(ROOT / "src/pauth.c"), str(ROOT / "src/checked_read.c"), str(ROOT / "src/plt_bridge.c"),
              *([str(ROOT / 'src'/name) for name in ('startup_context.c','startup_dispatch.c','sdk_native.c','native_platform.c','native_services.c','native_math.c','startup_vector.c','startup_float.c','startup_init_atomic.c','application_services.c','native_romfs.c')] if startup else []),
-             "-lbcrypt", "-o", str(library)])
+             ]
+        if split_programs:
+            objects=[]
+            for index,item in enumerate(inputs):
+                obj=directory/f"unit-{index:03d}.o"
+                run(command+["-c",item,"-o",str(obj)]);objects.append(str(obj))
+            run([compiler,"-shared",*objects,"-lbcrypt","-o",str(library)])
+        else:
+            run(command+["-shared",*inputs,"-lbcrypt","-o",str(library)])
         compiler_info = subprocess.run([compiler, "--version"], capture_output=True, text=True, check=True).stdout.splitlines()[0]
     else:
         cmake = find_cmake()
         (directory / "CMakeLists.txt").write_text(
             'cmake_minimum_required(VERSION 3.20)\nproject(lift_validation LANGUAGES C)\n'
-            f'add_library(lifted SHARED lifted.c "{(ROOT / "src/guest_memory.c").as_posix()}" '
+            'add_library(lifted SHARED '+ ' '.join('"'+s.as_posix()+'"' for s in sources)+f' "{(ROOT / "src/guest_memory.c").as_posix()}" '
             f'"{(ROOT / "src/runtime_image.c").as_posix()}" "{(ROOT / "src/host_win32.c").as_posix()}" '
             f'"{(ROOT / "src/leaf_dispatch.c").as_posix()}" "{(ROOT / "src/frame_dispatch.c").as_posix()}" '
             f'"{(ROOT / "src/stack_dispatch.c").as_posix()}" "{(ROOT / "src/pauth.c").as_posix()}" "{(ROOT / "src/checked_read.c").as_posix()}" "{(ROOT / "src/plt_bridge.c").as_posix()}" '+
@@ -214,7 +234,7 @@ def compile_library(programs, mode="cmake", extra_source="", startup=False):
             'target_compile_definitions(lifted PRIVATE OOT_MEMORY_SHARED_EXPORTS _CRT_SECURE_NO_WARNINGS _WIN32_WINNT=0x0A00)\n'
             'target_compile_features(lifted PRIVATE c_std_17)\n'
             f'target_include_directories(lifted PRIVATE "{(ROOT / "src").as_posix()}")\n'
-            'if(MSVC)\n target_compile_options(lifted PRIVATE /W4 /WX)\n'
+            'if(MSVC)\n target_compile_options(lifted PRIVATE /W4 /WX'+(' /MP4' if split_programs else '')+')\n'
             'else()\n target_compile_options(lifted PRIVATE -Wall -Wextra -Wpedantic -Werror)\nendif()\n',
             encoding="utf-8")
         run([cmake, "-S", str(directory), "-B", str(directory / "native"), "-DCMAKE_BUILD_TYPE=Release"])
@@ -230,7 +250,8 @@ def compile_library(programs, mode="cmake", extra_source="", startup=False):
             r'set\(CMAKE_C_COMPILER(?:_ID|_VERSION)? "([^"]+)"\)', compiler_text))
         require(bool(compiler_info), "missing native compiler identity")
     return CDLL(str(library)), {"mode": mode, "compiler": compiler_info,
-                                "directory": str(directory), "programs": reports}
+                                "directory": str(directory), "programs": reports,
+                                "translation_units": [s.name for s in sources]}
 
 
 def validate_program(library, program):
@@ -300,7 +321,7 @@ def validate_program(library, program):
 
 def run_validation(mode="cmake"):
     programs = synthetic_programs()
-    library, build = compile_library(programs, mode)
+    library, build = compile_library(programs, mode, split_programs=True)
     count = sum(validate_program(library, program) for program in programs)
     memory_policy = validate_memory_policy(library) + validate_pair_policy(library)
     observed_forms = sorted({ins.form for p in programs for ins in decode_block(p.data, p.base)})

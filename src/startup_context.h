@@ -28,6 +28,7 @@
 typedef struct OotStartupContext OotStartupContext;
 OOT_MEMORY_API int oot_startup_context_application_enabled(const OotStartupContext *context);
 OOT_MEMORY_API const OotApplicationServices *oot_startup_context_application_services(const OotStartupContext *context);
+OOT_MEMORY_API uint64_t oot_startup_context_application_resource_queries(const OotStartupContext *context);
 typedef struct OotApplicationThreadState {
     uint32_t priority,core;
     uint64_t affinity,priority_updates,affinity_updates;

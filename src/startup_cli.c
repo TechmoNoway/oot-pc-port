@@ -283,6 +283,9 @@ int oot_startup_cli(int argc, char **argv)
         oot_startup_dispatch_application_entry_retired(dispatcher) ? "true":"false",oot_startup_dispatch_post_entry_retired(dispatcher));
     if(program->flags&OOT_STARTUP_APPLICATION){
         const OotApplicationServices *app=oot_startup_context_application_services(context);
+        const OotNativePlatform *owner=oot_startup_context_platform(context);
+        printf(",\"application_resource\":{\"logical_process_id\":%" PRIu64 ",\"active\":%u,\"queries\":%" PRIu64 "}",
+            owner->config.process_id,owner->initialized,oot_startup_context_application_resource_queries(context));
         printf(",\"application_services\":{\"policy_calls\":%" PRIu64 ",\"graphics_notifications\":%u,\"language_code\":%" PRIu64 ",\"language_calls\":%" PRIu64 "}",app->policy_calls,app->graphics_notifications,app->language_code,app->language_calls);
         OotApplicationThreadState thread={0};
         if(oot_startup_context_application_thread(context,&thread))printf(",\"application_thread\":{\"priority\":%u,\"core\":%u,\"ideal_core\":%u,\"affinity\":%" PRIu64 ",\"priority_updates\":%" PRIu64 ",\"affinity_updates\":%" PRIu64 "}",

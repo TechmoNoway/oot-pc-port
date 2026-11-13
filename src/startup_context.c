@@ -26,6 +26,7 @@ struct OotStartupContext {
     OotNativeServices services;
     OotRomFs *romfs;
     OotApplicationServices application;
+    uint64_t application_resource_queries;
     OotApplicationThreadState application_thread;
     OotStartupVectorState vectors;
     OotGuestMemory memory;
@@ -320,6 +321,8 @@ int oot_startup_context_application_enabled(const OotStartupContext *c)
 { return oot_startup_context_init_enabled(c) && !!(c->sdk.flags & OOT_SDK_APPLICATION); }
 const OotApplicationServices *oot_startup_context_application_services(const OotStartupContext *c)
 { return oot_startup_context_application_enabled(c) ? &c->application:NULL; }
+uint64_t oot_startup_context_application_resource_queries(const OotStartupContext *c)
+{ return oot_startup_context_application_enabled(c) ? c->application_resource_queries:0; }
 int oot_startup_context_application_thread(const OotStartupContext *c,OotApplicationThreadState *out)
 { if(!out || !oot_startup_context_application_enabled(c))return 0;*out=c->application_thread;return 1; }
 int oot_startup_context_set_romfs(OotStartupContext *c,const char *path,const uint8_t seal[32])
@@ -331,10 +334,10 @@ int oot_startup_context_romfs_stats(const OotStartupContext *c,OotRomFsStats *ou
 { return oot_startup_context_application_enabled(c) && oot_romfs_stats(c->romfs,out); }
 int oot_startup_context_handler_valid(const OotStartupContext *c, uint32_t id)
 { return oot_startup_context_native_enabled(c) && (oot_sdk_native_handler_valid(id) ||
-    (oot_startup_context_application_enabled(c) && (id==OOT_APPLICATION_GRAPHICS_NOTIFICATIONS || id==OOT_APPLICATION_DESIRED_LANGUAGE || oot_romfs_handler_valid(id))) ||
+    (oot_startup_context_application_enabled(c) && (id==OOT_APPLICATION_GRAPHICS_NOTIFICATIONS || id==OOT_APPLICATION_DESIRED_LANGUAGE || id==OOT_APPLICATION_RESOURCE_USER_ID || oot_romfs_handler_valid(id))) ||
     (oot_startup_context_init_enabled(c) && (id==OOT_NATIVE_MATH_LOG || id==OOT_NATIVE_OS_GET_SYSTEM_TICK || oot_native_platform_handler_valid(id) || oot_native_services_handler_valid(id)))); }
 int oot_startup_context_returns_value(const OotStartupContext *c, uint32_t id)
-{ return (oot_startup_context_application_enabled(c) && (id==OOT_APPLICATION_DESIRED_LANGUAGE || oot_romfs_returns_value(id))) || (oot_startup_context_init_enabled(c) && (id==OOT_NATIVE_OS_GET_SYSTEM_TICK || oot_native_platform_returns_value(id) || oot_native_services_returns_value(id))); }
+{ return (oot_startup_context_application_enabled(c) && (id==OOT_APPLICATION_DESIRED_LANGUAGE || id==OOT_APPLICATION_RESOURCE_USER_ID || oot_romfs_returns_value(id))) || (oot_startup_context_init_enabled(c) && (id==OOT_NATIVE_OS_GET_SYSTEM_TICK || oot_native_platform_returns_value(id) || oot_native_services_returns_value(id))); }
 const OotNativePlatform *oot_startup_context_platform(const OotStartupContext *c)
 { return oot_startup_context_init_enabled(c) ? &c->platform : NULL; }
 const OotNativeServices *oot_startup_context_services(const OotStartupContext *c)
@@ -357,6 +360,7 @@ int oot_startup_context_native_call(OotStartupContext *c, uint32_t id,
     OotNativeServicesWrite services_write={0};
     int status, provider=0;
     uint64_t write_address=0;
+    uint64_t resource_queries=0;
     uint32_t write_size=0;
     const uint8_t *write_bytes=NULL;
     if (report && state) {
@@ -409,6 +413,10 @@ int oot_startup_context_native_call(OotStartupContext *c, uint32_t id,
         ++c->native.calls;*state=result;
         if(report)*report=(OotNativeReport){OOT_NATIVE_IMPLEMENTED,id,OOT_NATIVE_OK,0};
         return OOT_NATIVE_IMPLEMENTED;
+    } else if (oot_startup_context_application_enabled(c) && id==OOT_APPLICATION_RESOURCE_USER_ID) {
+        provider=4;
+        status=oot_application_resource_prepare(&c->platform,c->application_resource_queries,state,&resource_queries,&result);
+        if(report)*report=(OotNativeReport){(uint32_t)status,id,status==OOT_NATIVE_FAULT ? OOT_NATIVE_BAD_STATE:OOT_NATIVE_OK,0};
     } else if (oot_startup_context_application_enabled(c) && (id==OOT_APPLICATION_GRAPHICS_NOTIFICATIONS || id==OOT_APPLICATION_DESIRED_LANGUAGE)) {
         provider=3;
         status=oot_application_services_prepare(&c->application,id,c->platform.initialized,state,&application,&result);
@@ -446,6 +454,7 @@ int oot_startup_context_native_call(OotStartupContext *c, uint32_t id,
     if (provider==1) c->platform=platform;
     else if (provider==2) c->services=services;
     else if (provider==3) c->application=application;
+    else if (provider==4) c->application_resource_queries=resource_queries;
     if (provider) ++c->native.calls;
     else c->native=next;
     *state=result;

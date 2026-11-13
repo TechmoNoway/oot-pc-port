@@ -2,7 +2,23 @@
 
 Development is organized around complete capabilities and measured blocker cohorts. A milestone includes its dependent instruction/runtime changes, verifier integration, synthetic native evidence, fresh private surveys, documentation and a reviewed commit/push on `dev`. The assistant completes these substeps autonomously within the authorized scope and reports the result at the milestone boundary. Small instruction families no longer require separate user prompts or separate releases.
 
-## Current milestone: application narrow CAS
+## Current milestone: application resource identity
+
+The [resource identity design](superpowers/specs/2026-11-13-application-resource-identity-design.md)
+and [plan](superpowers/plans/2026-11-13-application-resource-identity.md) extend the
+existing native process metadata through exact original getter bindings. Other
+am consumers remain guarded. Focused checks and both bounded original pilots
+passed. The native-frontier proof retains the entire earlier trace prefix and
+checks the source-bound getter event/query count. The measured next boundary
+is the graphics-supervisor API. The fresh full run at
+`build/milestones/application-resource-identity-v2/` passes all 42 stages,
+672 Python tests without skips, seven CTest groups and 283,401 common comparisons
+per compiler, with the current source fingerprint. Both native full traces
+prove the resource getter crossing and preserve every preceding profile.
+The common matrix now uses independently compiled units after a reproduced
+monolithic GCC compile timeout, retaining all cases and existing timeouts.
+
+## Preceding application narrow CAS
 
 The [narrow-CAS plan](superpowers/plans/2026-11-13-application-narrow-cas.md)
 adds application-only byte/halfword compare-and-swap through the existing

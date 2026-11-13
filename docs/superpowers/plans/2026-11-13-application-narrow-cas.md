@@ -107,7 +107,7 @@ milestone commit rules. Never edit frozen SIMD source during its active run.
   a run source_sha256 equal to current run_milestone.source_digest().
 - [x] Fix genuine failures with fresh outputs; never weaken endpoints, skip tests,
   edit fingerprints or recover by fabricating passed markers.
-- [ ] Fetch/inspect origin/dev, integrate changes without force if necessary,
+- [x] Fetch/inspect origin/dev, integrate changes without force if necessary,
   review/stage only intended source/tests/config/docs, commit in English, push
   dev and verify HEAD equals origin/dev. Then continue from the next measured
   boundary toward actual original-game output/input.
@@ -131,5 +131,7 @@ resource getter at 311,535 post-entry instructions. All earlier profiles and
 static baselines are retained. Current source_sha256 matches
 `73babecba98a5534d153da6259332095c9b0d9ec5a14a4b221b576bfb03a523a`.
 No stage was skipped or recovered by editing pass markers. A fresh fetch found
-dev and origin/dev synchronized at `dec936d` before CAS integration. Git delivery
-must still be verified before reporting it as complete.
+dev and origin/dev synchronized at `dec936d` before CAS integration. Commit
+`977149f86aafbdbb8309d0f2740d909c5678564a` was then pushed and verified on origin/dev.
+Later resource-identity changes require their own fresh validation; this run
+certifies the immutable CAS implementation checkpoint.

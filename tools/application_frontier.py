@@ -117,6 +117,75 @@ def verify_full_trace(path,execution):
             last['retired']==execution.get('retired'),'full trace digest/accounting differs from native report')
 
 
+def verify_resource_progress_trace(trace,baseline_execution,baseline_bundle,current_bundle,execution,expected_owner):
+    """Read-only native resource proof; caller first verifies native full trace.
+
+    Replacing the old STOP row in the prefix hash proves every preceding row
+    is unchanged, without loading the historical multi-megabyte full trace.
+    A native call consumes work but retires no original instruction.
+    """
+    require(module_identities(baseline_bundle)==module_identities(current_bundle),'resource original modules changed')
+    e=baseline_execution;app='_ZN2nn6applet23GetAppletResourceUserIdEv';am='_ZN2nn2am23GetAppletResourceUserIdEv'
+    require(e.get('error')==9 and e.get('native_handler_stop') is True and e.get('service')==31 and
+        type(e.get('retired')) is int and e['retired']>0 and type(e.get('native_calls')) is int and e['native_calls']>=0 and
+        isinstance(e.get('pc'),str) and re.fullmatch('0x[0-9a-f]+',e['pc']) and
+        isinstance(e.get('trace_sha256'),str) and re.fullmatch('[0-9a-f]{64}',e['trace_sha256']),
+        'baseline is not a native resource guard frontier')
+    pc=int(e['pc'],16)
+    old=[f for f in baseline_bundle.get('native_audit',{}).get('functions',[]) if f.get('entry')==pc]
+    audit=current_bundle.get('native_audit',{});getters=[f for f in audit.get('functions',[]) if f.get('handler_id')==322]
+    require(len(old)==1 and old[0].get('handler_id')==31 and old[0].get('names')==[app] and
+        len(getters)==2 and {tuple(f.get('names',[])) for f in getters}=={(app,),(am,)},'resource getter binding domain differs')
+    public=next(f for f in getters if f['names']==[app]);domain=audit.get('application_resource_identity',{})
+    keys=('symbol','module','entry','size','body_sha256','symbol_metadata','entry_instruction')
+    require(all(old[0].get(k)==public.get(k) for k in keys) and public['entry']==pc and
+        domain.get('return_bytes')==8 and domain.get('exported_am_consumer_closure') is True,
+        'resource source body or ownership domain changed')
+    sources={}
+    for f in getters:
+        named=domain.get('public' if f['names']==[app] else 'getter',{})
+        require(f.get('module')=='sdk' and f.get('returns_value') is True and f.get('return_register')=='X0' and
+            all(f.get(k)==named.get(k) for k in keys) and
+            isinstance(f.get('body_sha256'),str) and re.fullmatch('[0-9a-f]{64}',f['body_sha256']),
+            'resource accessor lacks its source-proved full-width ABI')
+        word=f.get('entry_word');entry=f['entry'];instruction=f.get('entry_instruction',{})
+        require(instruction.get('address')==entry and instruction.get('word')==word and
+            type(word) is int and 0<=word<=0xffffffff,'resource accessor entry word differs')
+        source=dict(address=entry,word=word,module='sdk',source_sha256=module_identities(current_bundle)['sdk'][1],
+                    word_sha256=instruction.get('sha256'))
+        validate_site(source,current_bundle,entry,word);sources[entry]=source
+    require(public['entry_word']==e.get('word') and old[0].get('entry_word')==e.get('word'),
+            'resource former guard word changed')
+    resource=execution.get('application_resource',{})
+    require(type(expected_owner) is int and 0<expected_owner<1<<64 and
+        type(execution.get('native_calls')) is int and execution['native_calls']>=0 and
+        type(resource.get('logical_process_id')) is int and resource['logical_process_id']==expected_owner and
+        type(resource.get('active')) is int and resource['active']==1 and
+        type(resource.get('queries')) is int and 0<resource['queries']<1<<64,'resource owner/counter report differs')
+    stop=dict(pc=e['pc'],next_pc=e['pc'],retired=e['retired'],word=e['word'],event=2,error=9,service=31)
+    stop_bytes=json.dumps(stop,separators=(',',':')).encode()+b'\n'
+    digest=hashlib.sha256();crossing=None;native=queries=0
+    for line,row in trace_rows(trace):
+        if row['event']==3:native+=1
+        if row['event']==3 and row['service']==322:
+            source=sources.get(int(row['pc'],16));target=int(row['next_pc'],16)
+            require(source is not None and row['word']==source['word'] and row['error']==0 and
+                row['retired']>=e['retired'] and 4<=target<1<<39 and target%4==0 and target!=int(row['pc'],16),
+                'resource event word/source/return/checkpoint differs')
+            queries+=1
+            if row['pc']==e['pc'] and row['retired']==e['retired']:
+                require(crossing is None and native==e['native_calls']+1,'duplicate or displaced native resource crossing')
+                prefix=digest.copy();prefix.update(stop_bytes)
+                require(prefix.hexdigest()==e['trace_sha256'],'original trace prefix before the resource guard changed')
+                crossing=row
+        digest.update(line)
+    require(crossing is not None and queries==resource['queries'] and native==execution.get('native_calls') and
+        digest.hexdigest()==execution.get('trace_sha256'),'resource crossing/counters/full digest differ')
+    return dict(format='oot-application-resource-progress',crossing=crossing,source_site=sources[pc],
+        original_prefix_sha256=e['trace_sha256'],trace_sha256=digest.hexdigest(),resource_events=queries,
+        logical_process_id=expected_owner,runtime_authority_granted=False)
+
+
 def private_json(path):
     path=build_destination(Path(path))
     require(path.is_file() and path.stat().st_size<=128*1024*1024,'invalid private report input')
@@ -128,6 +197,7 @@ def main():
     commands=parser.add_subparsers(dest='mode',required=True)
     survey=commands.add_parser('survey');survey.add_argument('--manifest',type=Path,required=True)
     progress=commands.add_parser('progress')
+    progress.add_argument('--resource-owner',type=int,help='explicit native resource proof for the declared logical owner')
     for name in ('baseline','run','trace'):progress.add_argument('--'+name,type=Path,required=True)
     for command in (survey,progress):command.add_argument('--output',type=Path,required=True)
     args=parser.parse_args()
@@ -137,8 +207,10 @@ def main():
         else:
             old=private_json(args.baseline)['iterations'][-1];new=private_json(args.run)['iterations'][-1]
             trace=build_destination(args.trace);verify_full_trace(trace,new['execution'])
-            report=verify_progress_trace(trace,old['execution'],private_json(Path(old['bundle'])/'manifest.json'),
-                                         private_json(Path(new['bundle'])/'manifest.json'))
+            old_bundle=private_json(Path(old['bundle'])/'manifest.json');new_bundle=private_json(Path(new['bundle'])/'manifest.json')
+            if args.resource_owner is not None:
+                report=verify_resource_progress_trace(trace,old['execution'],old_bundle,new_bundle,new['execution'],args.resource_owner)
+            else:report=verify_progress_trace(trace,old['execution'],old_bundle,new_bundle)
             require(report['trace_sha256']==new['execution']['trace_sha256'],'trace changed during progress verification')
         output.parent.mkdir(parents=True,exist_ok=True)
         with output.open('x',encoding='utf-8') as stream:stream.write(json.dumps(report,indent=2)+'\n')
