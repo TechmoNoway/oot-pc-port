@@ -3,8 +3,10 @@
 #define VK_NO_PROTOTYPES
 #include <windows.h>
 #include <vulkan/vulkan_core.h>
+#include <vulkan/vulkan_win32.h>
 #include <stdlib.h>
 #include <string.h>
+#include <wchar.h>
 #include "native_graphics.h"
 
 struct OotGraphics {
@@ -17,6 +19,13 @@ struct OotGraphics {
     VkDevice device;
     VkQueue queue;
     OotGraphicsReport report;
+    OotDisplayReport display_report;
+    HINSTANCE window_module;
+    ATOM window_class;
+    HWND window;
+    DWORD window_thread;
+    VkSurfaceKHR surface;
+    PFN_vkDestroySurfaceKHR destroy_surface;
 };
 
 static int disjoint(const void *a,size_t an,const void *b,size_t bn)
@@ -26,8 +35,17 @@ static int disjoint(const void *a,size_t an,const void *b,size_t bn)
 }
 static int live(const OotGraphics *g)
 { return g->instance && g->physical && g->device && g->queue && g->destroy_instance && g->destroy_device; }
+static void release_display(OotGraphics *g)
+{
+    if(g->surface && g->destroy_surface)g->destroy_surface(g->instance,g->surface,NULL);
+    if(g->window)DestroyWindow(g->window);
+    if(g->window_class)UnregisterClassW((LPCWSTR)(ULONG_PTR)g->window_class,g->window_module);
+    g->surface=VK_NULL_HANDLE;g->window=NULL;g->window_class=0;g->window_thread=0;
+    g->window_module=NULL;g->destroy_surface=NULL;
+}
 static void release_resources(OotGraphics *g)
 {
+    release_display(g);
     /* Bootstrap submits no work and creates no device children. Extend this
      * teardown when a later renderer starts owning either kind of resource. */
     if(g->device && g->destroy_device)g->destroy_device(g->device,NULL);
@@ -114,11 +132,40 @@ static int bootstrap(OotGraphics *g)
 done:
     free(physical);return success;
 }
+
+static int initialize_display(OotGraphics *g,const void *owner)
+{
+    PFN_vkCreateWin32SurfaceKHR create_surface=NULL;
+    PFN_vkGetPhysicalDeviceSurfaceSupportKHR support=NULL;
+    WNDCLASSEXW wc={0};wchar_t name[64];VkWin32SurfaceCreateInfoKHR ci={0};
+    VkSurfaceKHR created_surface=VK_NULL_HANDLE;VkBool32 supported=VK_FALSE;
+    if(!PROC(g,vkCreateWin32SurfaceKHR,create_surface) ||
+       !PROC(g,vkDestroySurfaceKHR,g->destroy_surface) ||
+       !PROC(g,vkGetPhysicalDeviceSurfaceSupportKHR,support))return 0;
+    g->window_module=GetModuleHandleW(NULL);if(!g->window_module)return 0;
+    if(swprintf(name,sizeof(name)/sizeof(*name),L"oot-pc-port-%p",owner)<0)return 0;
+    wc.cbSize=sizeof(wc);wc.lpfnWndProc=DefWindowProcW;
+    wc.hInstance=g->window_module;wc.lpszClassName=name;
+    g->window_class=RegisterClassExW(&wc);if(!g->window_class)return 0;
+    /* A real, hidden surface probe. Guest dimensions/visibility belong to a
+     * later proved Layer API; do not advertise this size as guest capability. */
+    g->window=CreateWindowExW(0,(LPCWSTR)(ULONG_PTR)g->window_class,L"oot-pc-port",
+        WS_OVERLAPPEDWINDOW,CW_USEDEFAULT,CW_USEDEFAULT,1280,720,NULL,NULL,g->window_module,NULL);
+    if(!g->window)return 0;
+    g->window_thread=GetCurrentThreadId();
+    ci.sType=VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR;
+    ci.hinstance=g->window_module;ci.hwnd=g->window;
+    if(create_surface(g->instance,&ci,NULL,&created_surface)!=VK_SUCCESS || !created_surface)return 0;
+    g->surface=created_surface;
+    if(support(g->physical,g->report.queue_family,g->surface,&supported)!=VK_SUCCESS || supported!=VK_TRUE)return 0;
+    return 1;
+}
 #undef PROC
 
 OotGraphics *oot_graphics_create(void)
 {
-    OotGraphics *g=calloc(1,sizeof(*g));if(g)g->report.version=1;return g;
+    OotGraphics *g=calloc(1,sizeof(*g));
+    if(g){g->report.version=1;g->display_report.version=1;}return g;
 }
 void oot_graphics_destroy(OotGraphics *g)
 { if(g){release_resources(g);memset(g,0,sizeof(*g));free(g);} }
@@ -126,6 +173,11 @@ int oot_graphics_snapshot(const OotGraphics *g,OotGraphicsReport *out)
 {
     if(!g || !out || !disjoint(g,sizeof(*g),out,sizeof(*out)))return 0;
     *out=g->report;return 1;
+}
+int oot_graphics_display_snapshot(const OotGraphics *g,OotDisplayReport *out)
+{
+    if(!g || !out || !disjoint(g,sizeof(*g),out,sizeof(*out)))return 0;
+    *out=g->display_report;return 1;
 }
 int oot_graphics_call(OotGraphics *g,uint32_t id,const OotArm64State *s,OotArm64State *out)
 {
@@ -136,6 +188,23 @@ int oot_graphics_call(OotGraphics *g,uint32_t id,const OotArm64State *s,OotArm64
        (g->report.ready && !live(g)) || !s->pc || s->pc>=(UINT64_C(1)<<39) || s->pc%4 ||
        s->sp%16 || s->x[30]<4 || s->x[30]>=(UINT64_C(1)<<39) || s->x[30]%4 ||
        (s->nzcv&UINT32_C(0x0fffffff)))return 2;
+    if(id==OOT_DISPLAY_INITIALIZE){
+        if(g->display_report.version!=1 || g->display_report.reserved || g->display_report.ready>1 ||
+           g->display_report.calls==UINT64_MAX || g->display_report.initializations==UINT64_MAX)return 2;
+        if(!g->report.ready || !live(g))return 1;
+        if(g->display_report.ready){
+            if(g->window_thread!=GetCurrentThreadId())return 2;
+            if(!g->surface || !g->window_class || !g->destroy_surface ||
+               !IsWindow(g->window) || g->display_report.presentation_supported!=1)return 1;
+        }
+        result=*s;result.pc=s->x[30];next=*g;
+        if(!next.display_report.ready){
+            if(!initialize_display(&next,g)){release_display(&next);return 1;}
+            next.display_report.ready=1;next.display_report.presentation_supported=1;
+        }
+        ++next.display_report.calls;++next.display_report.initializations;
+        *g=next;*out=result;return 0;
+    }
     if(id!=OOT_GRAPHICS_BOOT && id!=OOT_GRAPHICS_CHECK)return 1;
     if(g->report.calls==UINT64_MAX || (id==OOT_GRAPHICS_BOOT ? g->report.boots:g->report.checks)==UINT64_MAX)return 2;
     if(id==OOT_GRAPHICS_CHECK && !g->report.ready)return 1;

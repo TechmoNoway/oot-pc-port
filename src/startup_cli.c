@@ -161,7 +161,8 @@ int oot_startup_cli(int argc, char **argv)
     }
     pauth=oot_pauth_create(OOT_PAUTH_QARMA5_VA39,NULL);
     if (!pauth) { fputs("Startup PAC context failed.\n",stderr); goto cleanup; }
-    dispatcher=(program->flags&OOT_STARTUP_GRAPHICS) ? oot_startup_dispatch_create_graphics(image,context,pauth,program,limit,&error) :
+    dispatcher=(program->flags&OOT_STARTUP_DISPLAY) ? oot_startup_dispatch_create_display(image,context,pauth,program,limit,&error) :
+        (program->flags&OOT_STARTUP_GRAPHICS) ? oot_startup_dispatch_create_graphics(image,context,pauth,program,limit,&error) :
         (program->flags&OOT_STARTUP_APPLICATION) ? oot_startup_dispatch_create_application(image,context,pauth,program,limit,&error) :
         (program->flags&OOT_STARTUP_HOST_LINKED) ? oot_startup_dispatch_create_host(image,context,pauth,program,limit,&error) :
         oot_startup_context_init_enabled(context) ? oot_startup_dispatch_create_init(image,context,pauth,program,limit,&error) :
@@ -282,6 +283,11 @@ int oot_startup_cli(int argc, char **argv)
     if(fast_functions)printf(",\"fast_function_calls\":%" PRIu64,oot_startup_dispatch_fast_calls(dispatcher));
     if(program->flags&OOT_STARTUP_APPLICATION)printf(",\"application_runtime\":true,\"application_entry_retired\":%s,\"post_entry_retired\":%" PRIu64,
         oot_startup_dispatch_application_entry_retired(dispatcher) ? "true":"false",oot_startup_dispatch_post_entry_retired(dispatcher));
+    if(program->flags&OOT_STARTUP_DISPLAY){
+        OotDisplayReport display={0};printf(",\"display_runtime\":true");
+        if(oot_startup_context_display_report(context,&display))printf(",\"application_display\":{\"ready\":%s,\"presentation_supported\":%s,\"calls\":%" PRIu64 ",\"initializations\":%" PRIu64 "}",
+            display.ready ? "true":"false",display.presentation_supported ? "true":"false",display.calls,display.initializations);
+    }
     if(program->flags&OOT_STARTUP_GRAPHICS){
         OotGraphicsReport g={0};
         printf(",\"graphics_runtime\":true");

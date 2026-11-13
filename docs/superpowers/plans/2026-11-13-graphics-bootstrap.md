@@ -32,7 +32,9 @@ Git text line endings; their canonical content hash is
 `071b2aaad657f5919053b4763ce8a2c9ce6a80d3ee38291b564879f707025c62`.
 Both original full graphics replays match the measured prototype's trace,
 52 native calls, one boot/one check and 313,014 post-entry instructions. Keep this
-checkpoint immutable while verifying commit/push delivery.
+checkpoint immutable. It is delivered as commit `7434802ef157cb8f76c8185e89fa66a90f9a6fac`
+on origin/dev, with a clean tree at delivery and post-commit source-content
+verification. Its source fingerprint is now historical as VI work begins.
 
 The actual GSV caller is the original VI initializer, before OpenDefaultDisplay,
 CreateLayer and nvnBootstrapLoader. A separate source-frozen display prototype

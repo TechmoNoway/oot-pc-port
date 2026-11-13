@@ -314,6 +314,22 @@ def validate_graphics_config(config):
             'graphics bootstrap requires its observed unsupported session boundary')
 
 
+def validate_display_config(config):
+    if 'display_experiment' in config or config.get('name')=='display-initialization':
+        require(type(config.get('display_experiment')) is bool,'invalid display milestone flag')
+    if config.get('name')=='display-initialization':
+        require(config.get('display_experiment') is True,'display milestone requires real display execution')
+    if not config.get('display_experiment'):return
+    require(config.get('graphics_experiment') is True and config.get('application_experiment') is True,
+            'display must retain both preceding graphics/application profiles')
+    require(all(isinstance(config.get(k),str) and config[k] for k in ('display_seed_report','display_baseline')),
+            'display seed/full graphics baseline provenance is absent')
+    require(type(config.get('display_min_post_entry')) is int and config['display_min_post_entry']>0,
+            'display requires the measured positive original continuation')
+    require(config.get('display_expected_guard')=='_ZN2nn2vi18OpenDefaultDisplayEPPNS0_7DisplayE',
+            'display initialization requires its observed unsupported object boundary')
+
+
 class MilestoneRun:
     def __init__(self, output, name, stages):
         self.output = build_destination(output)
@@ -469,6 +485,81 @@ def run_graphics_lanes(run,config,env):
     return dict(graphics_experiments=experiments,graphics_progress=proofs)
 
 
+def run_display_lanes(run,config,env):
+    """A separate VI profile over real graphics, retaining every preceding lane."""
+    from build_startup import execute as execute_startup,validated_romfs_input
+    from display_progress import verify_display_progress_trace
+    from startup_sources import cached_sources
+    prepared=ROOT/config['prepared'];entropy=run.output/'process-entropy.bin'
+    seed=read_json(build_destination(ROOT/config['display_seed_report']));prior=seed['iterations'][-1]
+    provenance=read_json(build_destination(Path(prior['bundle'])/'manifest.json'))
+    sdk_audit=read_json(run.output/'sdk-audit.json');audit=read_json(run.output/'display-audit.json')
+    require(seed.get('display_runtime') is True and seed.get('application_runtime') is True and
+            seed.get('host_linked') is True and provenance.get('display_runtime') is True and
+            provenance['sdk_npdm']['source_sha256']==sdk_audit['npdm']['source_sha256'] and
+            provenance['sdk_audit']['goal_entry']==sdk_audit['goal_entry'],'display seed input/profile differs')
+    old_root=build_destination(ROOT/config['display_baseline']);old_run=read_json(old_root/'run.json')
+    require(old_run.get('status')=='passed' and old_run.get('name')=='graphics-bootstrap' and
+            {'graphics-audit','graphics-experiment-cmake','graphics-experiment-gcc','summary'}<=set(old_run.get('stages',{})) and
+            all(s.get('status')=='passed' for s in old_run['stages'].values()),
+            'display requires the passed full graphics baseline')
+    baseline=read_json(ROOT/config['baseline_sdk_init'])
+    romfs=build_destination(ROOT/config['application_romfs_index']);romfs_input=validated_romfs_input(prepared,romfs)
+    keys=('status','error','pc','retired','word','service','trace_sha256','trace_steps','trace_rows',
+        'native_calls','native_stats','sdk_stages_completed','sdk_initialization_completed','game_entry_reached',
+        'init_stats','original_retired','host_scaffold_retired','constructors_completed','application_entry_retired',
+        'post_entry_retired','application_services','application_thread','application_resource','application_graphics',
+        'application_display','graphics_runtime','display_runtime','romfs','native_handler_stop',
+        'relative_relocation_probes','relative_relocations_matching_offline_link')
+    experiments={};proofs={}
+    for mode in ('cmake','gcc'):
+        folder=run.output/('display-'+mode);cache=folder/'native-cache'
+        args=[sys.executable,'-B','tools/build_startup.py',prepared,'--output',folder,'--compiler',mode,
+            '--sdk','--native-sdk','--sdk-init','--host-linked','--application','--graphics','--display','--fast-functions',
+            '--execute','--entropy-file',entropy,'--native-cache',cache,'--romfs-index',romfs,
+            '--expand-targets','64','--limit','1000000000','--quantum','10000']
+        for pc in prior['additional_entries']:args+=['--extra-entry',str(pc)]
+        for pc in prior['application_entries']:args+=['--app-entry',str(pc)]
+        run.command('display-experiment-'+mode,args,env)
+        result=read_json(folder/'run.json');last=result['iterations'][-1]
+        bundle=read_json(Path(last['bundle'])/'manifest.json')
+        require(result.get('display_runtime') is True and bundle.get('display_runtime') is True and
+            bundle['native_audit']==audit and bundle['sdk_audit']['goal_entry']==sdk_audit['goal_entry'] and
+            bundle['sdk_npdm']['source_sha256']==sdk_audit['npdm']['source_sha256'] and
+            result['entropy_input_sha256']==hashlib.sha256(entropy.read_bytes()).hexdigest(),
+            'display input/goal/provider/entropy evidence differs')
+        cached_sources(Path(last['bundle']),folder/'source-verification')
+        require(last['build']['source_manifest_sha256']==hashlib.sha256((Path(last['bundle'])/'sources.json').read_bytes()).hexdigest() and
+            last['build'].get('romfs_index_sha256')==romfs_input['index_sha256'] and
+            last['build'].get('romfs_binding_sha256')==hashlib.sha256((cache/'romfs_binding.h').read_bytes()).hexdigest() and
+            last['executable_sha256']==hashlib.sha256(Path(last['executable']).read_bytes()).hexdigest(),
+            'display executable/generated source/RomFS seal differs')
+        e=application_evidence(result,bundle,baseline,config['sdk_init_required_stages'],
+            config['display_min_post_entry'],config['display_expected_guard'],romfs_input)
+        display=e.get('application_display',{});graphics=e.get('application_graphics',{})
+        require(e.get('display_runtime') is True and e.get('fast_function_calls',0)>0 and
+            display.get('ready') is True and display.get('presentation_supported') is True and
+            (display.get('calls'),display.get('initializations'))==(1,1) and graphics.get('ready') is True and
+            (graphics.get('boots'),graphics.get('checks'))==(1,0),
+            'display did not exercise the measured real window/surface initialization')
+        full_dir=folder/'progress-full';full_dir.mkdir()
+        shutil.copyfile(Path(last['bundle'])/'startup.ootmem',full_dir/'startup.ootmem')
+        full=execute_startup(Path(last['executable']),full_dir,1000000000,10000,'full',entropy,False,romfs_index=romfs)
+        (full_dir/'report.json').write_text(json.dumps(full,indent=2)+'\n',encoding='utf-8')
+        require(all(e.get(k)==full.get(k) for k in keys),'display full/single-step and compact/accelerated execution differ')
+        old_folder=old_root/('graphics-'+mode);old=read_json(old_folder/'run.json')['iterations'][-1]
+        old_full=read_json(old_folder/'progress-full/report.json');old_trace=build_destination(Path(old_full['trace_file']))
+        require(old_trace.is_relative_to(old_folder.resolve()) and old_full['trace_sha256']==old['execution']['trace_sha256'],
+                'display baseline is not its verified full graphics trace')
+        old_bundle=read_json(build_destination(Path(old['bundle'])/'manifest.json'))
+        proof=verify_display_progress_trace(old_trace,old_full,old_bundle,Path(full['trace_file']),full,bundle)
+        (full_dir/'display-progress.json').write_text(json.dumps(proof,indent=2)+'\n',encoding='utf-8')
+        experiments[mode]=e;proofs[mode]=proof
+    require(all(experiments['cmake'].get(k)==experiments['gcc'].get(k) for k in keys),
+            'native compilers reached different display prefixes or owned state')
+    return dict(display_experiments=experiments,display_progress=proofs)
+
+
 def execute(config, output, native_only=False):
     require(os.name == "nt", "milestone runner requires Windows")
     require(isinstance(config, dict) and config.get("schema_version") == 1 and isinstance(config.get("name"), str) and re.fullmatch(r"[a-z][a-z0-9-]*", config["name"]), "invalid milestone config")
@@ -488,6 +579,7 @@ def execute(config, output, native_only=False):
     require(type(config.get('application_experiment',False)) is bool,'invalid application scope flag')
     validate_resource_progress_config(config)
     validate_graphics_config(config)
+    validate_display_config(config)
     if config.get('application_experiment'):
         require(config.get('sdk_init_experiment') is True and config.get('sdk_init_host_linked') is True and
             config.get('sdk_init_fast_functions') is True,'application milestone requires the complete preceding host initialization lane')
@@ -566,6 +658,9 @@ def execute(config, output, native_only=False):
     if not native_only and config.get('graphics_experiment'):
         stages.insert(stages.index('comparison'),'graphics-audit')
         for mode in ('cmake','gcc'):stages.insert(stages.index('summary'),'graphics-experiment-'+mode)
+    if not native_only and config.get('display_experiment'):
+        stages.insert(stages.index('comparison'),'display-audit')
+        for mode in ('cmake','gcc'):stages.insert(stages.index('summary'),'display-experiment-'+mode)
     run = MilestoneRun(output, config["name"], stages)
     run.manifest["scope"] = "synthetic native only" if native_only else "synthetic native and static private game analysis"
     if not native_only and config.get('startup_experiment'):
@@ -627,6 +722,19 @@ def execute(config, output, native_only=False):
                     report=extend_graphics_audit(linker,original)
                     (run.output/'graphics-audit.json').write_text(json.dumps(report,indent=2)+'\n',encoding='utf-8')
                 run.action('graphics-audit',graphics_source_audit)
+            if config.get('display_experiment'):
+                def display_source_audit():
+                    from link_exefs import load_prepared
+                    from module_linker import Linker
+                    from application_audit import audit_application
+                    from graphics_audit import extend_graphics_audit
+                    from display_audit import extend_display_audit
+                    linker=Linker(load_prepared(prepared));require(linker.apply()['link_complete'],'display offline link incomplete')
+                    original=extend_graphics_audit(linker,audit_application(linker))
+                    require(original==read_json(run.output/'graphics-audit.json'),'display preceding graphics audit changed')
+                    report=extend_display_audit(linker,original)
+                    (run.output/'display-audit.json').write_text(json.dumps(report,indent=2)+'\n',encoding='utf-8')
+                run.action('display-audit',display_source_audit)
             def compare():
                 comparisons = {scope: compare_profiles(read_json(ROOT/config["baseline_"+scope]), read_json(run.output/(scope+".json"))) for scope in ("default", "plt")}
                 audit = read_json(run.output/"callees.json"); compare_baseline(audit, read_json(run.output/"plt.json"))
@@ -919,6 +1027,7 @@ def execute(config, output, native_only=False):
                     'native compilers reached different original application prefixes or provider states')
                 summary['application_experiments']=app_experiments
             if config.get('graphics_experiment'):summary.update(run_graphics_lanes(run,config,env))
+            if config.get('display_experiment'):summary.update(run_display_lanes(run,config,env))
         def publish_summary():
             (run.output/"summary.json").write_text(json.dumps(summary, indent=2)+"\n", encoding="utf-8")
             lines = ["# Milestone validation", "", f"Milestone: {config['name']}", "", f"Python tests: {summary['python_tests']}; CTest groups: {summary['ctest_groups']}; native comparisons per compiler: {summary['native_trials_per_compiler']}."]
@@ -937,6 +1046,11 @@ def execute(config, output, native_only=False):
                 g=summary['graphics_experiments']['cmake']
                 startup_scope+=(' The separate graphics profile bootstraps a real Vulkan device/queue and resumes the original caller, '
                     f"reaching its guarded session boundary after {g['post_entry_retired']} post-entry instructions. No original game frame or usable input is established.")
+            if 'display_experiments' in summary:
+                display=summary['display_experiments']['cmake']
+                startup_scope+=(' The separate VI profile owns a real hidden Win32 window and presentation-supported Vulkan surface, '
+                    f"resumes its original caller and reaches the guarded Display-object API after {display['post_entry_retired']} post-entry instructions. "
+                    'Whole-parent replacement elides original instructions; full-prefix/return proof establishes progress. No game frame/input is established.')
             lines += ["", (("Native regression execution is synthetic. Separate opt-in startup experiments execute selected original instructions under an experimental process model. "+startup_scope)
                 if 'startup_experiments' in summary else "All executed code is synthetic.")+" Static game analysis grants no runtime capabilities. See run.json for final status and per-stage logs."]
             if 'memory_callee_profiles' in summary:

@@ -26,10 +26,13 @@
 #define OOT_SDK_INITIALIZATION 256u
 #define OOT_SDK_APPLICATION 512u
 #define OOT_SDK_GRAPHICS 1024u
+#define OOT_SDK_DISPLAY 2048u
 
 typedef struct OotStartupContext OotStartupContext;
 OOT_MEMORY_API int oot_startup_context_graphics_enabled(const OotStartupContext *context);
 OOT_MEMORY_API int oot_startup_context_graphics_report(const OotStartupContext *context,OotGraphicsReport *report);
+OOT_MEMORY_API int oot_startup_context_display_enabled(const OotStartupContext *context);
+OOT_MEMORY_API int oot_startup_context_display_report(const OotStartupContext *context,OotDisplayReport *report);
 OOT_MEMORY_API int oot_startup_context_application_enabled(const OotStartupContext *context);
 OOT_MEMORY_API const OotApplicationServices *oot_startup_context_application_services(const OotStartupContext *context);
 OOT_MEMORY_API uint64_t oot_startup_context_application_resource_queries(const OotStartupContext *context);

@@ -15,20 +15,29 @@ NAMES=('guest_memory','runtime_image','host_win32','leaf_dispatch','frame_dispat
 
 class GraphicsDispatchTests(unittest.TestCase):
     def test_native_boot_check_quota_and_complete_vector_bank(self):
-        blob,sources,_=boot.package(2,True,graphics=True,graphics_calls=True)
-        observer=boot.SNAPSHOT_SOURCE.replace('oot_startup_dispatch_create_application','oot_startup_dispatch_create_graphics')
+        self.run_native()
+
+    def run_native(self,display=False):
+        blob,sources,_=boot.package(2,True,graphics=True,graphics_calls=True,display=display)
+        observer=boot.SNAPSHOT_SOURCE.replace('oot_startup_dispatch_create_application',
+            'oot_startup_dispatch_create_display' if display else 'oot_startup_dispatch_create_graphics')
+        getter='display_get' if display else 'fake_get'
         observer=observer.replace('if(!context || !keys)goto done;',
-            'if(!context || !keys)goto done;\n    context->graphics->get_instance=fake_get;\n    context->graphics->destroy_instance=fake_destroy_instance;')
-        self.assertIn('context->graphics->get_instance=fake_get',observer)
+            f'if(!context || !keys)goto done;\n    context->graphics->get_instance={getter};\n    context->graphics->destroy_instance=fake_destroy_instance;')
+        self.assertIn('context->graphics->get_instance='+getter,observer)
         observer=observer.replace('*count=used;*final=state;ok=1;',
             '*count=used;*final=state;oot_graphics_snapshot(context->graphics,&last_graphics);'
+            'oot_graphics_display_snapshot(context->graphics,&last_display);'
             'last_native=context->native.calls;last_retired=report.retired;ok=1;')
-        text=('#define main oot_test_unused_lifecycle_main\n#define failure graphics_fixture_failure\n#include "native_graphics_test.c"\n#undef main\n#undef failure\n'
-            '#include "startup_context.c"\nstatic OotGraphicsReport last_graphics;\n'
+        fixture=('#define OOT_DISPLAY_FIXTURE_ONLY\n#define failure graphics_fixture_failure\n#include "native_display_test.c"\n#undef failure\n' if display else
+            '#define main oot_test_unused_lifecycle_main\n#define failure graphics_fixture_failure\n#include "native_graphics_test.c"\n#undef main\n#undef failure\n')
+        text=(fixture+'#include "startup_context.c"\nstatic OotGraphicsReport last_graphics;\nstatic OotDisplayReport last_display;\n'
             'static uint64_t last_native,last_retired;\n'+'\n'.join(sources.values())+observer+
             '\nOOT_LIFT_EXPORT void oot_test_graphics_counts(uint64_t *out){'
             'out[0]=last_native;out[1]=last_graphics.boots;out[2]=last_graphics.checks;'
-            'out[3]=last_graphics.ready;out[4]=last_retired;out[5]=instance_destroys;out[6]=device_destroys;out[7]=instances;out[8]=devices;}\n')
+            'out[3]=last_graphics.ready;out[4]=last_retired;out[5]=instance_destroys;out[6]=device_destroys;out[7]=instances;out[8]=devices;'
+            'out[9]=last_display.ready;out[10]=last_display.calls;out[11]=last_display.initializations;'
+            +('out[12]=classes;out[13]=windows;out[14]=surfaces;' if display else 'out[12]=0;out[13]=0;out[14]=0;')+'}\n')
         parent=ROOT/'build/graphics-dispatch-tests';parent.mkdir(parents=True,exist_ok=True)
         # Keep loaded native artifacts under ignored build, as compile_library does.
         temporary=tempfile.mkdtemp(dir=parent)
@@ -59,10 +68,12 @@ class GraphicsDispatchTests(unittest.TestCase):
         counts=lib.oot_test_graphics_counts;counts.argtypes=[POINTER(c_uint64)];counts.restype=None
         path=dest/'graphics.ootmem';path.write_bytes(blob);snapshots=[]
         for invocation,quantum in enumerate((1,2,1000),1):
-            history=(VectorState*1024)();count=c_uint();state=State();values=(c_uint64*9)()
+            history=(VectorState*1024)();count=c_uint();state=State();values=(c_uint64*15)()
             self.assertEqual(fn(os.fsencode(path),quantum,1000,0,history,byref(count),byref(state)),1)
-            counts(values);self.assertEqual(tuple(values[:4]),(4,2,1,1))
-            self.assertEqual(tuple(values[5:]),(invocation,invocation,0,0))
+            counts(values);self.assertEqual(tuple(values[:4]),(4,2,0 if display else 1,1))
+            self.assertEqual(tuple(values[5:9]),(invocation,invocation,0,0))
+            self.assertEqual(tuple(values[9:12]),(1,1,1) if display else (0,0,0))
+            self.assertEqual(tuple(values[12:]),(0,0,0))
             self.assertEqual(bytes(history[count.value-1].q[0]),b'\x5a'*16)
             self.assertEqual(bytes(history[count.value-1].q[31]),b'\xa5'*16)
             if quantum==1:self.assertEqual(count.value,values[4]+values[0]+1)

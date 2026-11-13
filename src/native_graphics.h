@@ -4,12 +4,17 @@
 
 #define OOT_GRAPHICS_BOOT 448u
 #define OOT_GRAPHICS_CHECK 449u
+#define OOT_DISPLAY_INITIALIZE 450u
 typedef struct OotGraphics OotGraphics;
 typedef struct OotGraphicsReport {
     uint32_t version,ready,api_version,driver_version,vendor_id,device_id,queue_family,reserved;
     uint64_t calls,boots,checks,working_memory,working_size;
     char device_name[256];
 } OotGraphicsReport;
+typedef struct OotDisplayReport {
+    uint32_t version,ready,presentation_supported,reserved;
+    uint64_t calls,initializations;
+} OotDisplayReport;
 
 /* A private owner, not a guest handle or an SDK object. Creation allocates no
  * GPU resource. The first successful boot owns a real Vulkan device/queue.
@@ -17,6 +22,10 @@ typedef struct OotGraphicsReport {
 OotGraphics *oot_graphics_create(void);
 void oot_graphics_destroy(OotGraphics *graphics);
 int oot_graphics_snapshot(const OotGraphics *graphics,OotGraphicsReport *report);
+int oot_graphics_display_snapshot(const OotGraphics *graphics,OotDisplayReport *report);
+/* Display initialization owns a hidden Win32 window and actual Vulkan surface.
+ * Calls and final owner destruction must run on the window's creator thread.
+ * These host resources are not guest Display/Layer handles or rendered frames. */
 /* 0 implemented, 1 unsupported, 2 fault. Void ABI: preserve every GPR, SP and
  * NZCV, change only PC to LR. Inputs/output/owner must be live and disjoint.
  * Failure publishes neither GPU readiness, counters nor output registers. */

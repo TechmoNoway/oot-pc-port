@@ -2,7 +2,23 @@
 
 Development is organized around complete capabilities and measured blocker cohorts. A milestone includes its dependent instruction/runtime changes, verifier integration, synthetic native evidence, fresh private surveys, documentation and a reviewed commit/push on `dev`. The assistant completes these substeps autonomously within the authorized scope and reports the result at the milestone boundary. Small instruction families no longer require separate user prompts or separate releases.
 
-## Current milestone: independent graphics bootstrap
+## Current milestone: native VI display initialization
+
+The [display design](superpowers/specs/2026-11-13-display-initialization-design.md)
+and [plan](superpowers/plans/2026-11-13-display-initialization.md) add flags254 over
+graphics, preserving every earlier profile. The independent owner creates a real
+hidden Win32 window and presentation-supported Vulkan surface. Its immutable
+prototype passed both original full compiler replays and historical VI-entry
+prefix/original-return proofs. Source audit retains three original pre-boot
+constructor groups and closes all other unsupported VI consumers. Actual-tree
+RED/GREEN and focused integration pass; a fresh 50-stage validation/delivery is next.
+Guest Display/Layer/vsync objects, rendering and usable input remain further work.
+The full run is active and its native-evidence stage passes703 Python tests,
+seven CTest groups and283,401 common comparisons per compiler. At the user's
+quota request, save a reviewed code checkpoint and [handoff](agent-handoff.md)
+while explicitly retaining the pending full original-execution validation.
+
+## Preceding milestone: independent graphics bootstrap
 
 The [graphics design](superpowers/specs/2026-11-13-graphics-bootstrap-design.md)
 and [implementation plan](superpowers/plans/2026-11-13-graphics-bootstrap.md)
@@ -16,6 +32,9 @@ fingerprint is verified; staged source content also matches under the configured
 Git line-ending normalization. The genuine unsupported GSV session endpoint is
 inside VI initialization. Continue with a separately proved native display
 backend; no guest session, game frame or usable input has been established.
+Commit `7434802` is verified on origin/dev using account AnhTc0; its
+[GitHub Windows Checks](https://github.com/TechmoNoway/oot-pc-port/actions/runs/43451205858)
+passed, separately from local full validation.
 
 ## Preceding milestone: application resource identity
 

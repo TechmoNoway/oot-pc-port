@@ -92,7 +92,7 @@ def narrow_cas_program():
     return words+[0x910043ff,0xd4200000],[59]*8
 
 
-def package(completed,application,atomic=False,integer_fp=False,simd_cohort=False,narrow_cas=False,resource=False,graphics=False,graphics_calls=False):
+def package(completed,application,atomic=False,integer_fp=False,simd_cohort=False,narrow_cas=False,resource=False,graphics=False,graphics_calls=False,display=False):
     raw,goal,audit=fixture(completed)
     main=raw.modules[1];sdk=raw.modules[2]
     struct.pack_into('<III',main.image,0x804,0x910004a5,0x910008c6,0xd4200000)
@@ -151,12 +151,12 @@ def package(completed,application,atomic=False,integer_fp=False,simd_cohort=Fals
             natives.append(dict(handler_id=handler,entry=sdk.base+offset,size=4,
                                 body_sha256=hashlib.sha256(sdk.read(offset,4)).hexdigest()))
     if graphics_calls:
-        for offset,handler in ((0xe10,64),(0xe20,448),(0xe30,449)):
+        for offset,handler in ((0xe10,64),(0xe20,448),(0xe30,450 if display else 449)):
             natives.append(dict(handler_id=handler,entry=sdk.base+offset,size=4,
                                 body_sha256=hashlib.sha256(sdk.read(offset,4)).hexdigest()))
     units={};source,summary=emit_startup(raw,sorted(nodes,key=lambda n:n['address']),manifest,config,
         sdk_config=model,sdk_goal=goal,native_functions=natives,sdk_init=True,units=units,entry_override=boot.base,
-        host_linked=True,host_constructors=report['module_order'],application=application,graphics=graphics)
+        host_linked=True,host_constructors=report['module_order'],application=application,graphics=graphics,display=display)
     return blob,dict(units,**{'startup.c':source}),goal
 
 class ApplicationBootTests(unittest.TestCase):

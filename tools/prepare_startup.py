@@ -93,7 +93,8 @@ def selection(linker, max_instructions=8192, extra_entries=(), sdk=False, native
     return audit, [nodes[p] for p in sorted(nodes)]
 
 
-def emit_startup(linker, nodes, package_manifest, config=None, relocation_probes=(), sdk_config=None, sdk_goal=None, native_functions=(), original_oe_entry=0, sdk_init=False, units=None, entry_override=None, host_linked=False, host_constructors=(), application=False,graphics=False):
+def emit_startup(linker, nodes, package_manifest, config=None, relocation_probes=(), sdk_config=None, sdk_goal=None, native_functions=(), original_oe_entry=0, sdk_init=False, units=None, entry_override=None, host_linked=False, host_constructors=(), application=False,graphics=False,display=False):
+    require(type(display) is bool and (not display or graphics),'display emission requires the separate graphics profile')
     require(type(graphics) is bool and (not graphics or application),'graphics emission requires the separate application profile')
     require(type(application) is bool and (not application or (host_linked and sdk_init and sdk_goal is not None)),
             'application emission requires host-linked initialization and its original goal')
@@ -186,7 +187,7 @@ def emit_startup(linker, nodes, package_manifest, config=None, relocation_probes
         lines.append(f'    {{{constant(pc)}, {size}, {{'+','.join(f'0x{x:02x}' for x in digest)+'}},')
     digest=bytes.fromhex(package_manifest['body_sha256'])
     lines += ['};', 'static const OotStartupProgram oot_startup_program = {',
-              '    OOT_STARTUP_DISPATCH_VERSION, '+('OOT_STARTUP_GRAPHICS | ' if graphics else '')+('OOT_STARTUP_APPLICATION | ' if application else '')+('OOT_STARTUP_HOST_LINKED | OOT_STARTUP_SDK_RUNTIME | OOT_STARTUP_NATIVE_RUNTIME | OOT_STARTUP_INIT_RUNTIME' if host_linked else 'OOT_STARTUP_RAW_IMAGE | OOT_STARTUP_SDK_RUNTIME | OOT_STARTUP_NATIVE_RUNTIME | OOT_STARTUP_INIT_RUNTIME' if sdk_init else 'OOT_STARTUP_RAW_IMAGE | OOT_STARTUP_SDK_RUNTIME | OOT_STARTUP_NATIVE_RUNTIME' if native_functions else 'OOT_STARTUP_RAW_IMAGE | OOT_STARTUP_SDK_RUNTIME' if sdk_config is not None else 'OOT_STARTUP_RAW_IMAGE')+', '+constant(entry_override if entry_override is not None else linker.modules[0].base)+',',
+              '    OOT_STARTUP_DISPATCH_VERSION, '+('OOT_STARTUP_DISPLAY | ' if display else '')+('OOT_STARTUP_GRAPHICS | ' if graphics else '')+('OOT_STARTUP_APPLICATION | ' if application else '')+('OOT_STARTUP_HOST_LINKED | OOT_STARTUP_SDK_RUNTIME | OOT_STARTUP_NATIVE_RUNTIME | OOT_STARTUP_INIT_RUNTIME' if host_linked else 'OOT_STARTUP_RAW_IMAGE | OOT_STARTUP_SDK_RUNTIME | OOT_STARTUP_NATIVE_RUNTIME | OOT_STARTUP_INIT_RUNTIME' if sdk_init else 'OOT_STARTUP_RAW_IMAGE | OOT_STARTUP_SDK_RUNTIME | OOT_STARTUP_NATIVE_RUNTIME' if native_functions else 'OOT_STARTUP_RAW_IMAGE | OOT_STARTUP_SDK_RUNTIME' if sdk_config is not None else 'OOT_STARTUP_RAW_IMAGE')+', '+constant(entry_override if entry_override is not None else linker.modules[0].base)+',',
               '    {'+','.join(f'0x{x:02x}' for x in digest)+'},',
               f'    oot_startup_words, {len(rows)}, oot_startup_spans, {len(spans)}', '};',
               'OOT_LIFT_EXPORT const OotStartupProgram *oot_startup_compiled_program(void) { return &oot_startup_program; }',
@@ -202,6 +203,7 @@ def emit_startup(linker, nodes, package_manifest, config=None, relocation_probes
         if sdk_init:flags+=' | OOT_SDK_INITIALIZATION'
         if application:flags+=' | OOT_SDK_APPLICATION'
         if graphics:flags+=' | OOT_SDK_GRAPHICS'
+        if display:flags+=' | OOT_SDK_DISPLAY'
         lines += ['static const OotSdkConfig oot_sdk_config = { OOT_SDK_CONTEXT_VERSION, '+flags+', {0,0,0,0}, '+', '.join(constant(sdk_config[k]) for k in fields)+' };',
                   'const OotSdkConfig *oot_startup_compiled_sdk_config(void) { return &oot_sdk_config; }']
     else:
@@ -545,7 +547,8 @@ def extend_application_selection(linker,merged,application_entry,application_ent
     return merged,evidence
 
 
-def prepare_bundle(linker, output, max_instructions=8192, extra_entries=(), config=None, stack_size=STACK_SIZE, shared_package=None, sdk_metadata=None, native_sdk=False, sdk_init=False, host_linked=False,decode_cache=None,application=False,application_entries=(),graphics=False):
+def prepare_bundle(linker, output, max_instructions=8192, extra_entries=(), config=None, stack_size=STACK_SIZE, shared_package=None, sdk_metadata=None, native_sdk=False, sdk_init=False, host_linked=False,decode_cache=None,application=False,application_entries=(),graphics=False,display=False):
+    require(type(display) is bool and (not display or graphics),'display requires separate graphics mode')
     require(type(graphics) is bool and (not graphics or application),'graphics requires separate application mode')
     output=build_destination(Path(output))
     require(not output.exists(), 'choose a fresh startup bundle directory')
@@ -580,6 +583,9 @@ def prepare_bundle(linker, output, max_instructions=8192, extra_entries=(), conf
                 if graphics:
                     from graphics_audit import extend_graphics_audit
                     native_audit=extend_graphics_audit(verified,native_audit)
+                    if display:
+                        from display_audit import extend_display_audit
+                        native_audit=extend_display_audit(verified,native_audit)
             else:
                 from sdk_init_audit import audit_sdk_init
                 native_audit=audit_sdk_init(verified)
@@ -680,7 +686,7 @@ def prepare_bundle(linker, output, max_instructions=8192, extra_entries=(), conf
             total_memory=manifest['backing_bytes']+config['tls_size']+(0x100000000 if sdk_init else config['heap_capacity']),
             main_thread_id=1,main_thread_priority=sdk_metadata['main_thread_priority'],main_thread_core=sdk_metadata['main_thread_core'])
     units={} if sdk_init else None
-    source,summary=emit_startup(emitter,nodes,manifest,config,probes,sdk_config,sdk_goal,native_functions,original_oe_entry,sdk_init,units,entry_override,host_linked,boot['module_order'] if boot else (),application,graphics)
+    source,summary=emit_startup(emitter,nodes,manifest,config,probes,sdk_config,sdk_goal,native_functions,original_oe_entry,sdk_init,units,entry_override,host_linked,boot['module_order'] if boot else (),application,graphics,display)
     summary['sdk_init_providers']=sdk_init
     summary['relative_relocation_probes']=len(probes)
     summary['linked_plt_lookahead_targets']=len(lookahead)
@@ -712,6 +718,7 @@ def prepare_bundle(linker, output, max_instructions=8192, extra_entries=(), conf
     if application:
         report['application_runtime']=True;summary['application_runtime']=True
         if graphics:report['graphics_runtime']=True;summary['graphics_runtime']=True
+        if display:report['display_runtime']=True;summary['display_runtime']=True
         report['application_selection']=application_selection
         report['application_pointer_selection']=application_pointers
         report['application_simd_sites'],report['application_svc_sites']=application_sites(emitter.modules,nodes)
