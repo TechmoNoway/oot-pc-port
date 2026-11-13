@@ -16,6 +16,7 @@ int oot_startup_init_atomic_kind(uint32_t word)
 int oot_startup_application_atomic_kind(uint32_t word)
 {
     uint32_t add=word&UINT32_C(0xbfe0fc00);
+    if((word&UINT32_C(0xbfa07c00))==UINT32_C(0x08a07c00))return OOT_STARTUP_APP_CAS_NARROW;
     return add==UINT32_C(0xb8a00000) ? OOT_STARTUP_APP_LDADDA:
         add==UINT32_C(0xb8600000) ? OOT_STARTUP_APP_LDADDL:0;
 }
@@ -30,7 +31,8 @@ static int atomic_step(uint32_t word, OotArm64State *registers,
     if (!registers || !memory || memory->valid!=1 || registers->pc%4 ||
         registers->pc>=INIT_ATOMIC_ADDRESS_LIMIT-4 || registers->sp%16 ||
         (registers->nzcv & UINT32_C(0x0fffffff))) return 2;
-    size=kind==OOT_STARTUP_INIT_STLR ? 1u<<(word>>30) : (word & UINT32_C(0x40000000)) ? 8u:4u;
+    size=(kind==OOT_STARTUP_INIT_STLR || kind==OOT_STARTUP_APP_CAS_NARROW) ?
+        1u<<(word>>30) : (word & UINT32_C(0x40000000)) ? 8u:4u;
     address=rn==31 ? registers->sp:registers->x[rn];
     if (address>=INIT_ATOMIC_ADDRESS_LIMIT || size>INIT_ATOMIC_ADDRESS_LIMIT-address) {
         memory->fault=(OotMemoryFault){address,address,size,
@@ -39,7 +41,12 @@ static int atomic_step(uint32_t word, OotArm64State *registers,
         return 2;
     }
     output=*registers;output.pc+=4;
-    if (kind==OOT_STARTUP_INIT_STLR) {
+    if(kind==OOT_STARTUP_APP_CAS_NARROW){
+        uint64_t expected=rs==31 ? 0:registers->x[rs];
+        uint64_t desired=rt==31 ? 0:registers->x[rt];
+        if(!oot_memory_compare_exchange_narrow(memory,address,size,rn==31,expected,desired,&old))return 2;
+        oot_arm64_write(&output,rs,32,0,old);
+    } else if (kind==OOT_STARTUP_INIT_STLR) {
         source=rt==31 ? 0:registers->x[rt];
         if (!oot_memory_store_release(memory,address,size,rn==31,source)) return 2;
     } else {

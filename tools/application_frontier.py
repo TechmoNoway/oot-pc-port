@@ -12,23 +12,24 @@ import struct
 
 from input_formats import InputError,require
 from link_exefs import build_destination
-from sdk_init_instructions import decode_sdk_init_instruction,sdk_init_vector_kind
+from sdk_init_instructions import decode_sdk_init_instruction,sdk_init_vector_kind,sdk_init_atomic_kind
 
 FAMILIES=('simd_integer_fp','simd_orr','simd_dup_element','simd_ins_element','simd_cmeq','simd_bif')
 
 
 def summarize_boundaries(manifest):
-    counts=dict.fromkeys(FAMILIES,0);supported=unsupported=0
+    counts=dict.fromkeys(FAMILIES,0);atomics={'compare_exchange_narrow':0};supported=unsupported=0
     rows=manifest.get('application_word_boundaries',[])
     for row in rows:
         word,pc=row['word'],row['address']
         family=sdk_init_vector_kind(word,application=True)
         if family in counts:counts[family]+=1
+        elif sdk_init_atomic_kind(word,True)=='compare_exchange_narrow':atomics['compare_exchange_narrow']+=1
         else:
             try:decode_sdk_init_instruction(word,pc,application=True)
             except InputError:unsupported+=1
             else:supported+=1
-    return dict(format='oot-application-frontier',families=counts,already_supported=supported,
+    return dict(format='oot-application-frontier',families=counts,atomic_families=atomics,already_supported=supported,
                 remaining_unsupported=unsupported,total_records=len(rows),runtime_authority_granted=False)
 
 
@@ -80,12 +81,17 @@ def verify_progress_trace(trace,baseline_execution,baseline_bundle,current_bundl
             type(e.get('retired')) is int and e['retired']>0,'baseline is not an original instruction frontier')
     require(isinstance(e.get('pc'),str) and re.fullmatch('0x[0-9a-f]+',e['pc']), 'invalid baseline PC')
     pc,word=int(e['pc'],16),e['word']
+    family=sdk_init_vector_kind(word,True)
+    narrow=sdk_init_atomic_kind(word,True)=='compare_exchange_narrow'
+    require(family in FAMILIES or narrow,'frontier is outside a supported application cohort')
+    field='application_atomic_sites' if narrow else 'application_simd_sites'
     old=[r for r in baseline_bundle.get('application_word_boundaries',[]) if r.get('address')==pc]
-    new=[r for r in current_bundle.get('application_simd_sites',[]) if r.get('address')==pc]
+    new=[r for key in ('application_simd_sites','application_atomic_sites')
+         for r in current_bundle.get(key,[]) if r.get('address')==pc]
     require(len(old)==len(new)==1 and old[0].get('semantic_error'),'missing/duplicate source-bound frontier site')
+    require(new[0] in current_bundle.get(field,[]),'frontier site belongs to the wrong instruction domain')
     validate_site(old[0],baseline_bundle,pc,word);validate_site(new[0],current_bundle,pc,word)
-    require(all(old[0][k]==new[0][k] for k in ('module','source_sha256','word_sha256')) and
-            sdk_init_vector_kind(word,True) in FAMILIES,'frontier is outside the supported cohort')
+    require(all(old[0][k]==new[0][k] for k in ('module','source_sha256','word_sha256')),'frontier source site changed')
     crossing=None;digest=hashlib.sha256()
     for line,row in trace_rows(trace):
         digest.update(line)

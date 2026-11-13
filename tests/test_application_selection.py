@@ -6,13 +6,27 @@ ROOT=Path(__file__).resolve().parent.parent
 sys.path[:0]=[str(ROOT/'tools'),str(ROOT/'tests')]
 from module_linker import Linker,Module
 from test_arm64_analysis import synthetic_module,branch,RET
-from prepare_startup import selection,extend_application_selection,application_sites
+from prepare_startup import selection,extend_application_selection,application_sites,application_atomic_sites
 from startup_audit import StartupDecodeCache
 from input_formats import InputError
 from prepare_startup import sdk_init_vtable_entries
 from test_sdk_init_vtables import fixture as pointer_fixture
 
 class ApplicationSelectionTests(unittest.TestCase):
+    def test_observed_narrow_cas_root_is_reaudited_without_upgrading_init_rows(self):
+        raw=Linker([Module('main',synthetic_module({0:branch(0,0x40),0x40:RET,
+            0x50:0x08e87d2a,0x54:RET}))])
+        base=raw.modules[0].base;frontier=base+0x50
+        for cache in (None,StartupDecodeCache()):
+            _,nodes=selection(raw,extra_entries=(frontier,),sdk=True,sdk_init=True,decode_cache=cache)
+            old={n['address']:n for n in nodes};saved=deepcopy(old)
+            self.assertFalse(old[frontier]['semantic_supported'])
+            for roots,supported in (((),False),((frontier,),True)):
+                merged,_=extend_application_selection(raw,old,base+0x40,roots,(),{},cache)
+                self.assertEqual(merged[frontier]['semantic_supported'],supported)
+                self.assertEqual(merged[frontier]['word'],0x08e87d2a)
+            self.assertEqual(old,saved)
+
     def test_legacy_bundle_does_not_gain_application_site_records(self):
         import tempfile
         from prepare_startup import prepare_bundle
@@ -21,6 +35,18 @@ class ApplicationSelectionTests(unittest.TestCase):
             report=prepare_bundle(raw,Path(tmp)/'legacy')
             self.assertNotIn('application_simd_sites',report)
             self.assertNotIn('application_svc_sites',report)
+            self.assertNotIn('application_atomic_sites',report)
+
+    def test_narrow_cas_site_is_exact_original_atomic_word_not_simd_or_native(self):
+        raw=Linker([Module('main',synthetic_module({0x40:0x08e87d2a,0x44:RET}))])
+        m=raw.modules[0];nodes=[dict(address=m.base+0x40,word=0x08e87d2a)]
+        self.assertEqual(application_sites(raw.modules,nodes),([],[]))
+        sites=application_atomic_sites(raw.modules,nodes)
+        self.assertEqual(len(sites),1);self.assertEqual(sites[0]['source_sha256'],m.source_sha256)
+        nodes[0]['native_boundary']=True
+        self.assertEqual(application_atomic_sites(raw.modules,nodes),[])
+        nodes[0].pop('native_boundary');nodes[0]['word']^=1
+        with self.assertRaises(InputError):application_atomic_sites(raw.modules,nodes)
 
     def test_site_records_require_original_words_and_exclude_native_and_scaffolding(self):
         import hashlib,struct

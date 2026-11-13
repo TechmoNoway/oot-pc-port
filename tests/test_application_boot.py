@@ -11,6 +11,7 @@ from startup_sources import write_sources
 from build_startup import build_native,execute
 from input_formats import InputError
 import test_application_simd as simd
+import test_application_cas as cas
 
 # Test-owned observer: the product CLI deliberately exposes no vector dump.
 SNAPSHOT_SOURCE=r'''
@@ -76,7 +77,21 @@ def simd_program():
     return words,[0x41880000,187,result,high,(1<<64)-1]
 
 
-def package(completed,application,atomic=False,integer_fp=False,simd_cohort=False):
+def narrow_cas_program():
+    words=[0xd10043ff,0x910003e9,simd.fixtures.movi(1,0,14,0x5a,0),
+           simd.fixtures.movi(1,0,14,0xa5,31)]
+    for size in (1,2):
+        for order in range(4):
+            rd=(size-1)*4+order
+            words += [0x52800228,0x72a00028,0x5280054a,
+                      (0x79000128 if size==2 else 0x39000128),
+                      cas.narrow_cas(size,order,8,10,9),
+                      (0x79400120 if size==2 else 0x39400120)|rd,
+                      0x0b080000|rd<<5|rd]
+    return words+[0x910043ff,0xd4200000],[59]*8
+
+
+def package(completed,application,atomic=False,integer_fp=False,simd_cohort=False,narrow_cas=False):
     raw,goal,audit=fixture(completed)
     main=raw.modules[1];sdk=raw.modules[2]
     struct.pack_into('<III',main.image,0x804,0x910004a5,0x910008c6,0xd4200000)
@@ -85,11 +100,14 @@ def package(completed,application,atomic=False,integer_fp=False,simd_cohort=Fals
     if simd_cohort:
         words,_=simd_program()
         struct.pack_into('<'+'I'*len(words),main.image,0x804,*words)
+    if narrow_cas:
+        words,_=narrow_cas_program()
+        struct.pack_into('<'+'I'*len(words),main.image,0x804,*words)
     boot,boot_nodes,report=make_boot(raw,goal,audit,32768)
     nodes=list(boot_nodes)
     for module,lo,hi in [(main,0x100,0x150),(main,0x200,0x214),(sdk,0x100,0x150),
                         (sdk,0x500,0x528),(main,0x700,0x73c),(main,0x780,0x788),
-                        (main,0x800,0x804+len(words)*4 if simd_cohort else 0x820 if atomic or integer_fp else 0x810)]:
+                        (main,0x800,0x804+len(words)*4 if simd_cohort or narrow_cas else 0x820 if atomic or integer_fp else 0x810)]:
         for off in range(lo,hi,4):
             word=module.unpack('<I',off)[0]
             if not word:continue
@@ -99,6 +117,8 @@ def package(completed,application,atomic=False,integer_fp=False,simd_cohort=Fals
             if word in (0x1e230108,0x9e380101) and not application:row.update(semantic_supported=False,selection_stop='application-only conversion')
             if simd_cohort and not application and simd.sdk_init_vector_kind(word,True)!=simd.sdk_init_vector_kind(word):
                 row.update(semantic_supported=False,selection_stop='application-only SIMD')
+            if narrow_cas and not application and cas.sdk_init_atomic_kind(word,True)=='compare_exchange_narrow':
+                row.update(semantic_supported=False,selection_stop='application-only narrow CAS')
             if word&0xffe0001f==0xd4000001:row['service_immediate']=word>>5&65535
             nodes.append(row)
     raw.modules.append(boot)
@@ -114,6 +134,51 @@ def package(completed,application,atomic=False,integer_fp=False,simd_cohort=Fals
     return blob,dict(units,**{'startup.c':source}),goal
 
 class ApplicationBootTests(unittest.TestCase):
+    def test_narrow_cas_dispatch_yields_full_vectors_and_crossed_word(self):
+        from ctypes import POINTER,byref,c_char_p,c_uint,c_uint64,c_int
+        from lifter_validation import compile_library
+        from lifter_validation_types import State
+        from test_sdk_init_vectors import VectorState
+        words,wanted=narrow_cas_program()
+        with tempfile.TemporaryDirectory(dir=ROOT/'build') as tmp:
+            root=Path(tmp);compiler=os.environ.get('OOT_LIFTER_COMPILER','cmake');outcomes=[]
+            for app in (False,True):
+                blob,sources,_=package(2,app,narrow_cas=True)
+                folder=root/str(app);folder.mkdir();write_sources(folder,sources)
+                (folder/'startup.ootmem').write_bytes(blob)
+                exe,_=build_native(folder,compiler,root/'cache')
+                outcomes.append(execute(exe,folder,1000,1000,'full'))
+            self.assertEqual(outcomes[0]['error'],15)
+            whole=outcomes[1];self.assertEqual(whole['error'],8)
+            self.assertTrue(whole['sdk_initialization_completed'])
+            self.assertEqual(whole['post_entry_retired'],len(words)-1)
+            self.assertEqual(whole['application_stop_arguments'],wanted)
+            rows=[json.loads(line) for line in Path(whole['trace_file']).read_text().splitlines()]
+            quotas={r['retired']+delta for r in rows if r['word']&0xbfa07c00==0x08a07c00 and r['event']==0
+                    for delta in (-1,0)}
+            for limit in [1000,*sorted(quotas)]:
+                folder=root/f'prefix-{limit}';folder.mkdir();(folder/'startup.ootmem').write_bytes(blob)
+                prefix=execute(exe,folder,limit,1,'full')
+                actual=[json.loads(line) for line in Path(prefix['trace_file']).read_text().splitlines()]
+                self.assertEqual(actual[:-1],[r for r in rows[:-1] if r['retired']<=prefix['retired']])
+                if limit==1000:
+                    self.assertEqual(prefix['trace_sha256'],whole['trace_sha256'])
+                    self.assertEqual(prefix['application_stop_arguments'],wanted)
+                else:self.assertEqual(prefix['retired'],limit)
+            # Independent full Q-bank observation also covers nonzero sentinels.
+            source='\n'.join(sources.values())+SNAPSHOT_SOURCE.replace('UINT32_C(0x7e21d81f)','UINT32_C(0x08e87d2a)')
+            lib,build=compile_library([],compiler,extra_source=source,startup=True)
+            fn=lib.oot_test_simd_snapshot
+            fn.argtypes=[c_char_p,c_uint64,c_uint64,c_uint,POINTER(VectorState),POINTER(c_uint),POINTER(State)];fn.restype=c_int
+            path=Path(build['directory'])/'cas.ootmem';path.write_bytes(blob)
+            history=(VectorState*1024)();count=c_uint();state=State()
+            self.assertEqual(fn(os.fsencode(path),1,1000,0,history,byref(count),byref(state)),1)
+            expected=[bytes(16) for _ in range(32)];expected[0]=bytes([0x5a])*16;expected[31]=bytes([0xa5])*16
+            self.assertEqual(bytes(history[count.value-1]),b''.join(expected)+bytes(8))
+            count.value=0
+            self.assertEqual(fn(os.fsencode(path),1,1000,1,history,byref(count),byref(state)),0)
+            self.assertEqual(count.value,0)
+
     def test_simd_complete_vector_bank_survives_yields_and_crossed_word_rejects(self):
         from ctypes import POINTER,byref,c_char_p,c_uint,c_uint64,c_int
         from lifter_validation import compile_library

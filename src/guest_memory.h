@@ -77,6 +77,12 @@ OOT_MEMORY_API int oot_memory_load_rcpc(OotGuestMemory *memory, uint64_t address
  * order does not model every permitted weak-memory outcome or guest threads. */
 OOT_MEMORY_API int oot_memory_compare_exchange(OotGuestMemory *memory, uint64_t address,
     unsigned size, unsigned sp_base, uint64_t expected, uint64_t desired, uint64_t *observed);
+/* Application byte/halfword CAS uses the same transaction and lock. This
+ * separate entry accepts only size1/2; the old API still accepts only size4/8.
+ * Return zero-extended old bytes and compare/store only low source bits. All
+ * alignment, complete RW, fault and private-output preconditions above apply. */
+OOT_MEMORY_API int oot_memory_compare_exchange_narrow(OotGuestMemory *memory,uint64_t address,
+    unsigned size,unsigned sp_base,uint64_t expected,uint64_t desired,uint64_t *observed);
 /* Initialization-only LDADD W/X backend: one naturally aligned complete
  * READ|WRITE transfer under the same lock as every other backend access.
  * Return the old zero-extended value and add modulo the selected width.

@@ -389,9 +389,9 @@ def execute(config, output, native_only=False):
         require(all(isinstance(config.get(k),str) and config[k] for k in
             ('baseline_sdk_init','application_seed_report','application_romfs_index')),'application provenance configuration is absent')
         application_endpoint(config.get('application_expected_guard'),config.get('application_expected_word'),config.get('application_expected_svc'))
-        if 'application_progress_baseline' in config or config['name']=='application-simd':
+        if 'application_progress_baseline' in config or config['name'] in ('application-simd','application-narrow-cas'):
             require(isinstance(config.get('application_progress_baseline'),str) and bool(config['application_progress_baseline']),
-                    'application SIMD milestone requires an original progress baseline')
+                    'application progress milestone requires an original progress baseline')
         require(type(config.get('application_min_post_entry')) is int and config['application_min_post_entry']>0,
             'application requires a positive measured post-entry capability')
     if config.get('sdk_init_experiment'):

@@ -217,20 +217,23 @@ int oot_memory_load_rcpc(OotGuestMemory *memory, uint64_t address, unsigned size
     return ok;
 }
 
-int oot_memory_compare_exchange(OotGuestMemory *memory, uint64_t address,
-    unsigned size, unsigned sp_base, uint64_t expected, uint64_t desired, uint64_t *observed)
+static int compare_exchange(OotGuestMemory *memory, uint64_t address,
+    unsigned size, unsigned sp_base, uint64_t expected, uint64_t desired, uint64_t *observed,unsigned narrow)
 {
     int ok;
-    uint64_t value, mask = size == 4 ? UINT64_C(0xffffffff) : UINT64_MAX;
+    uint64_t value;
     const unsigned access = OOT_MEMORY_READ | OOT_MEMORY_WRITE;
     AcquireSRWLockExclusive(&transfer_lock);
-    if (!memory || !memory->valid || !observed || sp_base > 1 || (size != 4 && size != 8))
+    if (!memory || !memory->valid || !observed || sp_base > 1 ||
+        (narrow ? (size!=1 && size!=2):(size!=4 && size!=8)))
         ok = fail(memory,address,size,access,OOT_MEMORY_CONFIGURATION,address);
     else if (address % size || (sp_base && address % 16))
         ok = fail(memory,address,size,access,OOT_MEMORY_ALIGNMENT,address);
     else {
         ok = check(memory,address,size,access);
         if (ok) {
+            /* Size is validated before this shift, including the 64-bit case. */
+            uint64_t mask=UINT64_MAX>>((8-size)*8);
             value = read_bytes(memory,address,size);
             if (value == (expected & mask)) write_bytes(memory,address,size,desired);
             *observed = value;
@@ -239,6 +242,14 @@ int oot_memory_compare_exchange(OotGuestMemory *memory, uint64_t address,
     ReleaseSRWLockExclusive(&transfer_lock);
     return ok;
 }
+
+int oot_memory_compare_exchange(OotGuestMemory *memory,uint64_t address,
+    unsigned size,unsigned sp_base,uint64_t expected,uint64_t desired,uint64_t *observed)
+{ return compare_exchange(memory,address,size,sp_base,expected,desired,observed,0); }
+
+int oot_memory_compare_exchange_narrow(OotGuestMemory *memory,uint64_t address,
+    unsigned size,unsigned sp_base,uint64_t expected,uint64_t desired,uint64_t *observed)
+{ return compare_exchange(memory,address,size,sp_base,expected,desired,observed,1); }
 
 static int fetch_update(OotGuestMemory *memory, uint64_t address,
     unsigned size, unsigned sp_base, uint64_t operand, uint64_t *observed,unsigned operation)

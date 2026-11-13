@@ -10,6 +10,16 @@ from test_startup_audit import linked
 from test_arm64_analysis import branch,RET
 
 class StartupDecodeCacheTests(unittest.TestCase):
+    def test_narrow_cas_decode_stays_in_the_application_profile(self):
+        from arm64_decode import Decoder
+        from startup_audit import _decode_entry_word
+        cache=StartupDecodeCache();syntax=Decoder()
+        for word in (0x08e87d2a,0x48a07fff):
+            for application in (False,True,False):
+                row=cache.decode(syntax,word,0x1000,True,True,application)
+                self.assertEqual(row,_decode_entry_word(syntax,word,0x1000,True,True,application))
+                self.assertEqual(row[3]=='sdk_atomic',application)
+
     def test_application_simd_decode_does_not_cross_profiles(self):
         from arm64_decode import Decoder
         from startup_audit import _decode_entry_word

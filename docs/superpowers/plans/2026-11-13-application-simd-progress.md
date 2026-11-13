@@ -427,7 +427,7 @@ If it fails, fix the cause and use a new output directory (`...-v2`, etc.). Neve
 Use the actual successful fresh directory if a retry was needed. Documentation-only final totals may be corrected after the run because the current source digest excludes Markdown; any production/test/config change requires rerunning.
 
 - [x] Fetch `origin` and compare `dev...origin/dev`. If the remote has advanced, inspect and integrate without force push; rerun affected validation and the full source-fingerprint gate after any code change. Preserve unrelated local work.
-- [ ] Stage only the explicitly reviewed source, synthetic tests, new config and documentation. Inspect `git diff --cached --stat`, `git diff --cached --check`, and the staged diff itself. Create one implementation commit, for example:
+- [x] Stage only the explicitly reviewed source, synthetic tests, new config and documentation. Inspect `git diff --cached --stat`, `git diff --cached --check`, and the staged diff itself. Create one implementation commit, for example:
 
 ```powershell
 git commit -m 'Add checked application SIMD cohort and source-bound progress evidence'
@@ -438,7 +438,7 @@ git rev-parse origin/dev
 git status --short
 ```
 
-- [ ] Verify the two commit IDs agree. If transport/authentication blocks push, preserve the local commit and report the exact blocker; do not claim remote delivery. If GitHub Actions is available, inspect the triggered Checks workflow and distinguish its synthetic checks from private local game evidence.
+- [x] Verify the two commit IDs agree. If transport/authentication blocks push, preserve the local commit and report the exact blocker; do not claim remote delivery. If GitHub Actions is available, inspect the triggered Checks workflow and distinguish its synthetic checks from private local game evidence.
 - [ ] Final report in Vietnamese: delivered capability, real new boundary, synthetic/static/original-run evidence, successful commit/link and push status, limitations and the next design input. Do not claim playability or use test counts as completion percentage.
 
 ### Full validation checkpoint
@@ -448,10 +448,12 @@ Fresh `build/milestones/application-simd-v1/run.json` passed all 42 stages on
 283,401 common native/reference comparisons per compiler. All old static and
 runtime baselines are retained. Both full application proofs match the native
 digest, cross the old UCVTF frontier at the exact checkpoint and reach CASAB at
-311,527 post-entry instructions. Current source_sha256 matches
+311,527 post-entry instructions. The validated checkpoint has source_sha256
 `970180c2b5903c4acc7592cdcd36592b2d4b397072eb66e1e0b0d32fd6891810`.
 A fresh fetch found dev and origin/dev unchanged at f8a7162 before integration.
-The remaining unchecked steps below the validation gate concern Git delivery.
+Commit `dec936d3087867ac92bcbb12015f20b5108c67e3` was pushed and verified
+against origin/dev. Later narrow-CAS changes require their own fresh validation;
+the SIMD run certifies this historical checkpoint.
 
 ## Handoff acceptance matrix
 

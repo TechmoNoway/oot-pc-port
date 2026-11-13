@@ -59,16 +59,18 @@ promise a playable game or a first rendered frame.
 
 ## Read order
 
-Tasks1-6 are complete as of 2026-11-13. The source/configuration is frozen for
-Task7's fresh full run at `build/milestones/application-simd-v1/`. Read its actual
-`run.json` before taking any action: a running/failed manifest is not a pass.
+Tasks1-7 passed their full validation on 2026-11-13 at
+`build/milestones/application-simd-v1/`; commit `dec936d` is verified on origin/dev.
+Read its actual `run.json`: it certifies that implementation checkpoint, while
+the later narrow-CAS work requires its own fresh full run.
 The v3 pilots and native-verified full replays match on both compilers, proving
 original progress to CASAB at 311,527 post-entry instructions. All 24 original
 SDK jump-table selection hints remain private, and all original branches run.
 Source has changed since Task0's `ready.json`; that report is historical only.
-The user requested continuation until real game output/input works, so complete
-this milestone's verified commit/push before designing the measured byte/halfword
-atomic cohort. Do not silently add CASAB to this frozen SIMD validation.
+The user requested continuation until real game output/input works. The
+measured byte/halfword atomic cohort now follows its
+[own plan](2026-11-13-application-narrow-cas.md). Do not silently add CASAB to
+the historical SIMD validation.
 
 1. `AGENTS.md` and [verified environment recovery](2026-11-13-build-environment-ready.md).
 2. [Design and research](../specs/2026-11-13-application-simd-progress-design.md).

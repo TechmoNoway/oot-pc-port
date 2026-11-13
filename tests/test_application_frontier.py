@@ -20,6 +20,23 @@ def fixture():
 
 
 class ApplicationFrontierTests(unittest.TestCase):
+    def test_narrow_cas_progress_uses_atomic_domain_and_keeps_simd_counts_separate(self):
+        old,current,e,row=fixture();word=0x08e87d2a
+        site=current.pop('application_simd_sites')[0]
+        site.update(word=word,word_sha256=hashlib.sha256(struct.pack('<I',word)).hexdigest())
+        current['application_atomic_sites']=[site]
+        old['application_word_boundaries']=[dict(site,semantic_error='old CASAB frontier')]
+        e['word']=row['word']=word
+        proof=self.proof([row],old,current,e)
+        self.assertEqual(proof['source_site'],site)
+        survey=summarize_boundaries(old)
+        self.assertEqual(sum(survey['families'].values()),0)
+        self.assertEqual(survey['atomic_families'],{'compare_exchange_narrow':1})
+        bad=deepcopy(current);bad['application_simd_sites']=bad.pop('application_atomic_sites')
+        with self.assertRaises(InputError):self.proof([row],old,bad,e)
+        bad=deepcopy(current);bad['application_simd_sites']=[deepcopy(site)]
+        with self.assertRaises(InputError):self.proof([row],old,bad,e)
+
     def test_cli_checks_native_full_trace_and_build_paths_before_writing_proof(self):
         old,current,e,crossing=fixture()
         with tempfile.TemporaryDirectory(dir=ROOT/'build') as tmp:

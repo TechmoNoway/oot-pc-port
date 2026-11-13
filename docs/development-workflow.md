@@ -2,7 +2,20 @@
 
 Development is organized around complete capabilities and measured blocker cohorts. A milestone includes its dependent instruction/runtime changes, verifier integration, synthetic native evidence, fresh private surveys, documentation and a reviewed commit/push on `dev`. The assistant completes these substeps autonomously within the authorized scope and reports the result at the milestone boundary. Small instruction families no longer require separate user prompts or separate releases.
 
-## Current milestone: application SIMD progress
+## Current milestone: application narrow CAS
+
+The [narrow-CAS plan](superpowers/plans/2026-11-13-application-narrow-cas.md)
+adds application-only byte/halfword compare-and-swap through the existing
+serialized Normal-memory backend. The old size4/8 API and all older profiles
+remain separate. Focused MSVC/GCC checks include independent ARM state/memory,
+native alias contention, generated dispatch/yields and complete fault isolation.
+The fresh `build/milestones/application-narrow-cas-v1/` run passed all 42 stages
+with a matching source fingerprint: 656 Python tests without skips, seven CTest
+groups and both compiler full-trace progress proofs. It retains every earlier
+baseline, retires CASAB and reaches the guarded applet-resource getter at
+311,535 post-entry instructions. Rendering/input remain further work.
+
+## Preceding application SIMD progress
 
 The [application profile](application-startup.md) adds the six measured
 register-only SIMD families while preserving the complete initialization,
@@ -21,6 +34,8 @@ The fresh `build/milestones/application-simd-v1/` run passes all 42 stages,
 including 641 Python tests without skips, seven CTest groups, retained legacy
 surveys/prefixes and both full original-frontier proofs. The exact measured next
 boundary is CASAB at 311,527 post-entry instructions; gameplay is not implemented.
+Its reviewed commit `dec936d` is verified on origin/dev and the GitHub Windows
+Checks job passed. This evidence certifies that checkpoint, not later changes.
 
 ## Preceding SDK initialization and host-linked boot
 

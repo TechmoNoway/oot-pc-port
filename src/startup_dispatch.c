@@ -698,7 +698,8 @@ int oot_startup_dispatch_run(OotStartupDispatcher *d, OotArm64State *s, uint64_t
             uint64_t value = 0;
             int init_atomic=oot_startup_init_atomic_kind(i->word);
             if(!init_atomic)init_atomic=oot_startup_application_atomic_kind(i->word);
-            int atomic = (i->word & UINT32_C(0xbfa07c00)) == UINT32_C(0x88a07c00);
+            int narrow_cas=init_atomic==OOT_STARTUP_APP_CAS_NARROW;
+            int atomic = narrow_cas || (i->word & UINT32_C(0xbfa07c00)) == UINT32_C(0x88a07c00);
             expected = working; expected.pc += 4;
             if (init_atomic==OOT_STARTUP_INIT_LDADD || init_atomic==OOT_STARTUP_INIT_LDADDAL ||
                 init_atomic==OOT_STARTUP_INIT_LDSET || init_atomic==OOT_STARTUP_INIT_LDCLR ||
@@ -717,14 +718,14 @@ int oot_startup_dispatch_run(OotStartupDispatcher *d, OotArm64State *s, uint64_t
             }
             else if (atomic) {
                 unsigned rn=(i->word >> 5)&31, rs=(i->word >> 16)&31;
-                unsigned size=(i->word & UINT32_C(0x40000000)) ? 8:4;
+                unsigned size=narrow_cas ? 1u<<(i->word>>30):((i->word & UINT32_C(0x40000000)) ? 8:4);
                 uint64_t address=oot_arm64_read(&working,rn,64,1);
                 /* This context/image has one owner thread. The snapshot is
                  * only the independent full-state expectation; the actual
                  * compare/conditional write is one locked backend transfer. */
                 if (!oot_memory_load(memory,address,size,&value))
                     return stop(d,out,sink,user,OOT_STARTUP_MEMORY_FAULT,i->word,0,source_pc,0);
-                oot_arm64_write(&expected,rs,size*8,0,value);
+                oot_arm64_write(&expected,rs,narrow_cas ? 32:size*8,0,value);
             }
             else if (system == UINT32_C(0xd53bd060)) value = oot_startup_context_tls_pointer(d->context);
             else if (system == UINT32_C(0xd53bd040)) value = oot_startup_context_tpidr_el0(d->context);

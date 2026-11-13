@@ -276,9 +276,45 @@ historical progress checkpoint. Its fresh full milestone run passed all 42 requi
 tests without skips, seven CTest groups and 283,401 common native/reference
 comparisons per compiler. All earlier raw/SDK/logging/initialization prefixes and
 static outcomes remain unchanged. Both application full replays retain the
-source-bound progress proof and matching native digest. The current source gate is:
+source-bound progress proof and matching native digest. That validated SIMD source gate is:
 
 `970180c2b5903c4acc7592cdcd36592b2d4b397072eb66e1e0b0d32fd6891810`.
 
 No stage was skipped or recovered by editing pass markers. The preceding
 application/content report above remains historical evidence.
+
+
+## Application narrow CAS
+
+Application-only CASB/CASAB/CASLB/CASALB and CASH/CASAH/CASLH/CASALH use a
+separate size1/2 wrapper over the existing locked compare/exchange backend.
+Comparison and desired operands use only their low byte/halfword, and the
+original value returns through zero-extended W(Rs). Original operands are
+captured across aliases; full RW preflight is required even on a comparison
+miss. The old size4/8 API, INIT profile and ABI2 remain unchanged.
+
+Both compilers pass full-state pinned-ARM and independent-byte checks,
+complete backend fault tests, native alias contention and real generated
+dispatch/quota/vector-preservation tests. An explicit observed code root
+reaudits the former INIT-only CASAB boundary under the application profile;
+old INIT selection records remain unchanged. Atomic source-site records
+grant no runtime authority.
+
+The fresh v2 original pilots and full single-step replays agree on both
+compilers. They retire the old CASAB at its exact expected checkpoint, then
+reach the guarded `nn::applet::GetAppletResourceUserId()` export at 311,535
+post-entry instructions. Total retirement is 1,833,232: 1,833,181 original and
+51 scaffold instructions, with 50 native calls. The three constructor bodies,
+seven stages, four real file reads and 3,427 bytes remain unchanged. Their
+complete trace SHA-256 is
+`179fad436f76bf0a0071f938551109e90c6e9f7de74425aa15207a3bc2ee1419`.
+
+Private pilots are under `build/application-narrow-cas-pilots/*-v2/`. The
+measured endpoint is frozen in `config/milestones/application-narrow-cas.json`.
+The fresh full milestone passed all 42 stages, including 656 Python tests
+without skips, seven CTest groups and 283,401 common native/reference comparisons
+per compiler. Both full original-progress proofs, retained legacy prefixes and
+static baselines passed. Its matching implementation/configuration fingerprint is
+`73babecba98a5534d153da6259332095c9b0d9ec5a14a4b221b576bfb03a523a`.
+This capability does not establish gameplay, applet-resource ownership, graphics
+or guest scheduling support. The guarded resource getter is the next design input.

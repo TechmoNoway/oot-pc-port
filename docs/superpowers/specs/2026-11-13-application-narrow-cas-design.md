@@ -1,8 +1,9 @@
 # Application byte/halfword compare-and-swap
 
-Status: next measured capability design; repository implementation pending. An isolated source-only candidate under ignored build/ has focused synthetic checks.
-The user requested continuation toward actual game output/input. Finish the
-frozen application SIMD validation and its reviewed dev delivery first.
+Status: implementation, focused native checks, v2 original pilots and the fresh
+42-stage full validation passed. Reviewed dev delivery is next. SIMD commit
+`dec936d` is verified on origin/dev.
+The user requested continuation toward actual game output/input.
 
 ## Evidence and scope
 
@@ -118,5 +119,7 @@ A source-only mirror at `build/cas-candidate/` passed eight narrow-CAS unit test
 and one real synthetic-dispatch/yield/vector test on each compiler. Its source
 is separate from the dev tree frozen for SIMD validation. A negative control
 removing the narrow CAS dispatcher expectation produced BAD_CALLBACK13 exactly;
-restoring it passed. Wide-CAS/atomic regressions, native order stress, original
-progress and a fresh full milestone remain mandatory before narrow-CAS delivery.
+restoring it passed. After promotion, both compilers passed 53 focused tests,
+including wide-CAS regressions, native order stress and generated dispatch.
+The rebuilt native host/memory CTest groups passed 6/6. Original progress and
+a fresh full milestone remain mandatory before narrow-CAS delivery.
