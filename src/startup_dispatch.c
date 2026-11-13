@@ -282,19 +282,20 @@ int oot_startup_dispatch_destroy(OotStartupDispatcher *d)
 
 static OotStartupDispatcher *create_registry(OotRuntimeImage *image,
     OotStartupContext *context, OotPauth *pauth, const OotStartupProgram *p,
-    uint64_t limit, uint32_t *error, int sdk, int native, int initialization, int host_linked, int application)
+    uint64_t limit, uint32_t *error, int sdk, int native, int initialization, int host_linked, int application,int graphics)
 {
     OotStartupDispatcher *d;
     size_t n, span = 0;
     uint32_t failure = OOT_STARTUP_BAD_ARGUMENT;
     if (error) *error = failure;
     if (!image || !context || !pauth || oot_pauth_model(pauth) != OOT_PAUTH_QARMA5_VA39 || !p ||
-        p->version != OOT_STARTUP_DISPATCH_VERSION || p->flags != ((host_linked ? OOT_STARTUP_HOST_LINKED:OOT_STARTUP_RAW_IMAGE) | (sdk ? OOT_STARTUP_SDK_RUNTIME : 0u) | (native ? OOT_STARTUP_NATIVE_RUNTIME:0u) | (initialization ? OOT_STARTUP_INIT_RUNTIME:0u) | (application ? OOT_STARTUP_APPLICATION:0u)) ||
+        p->version != OOT_STARTUP_DISPATCH_VERSION || p->flags != ((host_linked ? OOT_STARTUP_HOST_LINKED:OOT_STARTUP_RAW_IMAGE) | (sdk ? OOT_STARTUP_SDK_RUNTIME : 0u) | (native ? OOT_STARTUP_NATIVE_RUNTIME:0u) | (initialization ? OOT_STARTUP_INIT_RUNTIME:0u) | (application ? OOT_STARTUP_APPLICATION:0u) | (graphics ? OOT_STARTUP_GRAPHICS:0u)) ||
         !!oot_startup_context_sdk_enabled(context) != !!sdk ||
         (native && !oot_startup_context_native_enabled(context)) ||
         (!native && oot_startup_context_native_enabled(context)) ||
         !!oot_startup_context_init_enabled(context)!=!!initialization ||
         !!oot_startup_context_application_enabled(context)!=!!application ||
+        !!oot_startup_context_graphics_enabled(context)!=!!graphics ||
         !limit || limit > (sdk ? OOT_STARTUP_SDK_MAX_RETIRED : OOT_STARTUP_MAX_RETIRED) ||
         !p->instructions || !p->instruction_count ||
         p->instruction_count > (initialization ? OOT_STARTUP_INIT_MAX_INSTRUCTIONS : sdk ? OOT_STARTUP_SDK_MAX_INSTRUCTIONS : OOT_STARTUP_MAX_INSTRUCTIONS) ||
@@ -358,37 +359,41 @@ OotStartupDispatcher *oot_startup_dispatch_create(OotRuntimeImage *image,
     OotStartupContext *context, OotPauth *pauth, const OotStartupProgram *p,
     uint64_t limit, uint32_t *error)
 {
-    return create_registry(image,context,pauth,p,limit,error,0,0,0,0,0);
+    return create_registry(image,context,pauth,p,limit,error,0,0,0,0,0,0);
 }
 
 OotStartupDispatcher *oot_startup_dispatch_create_sdk(OotRuntimeImage *image,
     OotStartupContext *context, OotPauth *pauth, const OotStartupProgram *p,
     uint64_t limit, uint32_t *error)
 {
-    return create_registry(image,context,pauth,p,limit,error,1,0,0,0,0);
+    return create_registry(image,context,pauth,p,limit,error,1,0,0,0,0,0);
 }
 
 OotStartupDispatcher *oot_startup_dispatch_create_native(OotRuntimeImage *image,
     OotStartupContext *context, OotPauth *pauth, const OotStartupProgram *p,
     uint64_t limit, uint32_t *error)
 {
-    return create_registry(image,context,pauth,p,limit,error,1,1,0,0,0);
+    return create_registry(image,context,pauth,p,limit,error,1,1,0,0,0,0);
 }
 
 OotStartupDispatcher *oot_startup_dispatch_create_init(OotRuntimeImage *image,
     OotStartupContext *context, OotPauth *pauth, const OotStartupProgram *p,
     uint64_t limit, uint32_t *error)
 {
-    return create_registry(image,context,pauth,p,limit,error,1,1,1,0,0);
+    return create_registry(image,context,pauth,p,limit,error,1,1,1,0,0,0);
 }
 
 OotStartupDispatcher *oot_startup_dispatch_create_host(OotRuntimeImage *image,OotStartupContext *context,
     OotPauth *pauth,const OotStartupProgram *program,uint64_t limit,uint32_t *error)
-{ return create_registry(image,context,pauth,program,limit,error,1,1,1,1,0); }
+{ return create_registry(image,context,pauth,program,limit,error,1,1,1,1,0,0); }
 
 OotStartupDispatcher *oot_startup_dispatch_create_application(OotRuntimeImage *image,OotStartupContext *context,
     OotPauth *pauth,const OotStartupProgram *program,uint64_t limit,uint32_t *error)
-{ return create_registry(image,context,pauth,program,limit,error,1,1,1,1,1); }
+{ return create_registry(image,context,pauth,program,limit,error,1,1,1,1,1,0); }
+
+OotStartupDispatcher *oot_startup_dispatch_create_graphics(OotRuntimeImage *image,OotStartupContext *context,
+    OotPauth *pauth,const OotStartupProgram *program,uint64_t limit,uint32_t *error)
+{ return create_registry(image,context,pauth,program,limit,error,1,1,1,1,1,1); }
 
 int oot_startup_dispatch_initialization_reached(const OotStartupDispatcher *d)
 { return d && d->application && d->initialization_reached; }

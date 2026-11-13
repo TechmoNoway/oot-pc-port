@@ -2,7 +2,22 @@
 
 Development is organized around complete capabilities and measured blocker cohorts. A milestone includes its dependent instruction/runtime changes, verifier integration, synthetic native evidence, fresh private surveys, documentation and a reviewed commit/push on `dev`. The assistant completes these substeps autonomously within the authorized scope and reports the result at the milestone boundary. Small instruction families no longer require separate user prompts or separate releases.
 
-## Current milestone: application resource identity
+## Current milestone: independent graphics bootstrap
+
+The [graphics design](superpowers/specs/2026-11-13-graphics-bootstrap-design.md)
+and [implementation plan](superpowers/plans/2026-11-13-graphics-bootstrap.md)
+introduce a separate flags126 application profile with a real owned Vulkan
+device/queue. Keep the earlier flags62 resource lane and every preceding profile.
+The fresh `build/milestones/graphics-bootstrap-v1/` run passes all 46 stages:
+687 Python tests without skips, seven CTest groups and 283,401 common comparisons
+per compiler. Both original full replays match, prove the historical first-boot
+prefix and retire the original caller after native return. The final local source
+fingerprint is verified; staged source content also matches under the configured
+Git line-ending normalization. The genuine unsupported GSV session endpoint is
+inside VI initialization. Continue with a separately proved native display
+backend; no guest session, game frame or usable input has been established.
+
+## Preceding milestone: application resource identity
 
 The [resource identity design](superpowers/specs/2026-11-13-application-resource-identity-design.md)
 and [plan](superpowers/plans/2026-11-13-application-resource-identity.md) extend the
@@ -13,10 +28,11 @@ checks the source-bound getter event/query count. The measured next boundary
 is the graphics-supervisor API. The fresh full run at
 `build/milestones/application-resource-identity-v2/` passes all 42 stages,
 672 Python tests without skips, seven CTest groups and 283,401 common comparisons
-per compiler, with the current source fingerprint. Both native full traces
+per compiler, with that checkpoint's historical source fingerprint. Both native full traces
 prove the resource getter crossing and preserve every preceding profile.
 The common matrix now uses independently compiled units after a reproduced
 monolithic GCC compile timeout, retaining all cases and existing timeouts.
+Commit `3ce99bf` is verified on origin/dev and its GitHub Windows Checks passed.
 
 ## Preceding application narrow CAS
 

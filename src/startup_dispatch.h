@@ -12,6 +12,7 @@
 #define OOT_STARTUP_INIT_RUNTIME 8u
 #define OOT_STARTUP_HOST_LINKED 16u
 #define OOT_STARTUP_APPLICATION 32u
+#define OOT_STARTUP_GRAPHICS 64u
 #define OOT_STARTUP_MAX_NATIVE_FUNCTIONS 64u
 #define OOT_STARTUP_INIT_MAX_NATIVE_FUNCTIONS 4096u
 #define OOT_STARTUP_MAX_INSTRUCTIONS 16384u
@@ -149,6 +150,9 @@ OOT_MEMORY_API OotStartupDispatcher *oot_startup_dispatch_create_host(OotRuntime
     uint64_t limit,uint32_t *error);
 /* Separate flags-62 application prefix: retain the complete initialization
  * goal, then continue through its original entry instead of stopping there. */
+OOT_MEMORY_API OotStartupDispatcher *oot_startup_dispatch_create_graphics(OotRuntimeImage *image,
+    OotStartupContext *context,OotPauth *pauth,const OotStartupProgram *program,
+    uint64_t limit,uint32_t *error);
 OOT_MEMORY_API OotStartupDispatcher *oot_startup_dispatch_create_application(OotRuntimeImage *image,
     OotStartupContext *context,OotPauth *pauth,const OotStartupProgram *program,
     uint64_t limit,uint32_t *error);

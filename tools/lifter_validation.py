@@ -206,11 +206,11 @@ def compile_library(programs, mode="cmake", extra_source="", startup=False, *, s
         library = directory / ("lifted.dll" if os.name == "nt" else "lifted.so")
         command=[compiler, "-std=c17", "-O2", "-Wall", "-Wextra", "-Wpedantic", "-Werror",
              "-DOOT_MEMORY_SHARED_EXPORTS", "-D_CRT_SECURE_NO_WARNINGS", "-D_WIN32_WINNT=0x0A00",
-             "-I", str(ROOT / "src")]
+             "-I", str(ROOT / "src"),"-I",str(ROOT/'third_party/vulkan/include')]
         inputs=[*map(str,sources), str(ROOT / "src/guest_memory.c"),
              str(ROOT / "src/runtime_image.c"), str(ROOT / "src/host_win32.c"), str(ROOT / "src/leaf_dispatch.c"),
              str(ROOT / "src/frame_dispatch.c"), str(ROOT / "src/stack_dispatch.c"), str(ROOT / "src/pauth.c"), str(ROOT / "src/checked_read.c"), str(ROOT / "src/plt_bridge.c"),
-             *([str(ROOT / 'src'/name) for name in ('startup_context.c','startup_dispatch.c','sdk_native.c','native_platform.c','native_services.c','native_math.c','startup_vector.c','startup_float.c','startup_init_atomic.c','application_services.c','native_romfs.c')] if startup else []),
+             *([str(ROOT / 'src'/name) for name in ('startup_context.c','startup_dispatch.c','sdk_native.c','native_platform.c','native_services.c','native_math.c','startup_vector.c','startup_float.c','startup_init_atomic.c','application_services.c','native_romfs.c','native_graphics.c')] if startup else []),
              ]
         if split_programs:
             objects=[]
@@ -229,11 +229,11 @@ def compile_library(programs, mode="cmake", extra_source="", startup=False, *, s
             f'"{(ROOT / "src/runtime_image.c").as_posix()}" "{(ROOT / "src/host_win32.c").as_posix()}" '
             f'"{(ROOT / "src/leaf_dispatch.c").as_posix()}" "{(ROOT / "src/frame_dispatch.c").as_posix()}" '
             f'"{(ROOT / "src/stack_dispatch.c").as_posix()}" "{(ROOT / "src/pauth.c").as_posix()}" "{(ROOT / "src/checked_read.c").as_posix()}" "{(ROOT / "src/plt_bridge.c").as_posix()}" '+
-            (' '.join('"'+(ROOT/p).as_posix()+'"' for p in ('src/startup_context.c','src/startup_dispatch.c','src/sdk_native.c','src/native_platform.c','src/native_services.c','src/native_math.c','src/startup_vector.c','src/startup_float.c','src/startup_init_atomic.c','src/application_services.c','src/native_romfs.c')) if startup else '')+')\n'+
+            (' '.join('"'+(ROOT/p).as_posix()+'"' for p in ('src/startup_context.c','src/startup_dispatch.c','src/sdk_native.c','src/native_platform.c','src/native_services.c','src/native_math.c','src/startup_vector.c','src/startup_float.c','src/startup_init_atomic.c','src/application_services.c','src/native_romfs.c','src/native_graphics.c')) if startup else '')+')\n'+
             'target_link_libraries(lifted PRIVATE bcrypt)\n'
             'target_compile_definitions(lifted PRIVATE OOT_MEMORY_SHARED_EXPORTS _CRT_SECURE_NO_WARNINGS _WIN32_WINNT=0x0A00)\n'
             'target_compile_features(lifted PRIVATE c_std_17)\n'
-            f'target_include_directories(lifted PRIVATE "{(ROOT / "src").as_posix()}")\n'
+            f'target_include_directories(lifted PRIVATE "{(ROOT / "src").as_posix()}" "{(ROOT/"third_party/vulkan/include").as_posix()}")\n'
             'if(MSVC)\n target_compile_options(lifted PRIVATE /W4 /WX'+(' /MP4' if split_programs else '')+')\n'
             'else()\n target_compile_options(lifted PRIVATE -Wall -Wextra -Wpedantic -Werror)\nendif()\n',
             encoding="utf-8")

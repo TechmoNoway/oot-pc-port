@@ -36,7 +36,8 @@ def source_digest():
     digest = hashlib.sha256()
     paths = [ROOT / "CMakeLists.txt"]
     for folder, suffixes in (("src", (".c", ".h")), ("tools", (".py", ".txt", ".c")),
-                              ("tests", (".py", ".c")), ("config/milestones", (".json",))):
+                              ("tests", (".py", ".c")), ("config/milestones", (".json",)),
+                              ("third_party/vulkan/include",(".h",))):
         paths += [p for p in (ROOT/folder).rglob("*") if p.is_file() and p.suffix in suffixes]
     for path in sorted(paths):
         require(path.resolve().is_relative_to(ROOT), "source fingerprint escaped checkout")
@@ -293,6 +294,26 @@ def compare_bounded_memory(before, after):
     return dict(source_text_hashes_match=True,shared_policy_outcomes_match=True,profiles=after['totals']['profiles'],cohort=cohort)
 
 
+def validate_graphics_config(config):
+    if 'graphics_experiment' in config or config.get('name')=='graphics-bootstrap':
+        require(type(config.get('graphics_experiment')) is bool,'invalid graphics milestone flag')
+    if config.get('name')=='graphics-bootstrap':
+        require(config.get('graphics_experiment') is True,'graphics bootstrap requires real graphics execution')
+    if not config.get('graphics_experiment'):return
+    require(config.get('application_experiment') is True and
+            isinstance(config.get('application_resource_progress_baseline'),str) and
+            bool(config['application_resource_progress_baseline']),
+            'graphics milestone must retain the preceding resource application lane')
+    require(all(isinstance(config.get(k),str) and config[k] for k in ('graphics_seed_report','graphics_baseline')),
+            'graphics seed/full baseline provenance is absent')
+    require(type(config.get('graphics_min_post_entry')) is int and
+            type(config.get('application_min_post_entry')) is int and
+            config['graphics_min_post_entry']>config['application_min_post_entry'],
+            'graphics requires the measured later original continuation')
+    require(config.get('graphics_expected_guard')=='_ZN2nn3gsv14GetUserSessionEv',
+            'graphics bootstrap requires its observed unsupported session boundary')
+
+
 class MilestoneRun:
     def __init__(self, output, name, stages):
         self.output = build_destination(output)
@@ -375,6 +396,79 @@ def collect_native(run, native, config):
             "ctest_groups": len(names), "compilers": {k: v["native_build"]["compiler"] for k, v in reports.items()}}
 
 
+def run_graphics_lanes(run,config,env):
+    """Add real graphics lanes without replacing the older resource profile."""
+    from build_startup import execute as execute_startup,validated_romfs_input
+    from graphics_progress import verify_graphics_progress_trace
+    from startup_sources import cached_sources
+    prepared=ROOT/config['prepared'];entropy=run.output/'process-entropy.bin'
+    seed=read_json(build_destination(ROOT/config['graphics_seed_report']));prior=seed['iterations'][-1]
+    provenance=read_json(build_destination(Path(prior['bundle'])/'manifest.json'))
+    sdk_audit=read_json(run.output/'sdk-audit.json');audit=read_json(run.output/'graphics-audit.json')
+    require(seed.get('application_runtime') is True and seed.get('host_linked') is True and
+            provenance.get('graphics_runtime') is True and
+            provenance['sdk_npdm']['source_sha256']==sdk_audit['npdm']['source_sha256'] and
+            provenance['sdk_audit']['goal_entry']==sdk_audit['goal_entry'],'graphics seed input/profile differs')
+    old_root=build_destination(ROOT/config['graphics_baseline']);old_run=read_json(old_root/'run.json')
+    require(old_run.get('status')=='passed' and
+            {'application-experiment-cmake','application-experiment-gcc','summary'}<=set(old_run.get('stages',{})) and
+            all(s.get('status')=='passed' for s in old_run['stages'].values()) and
+            old_run.get('name')=='application-resource-identity','graphics requires the passed full resource baseline')
+    baseline=read_json(ROOT/config['baseline_sdk_init'])
+    romfs=build_destination(ROOT/config['application_romfs_index']);romfs_input=validated_romfs_input(prepared,romfs)
+    keys=('status','error','pc','retired','word','service','trace_sha256','trace_steps','trace_rows',
+        'native_calls','native_stats','sdk_stages_completed','sdk_initialization_completed','game_entry_reached',
+        'init_stats','original_retired','host_scaffold_retired','constructors_completed','application_entry_retired',
+        'post_entry_retired','application_services','application_thread','application_resource','application_graphics',
+        'graphics_runtime','romfs','native_handler_stop','relative_relocation_probes','relative_relocations_matching_offline_link')
+    experiments={};proofs={}
+    for mode in ('cmake','gcc'):
+        folder=run.output/('graphics-'+mode);cache=folder/'native-cache'
+        args=[sys.executable,'-B','tools/build_startup.py',prepared,'--output',folder,'--compiler',mode,
+            '--sdk','--native-sdk','--sdk-init','--host-linked','--application','--graphics','--fast-functions',
+            '--execute','--entropy-file',entropy,'--native-cache',cache,'--romfs-index',romfs,
+            '--expand-targets','64','--limit','1000000000','--quantum','10000']
+        for pc in prior['additional_entries']:args+=['--extra-entry',str(pc)]
+        for pc in prior['application_entries']:args+=['--app-entry',str(pc)]
+        run.command('graphics-experiment-'+mode,args,env)
+        result=read_json(folder/'run.json');last=result['iterations'][-1]
+        bundle=read_json(Path(last['bundle'])/'manifest.json')
+        require(result.get('graphics_runtime') is True and bundle.get('graphics_runtime') is True and
+            bundle['native_audit']==audit and bundle['sdk_audit']['goal_entry']==sdk_audit['goal_entry'] and
+            bundle['sdk_npdm']['source_sha256']==sdk_audit['npdm']['source_sha256'] and
+            result['entropy_input_sha256']==hashlib.sha256(entropy.read_bytes()).hexdigest(),
+            'graphics input/goal/provider/entropy evidence differs')
+        cached_sources(Path(last['bundle']),folder/'source-verification')
+        require(last['build']['source_manifest_sha256']==hashlib.sha256((Path(last['bundle'])/'sources.json').read_bytes()).hexdigest() and
+            last['build'].get('romfs_index_sha256')==romfs_input['index_sha256'] and
+            last['build'].get('romfs_binding_sha256')==hashlib.sha256((cache/'romfs_binding.h').read_bytes()).hexdigest() and
+            last['executable_sha256']==hashlib.sha256(Path(last['executable']).read_bytes()).hexdigest(),
+            'graphics executable/generated source/RomFS seal differs')
+        e=application_evidence(result,bundle,baseline,config['sdk_init_required_stages'],
+            config['graphics_min_post_entry'],config['graphics_expected_guard'],romfs_input)
+        require(e.get('graphics_runtime') is True and e.get('fast_function_calls',0)>0 and
+            e.get('application_graphics',{}).get('ready') is True and
+            (e['application_graphics'].get('boots'),e['application_graphics'].get('checks'))==(1,1),
+            'graphics did not exercise the measured real bootstrap/check')
+        full_dir=folder/'progress-full';full_dir.mkdir()
+        shutil.copyfile(Path(last['bundle'])/'startup.ootmem',full_dir/'startup.ootmem')
+        full=execute_startup(Path(last['executable']),full_dir,1000000000,10000,'full',entropy,False,romfs_index=romfs)
+        (full_dir/'report.json').write_text(json.dumps(full,indent=2)+'\n',encoding='utf-8')
+        require(all(e.get(k)==full.get(k) for k in keys),'graphics full/single-step and compact/accelerated execution differ')
+        old_folder=old_root/('application-'+mode);old=read_json(old_folder/'run.json')['iterations'][-1]
+        old_full=read_json(old_folder/'progress-full/report.json')
+        old_trace=build_destination(Path(old_full['trace_file']))
+        require(old_trace.is_relative_to(old_folder.resolve()) and old_full['trace_sha256']==old['execution']['trace_sha256'],
+                'graphics baseline is not its verified full resource trace')
+        old_bundle=read_json(build_destination(Path(old['bundle'])/'manifest.json'))
+        proof=verify_graphics_progress_trace(old_trace,old_full,old_bundle,Path(full['trace_file']),full,bundle)
+        (full_dir/'graphics-progress.json').write_text(json.dumps(proof,indent=2)+'\n',encoding='utf-8')
+        experiments[mode]=e;proofs[mode]=proof
+    require(all(experiments['cmake'].get(k)==experiments['gcc'].get(k) for k in keys),
+            'native compilers reached different graphics prefixes or owned state')
+    return dict(graphics_experiments=experiments,graphics_progress=proofs)
+
+
 def execute(config, output, native_only=False):
     require(os.name == "nt", "milestone runner requires Windows")
     require(isinstance(config, dict) and config.get("schema_version") == 1 and isinstance(config.get("name"), str) and re.fullmatch(r"[a-z][a-z0-9-]*", config["name"]), "invalid milestone config")
@@ -393,6 +487,7 @@ def execute(config, output, native_only=False):
     require(type(config.get('sdk_init_experiment',False)) is bool,'invalid SDK initialization scope flag')
     require(type(config.get('application_experiment',False)) is bool,'invalid application scope flag')
     validate_resource_progress_config(config)
+    validate_graphics_config(config)
     if config.get('application_experiment'):
         require(config.get('sdk_init_experiment') is True and config.get('sdk_init_host_linked') is True and
             config.get('sdk_init_fast_functions') is True,'application milestone requires the complete preceding host initialization lane')
@@ -468,6 +563,9 @@ def execute(config, output, native_only=False):
     if not native_only and config.get('application_experiment'):
         stages.insert(stages.index('comparison'),'application-audit')
         for mode in ('cmake','gcc'):stages.insert(stages.index('summary'),'application-experiment-'+mode)
+    if not native_only and config.get('graphics_experiment'):
+        stages.insert(stages.index('comparison'),'graphics-audit')
+        for mode in ('cmake','gcc'):stages.insert(stages.index('summary'),'graphics-experiment-'+mode)
     run = MilestoneRun(output, config["name"], stages)
     run.manifest["scope"] = "synthetic native only" if native_only else "synthetic native and static private game analysis"
     if not native_only and config.get('startup_experiment'):
@@ -489,7 +587,8 @@ def execute(config, output, native_only=False):
                 exe=run.output/'sdk-context-test.exe'
                 run.command('gcc-sdk-context-build',[gcc,'-std=c17','-O2','-Wall','-Wextra','-Wpedantic','-Werror',
                     '-D_CRT_SECURE_NO_WARNINGS','-D_WIN32_WINNT=0x0A00','-I',ROOT/'src',ROOT/'tests/startup_context_test.c',
-                    *[ROOT/'src'/(name+'.c') for name in ('startup_context','runtime_image','guest_memory','host_win32','sdk_native','native_platform','native_services','native_math','startup_vector','startup_float','startup_init_atomic','application_services','native_romfs')],'-lbcrypt','-o',exe],e)
+                    *[ROOT/'src'/(name+'.c') for name in ('startup_context','runtime_image','guest_memory','host_win32','sdk_native','native_platform','native_services','native_math','startup_vector','startup_float','startup_init_atomic','application_services','native_romfs','native_graphics')],
+                    '-I',ROOT/'third_party/vulkan/include','-lbcrypt','-o',exe],e)
                 run.command('gcc-sdk-context-test',[exe,run.output/'sdk-context-test.ootmem'],e)
         with ThreadPoolExecutor(max_workers=2) as pool:
             futures = [pool.submit(msvc), pool.submit(gcc_lane)]
@@ -516,6 +615,18 @@ def execute(config, output, native_only=False):
                 run.command('sdk-init-audit',py+['tools/sdk_init_audit.py',prepared,'--report',run.output/'sdk-init-audit.json'],env)
             if config.get('application_experiment'):
                 run.command('application-audit',py+['tools/application_audit.py',prepared,'--report',run.output/'application-audit.json'],env)
+            if config.get('graphics_experiment'):
+                def graphics_source_audit():
+                    from link_exefs import load_prepared
+                    from module_linker import Linker
+                    from application_audit import audit_application
+                    from graphics_audit import extend_graphics_audit
+                    linker=Linker(load_prepared(prepared));require(linker.apply()['link_complete'],'graphics offline link incomplete')
+                    original=audit_application(linker)
+                    require(original==read_json(run.output/'application-audit.json'),'graphics preceding application audit changed')
+                    report=extend_graphics_audit(linker,original)
+                    (run.output/'graphics-audit.json').write_text(json.dumps(report,indent=2)+'\n',encoding='utf-8')
+                run.action('graphics-audit',graphics_source_audit)
             def compare():
                 comparisons = {scope: compare_profiles(read_json(ROOT/config["baseline_"+scope]), read_json(run.output/(scope+".json"))) for scope in ("default", "plt")}
                 audit = read_json(run.output/"callees.json"); compare_baseline(audit, read_json(run.output/"plt.json"))
@@ -807,6 +918,7 @@ def execute(config, output, native_only=False):
                 require(all(app_experiments['cmake'].get(k)==app_experiments['gcc'].get(k) for k in app_keys),
                     'native compilers reached different original application prefixes or provider states')
                 summary['application_experiments']=app_experiments
+            if config.get('graphics_experiment'):summary.update(run_graphics_lanes(run,config,env))
         def publish_summary():
             (run.output/"summary.json").write_text(json.dumps(summary, indent=2)+"\n", encoding="utf-8")
             lines = ["# Milestone validation", "", f"Milestone: {config['name']}", "", f"Python tests: {summary['python_tests']}; CTest groups: {summary['ctest_groups']}; native comparisons per compiler: {summary['native_trials_per_compiler']}."]
@@ -821,6 +933,10 @@ def execute(config, output, native_only=False):
                 app=summary['application_experiments']['cmake'];fs=app['romfs']
                 startup_scope=('The separate application profile executes the original nnMain body and reaches its declared unsupported boundary. '
                     f"It retires {app['post_entry_retired']} post-entry instructions, mounts verified content and reads {fs['bytes_read']} bytes in {fs['read_calls']} file operations. Gameplay remains unimplemented.")
+            if 'graphics_experiments' in summary:
+                g=summary['graphics_experiments']['cmake']
+                startup_scope+=(' The separate graphics profile bootstraps a real Vulkan device/queue and resumes the original caller, '
+                    f"reaching its guarded session boundary after {g['post_entry_retired']} post-entry instructions. No original game frame or usable input is established.")
             lines += ["", (("Native regression execution is synthetic. Separate opt-in startup experiments execute selected original instructions under an experimental process model. "+startup_scope)
                 if 'startup_experiments' in summary else "All executed code is synthetic.")+" Static game analysis grants no runtime capabilities. See run.json for final status and per-stage logs."]
             if 'memory_callee_profiles' in summary:

@@ -17,9 +17,11 @@ event/query. Their digest is
 `c00c495530695e89661396ca5b3d1e61d93e0657733a957990b7343718a3fb1f`.
 The CAS source fingerprint is historical once new work begins: do not restore
 old files or require that fingerprint to match this new working tree. Current
-phase is Step13 Git delivery. Steps4-12 are complete. The configuration freezes the real
+phase is Step14 graphics continuation. Steps4-13 are complete. The configuration freezes the real
 GetGraphicsSupervisor export boundary at 311,543 post-entry instructions; full
-validation has passed; Git delivery is next. No graphics handle is implemented.
+validation has passed. Commit `3ce99bf7eb8d5d39c18325769c68621858573af9` is verified
+on origin/dev with a clean tree at delivery. No graphics handle is implemented
+by that resource profile.
 
 The first full attempt retained its GCC compiler-timeout failure. A standalone
 retry reproduced it in the monolithic approximately 7 MB common generated C.

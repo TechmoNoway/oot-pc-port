@@ -86,13 +86,13 @@ def build_native(bundle, mode, native_cache=None, sdk_init=False,romfs_sha=None)
         require(Path(compiler).is_file(),'GCC is unavailable')
         exe=bundle/'oot-startup.exe'
         names=('main','startup_cli','startup_context','startup_dispatch','guest_memory',
-               'runtime_image','host_win32','pauth','checked_read','sdk_native','native_platform','native_services','native_math','startup_vector','startup_float','startup_init_atomic','application_services','native_romfs')
+               'runtime_image','host_win32','pauth','checked_read','sdk_native','native_platform','native_services','native_math','startup_vector','startup_float','startup_init_atomic','application_services','native_romfs','native_graphics')
         if split:
             from concurrent.futures import ThreadPoolExecutor
             import threading
             objects=native_cache/'objects';objects.mkdir(parents=True,exist_ok=True)
-            flags=['-std=c17','-O2','-Wall','-Wextra','-Wpedantic','-Werror','-DOOT_HAS_STARTUP_PROGRAM','-D_CRT_SECURE_NO_WARNINGS','-D_WIN32_WINNT=0x0A00','-I',str(ROOT/'src')]
-            headers=b''.join(p.name.encode()+p.read_bytes() for p in sorted((ROOT/'src').glob('*.h')))
+            flags=['-std=c17','-O2','-Wall','-Wextra','-Wpedantic','-Werror','-DOOT_HAS_STARTUP_PROGRAM','-D_CRT_SECURE_NO_WARNINGS','-D_WIN32_WINNT=0x0A00','-I',str(ROOT/'src'),'-I',str(ROOT/'third_party/vulkan/include')]
+            headers=b''.join(str(p.relative_to(ROOT)).encode()+p.read_bytes() for p in sorted([*(ROOT/'src').glob('*.h'),*(ROOT/'third_party/vulkan/include').rglob('*.h')]))
             lift_headers=b''.join((ROOT/'src'/n).read_bytes() for n in ('arm64_lift.h','guest_memory.h','pauth.h'))
             tool=subprocess.check_output([compiler,'--version'])+hashlib.sha256(Path(compiler).read_bytes()).digest()
             paths=[ROOT/'src'/(n+'.c') for n in names]+sources
@@ -116,7 +116,7 @@ def build_native(bundle, mode, native_cache=None, sdk_init=False,romfs_sha=None)
         else:
             run([compiler,'-std=c17','-O2','-Wall','-Wextra','-Wpedantic','-Werror',
                  '-DOOT_HAS_STARTUP_PROGRAM','-D_CRT_SECURE_NO_WARNINGS','-D_WIN32_WINNT=0x0A00',
-                 *(['-DOOT_ROMFS_BINDING_HEADER="'+binding.as_posix()+'"'] if binding else []),'-I',ROOT/'src',*[ROOT/'src'/(n+'.c') for n in names],*sources,'-lbcrypt','-o',exe])
+                 *(['-DOOT_ROMFS_BINDING_HEADER="'+binding.as_posix()+'"'] if binding else []),'-I',ROOT/'src','-I',ROOT/'third_party/vulkan/include',*[ROOT/'src'/(n+'.c') for n in names],*sources,'-lbcrypt','-o',exe])
         identity=subprocess.check_output([compiler,'--version'],text=True).splitlines()[0]
     else:
         cmake=find_cmake();native=native_cache or bundle/'native'
@@ -185,7 +185,7 @@ def execute(exe,bundle,limit,quantum,trace_mode='compact',entropy_file=None,fast
     return report
 
 
-def run(prepared,output,compiler='cmake',execute_code=False,expand_targets=0,limit=1000000,quantum=1000,initial_entries=(),trace_mode='compact',sdk=False,entropy_file=None,native_sdk=False,sdk_init=False,host_linked=False,fast_functions=False,native_cache=None,application=False,application_entries=(),romfs_index=None):
+def run(prepared,output,compiler='cmake',execute_code=False,expand_targets=0,limit=1000000,quantum=1000,initial_entries=(),trace_mode='compact',sdk=False,entropy_file=None,native_sdk=False,sdk_init=False,host_linked=False,fast_functions=False,native_cache=None,application=False,application_entries=(),romfs_index=None,graphics=False):
     require(os.name=='nt','native startup builds require Windows')
     output=build_destination(output)
     require(not output.exists(),'choose a fresh startup output directory')
@@ -199,6 +199,7 @@ def run(prepared,output,compiler='cmake',execute_code=False,expand_targets=0,lim
     require(not host_linked or sdk_init,'host boot requires SDK init')
     require(not fast_functions or sdk_init,'fast functions require SDK init')
     require(type(application) is bool and (not application or host_linked),'application requires host-linked opt-in')
+    require(type(graphics) is bool and (not graphics or application),'graphics requires application opt-in')
     require(application or not application_entries,'application roots require application mode')
     romfs_input=None
     if romfs_index is not None:
@@ -228,7 +229,7 @@ def run(prepared,output,compiler='cmake',execute_code=False,expand_targets=0,lim
             sdk_metadata=inspect_sdk_npdm(npdm)
         manifest=prepare_bundle(raw,bundle,extra_entries=extras,
             max_instructions=524288 if sdk_init else 32768 if sdk else 8192,sdk_metadata=sdk_metadata,native_sdk=native_sdk,sdk_init=sdk_init,host_linked=host_linked,
-            shared_package=output/'iteration-00/startup.ootmem' if index else None,decode_cache=decode_cache,application=application,application_entries=app_extras,
+            shared_package=output/'iteration-00/startup.ootmem' if index else None,decode_cache=decode_cache,application=application,application_entries=app_extras,graphics=graphics,
             **({'stack_size':metadata['main_thread_stack_size']} if metadata else {}))
         if romfs_input:manifest['romfs_input']=dict(romfs_input,index_path=str(romfs_index))
         manifest['npdm']=metadata
@@ -274,6 +275,7 @@ def run(prepared,output,compiler='cmake',execute_code=False,expand_targets=0,lim
         entropy_input_sha256=hashlib.sha256(entropy_file.read_bytes()).hexdigest() if entropy_file else None,
         iterations=iterations)
     if application:final['application_runtime']=True
+    if graphics:final['graphics_runtime']=True
     (output/'run.json').write_text(json.dumps(final,indent=2)+'\n',encoding='utf-8')
     return final
 
@@ -294,12 +296,13 @@ def main():
     p.add_argument('--fast-functions',action='store_true')
     p.add_argument('--app-entry',type=lambda s:int(s,0),action='append',default=[])
     p.add_argument('--application',action='store_true',help='separate opt-in execution beyond the checked nnMain transition')
+    p.add_argument('--graphics',action='store_true',help='separate application profile with a real owned Vulkan bootstrap')
     p.add_argument('--entropy-file',type=Path,help='private 32-byte process entropy under ignored build/')
     p.add_argument('--romfs-index',type=Path,help='private verified read-only RomFS index')
     p.add_argument('--native-cache',type=Path,help='owned incremental compiler cache under ignored build/')
     a=p.parse_args()
     try:
-        r=run(a.prepared,a.output,a.compiler,a.execute,a.expand_targets,a.limit,a.quantum,a.extra_entry,a.trace_mode,a.sdk,a.entropy_file,a.native_sdk,a.sdk_init,a.host_linked,a.fast_functions,native_cache=a.native_cache,application=a.application,application_entries=a.app_entry,romfs_index=a.romfs_index)
+        r=run(a.prepared,a.output,a.compiler,a.execute,a.expand_targets,a.limit,a.quantum,a.extra_entry,a.trace_mode,a.sdk,a.entropy_file,a.native_sdk,a.sdk_init,a.host_linked,a.fast_functions,native_cache=a.native_cache,application=a.application,application_entries=a.app_entry,romfs_index=a.romfs_index,graphics=a.graphics)
         last=r['iterations'][-1]
         print(json.dumps(dict(output=str(a.output),status=r['status'],iterations=len(r['iterations']),
             game_code_executed=r['game_code_executed'],startup_completed=False,

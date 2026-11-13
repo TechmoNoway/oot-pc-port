@@ -27,6 +27,7 @@ struct OotStartupContext {
     OotRomFs *romfs;
     OotApplicationServices application;
     uint64_t application_resource_queries;
+    OotGraphics *graphics;
     OotApplicationThreadState application_thread;
     OotStartupVectorState vectors;
     OotGuestMemory memory;
@@ -96,6 +97,7 @@ static int set_heap_mapping(OotStartupContext *c, uint64_t size)
 void oot_startup_context_destroy(OotStartupContext *c)
 {
     if (!c || --c->references) return;
+    oot_graphics_destroy(c->graphics);
     if (c->tls) (void)host_memory_release(c->tls);
     if (c->heap) (void)host_memory_release(c->heap);
     oot_romfs_close(c->romfs);
@@ -130,7 +132,7 @@ static OotStartupContext *create_context(OotRuntimeImage *image,
         !valid_span(config->heap_base,config->heap_capacity)) return NULL;
     if (sdk && (sdk->version != OOT_SDK_CONTEXT_VERSION ||
         sdk->flags & ~(OOT_SDK_EXPLICIT_ENTROPY | OOT_SDK_PROCESS_INFO | OOT_SDK_NO_REMOTE_ARENA |
-            OOT_SDK_MAIN_THREAD | OOT_SDK_NO_ALIAS_EXTRA | OOT_SDK_PAGE_ALLOCATION | OOT_SDK_OBSERVED_MAIN_TLR | OOT_SDK_NATIVE_FUNCTIONS | OOT_SDK_INITIALIZATION | OOT_SDK_APPLICATION) ||
+            OOT_SDK_MAIN_THREAD | OOT_SDK_NO_ALIAS_EXTRA | OOT_SDK_PAGE_ALLOCATION | OOT_SDK_OBSERVED_MAIN_TLR | OOT_SDK_NATIVE_FUNCTIONS | OOT_SDK_INITIALIZATION | OOT_SDK_APPLICATION | OOT_SDK_GRAPHICS) ||
         ((sdk->flags & (OOT_SDK_NO_REMOTE_ARENA | OOT_SDK_MAIN_THREAD | OOT_SDK_NO_ALIAS_EXTRA |
             OOT_SDK_PAGE_ALLOCATION | OOT_SDK_OBSERVED_MAIN_TLR)) && !(sdk->flags & OOT_SDK_PROCESS_INFO)) ||
         ((sdk->flags & OOT_SDK_OBSERVED_MAIN_TLR) && !(sdk->flags & OOT_SDK_MAIN_THREAD)) ||
@@ -138,6 +140,7 @@ static OotStartupContext *create_context(OotRuntimeImage *image,
          (sdk->flags & (OOT_SDK_MAIN_THREAD | OOT_SDK_PROCESS_INFO)) != (OOT_SDK_MAIN_THREAD | OOT_SDK_PROCESS_INFO)))) return NULL;
     if (sdk && (sdk->flags & OOT_SDK_INITIALIZATION) && !(sdk->flags & OOT_SDK_NATIVE_FUNCTIONS)) return NULL;
     if (sdk && (sdk->flags & OOT_SDK_APPLICATION) && !(sdk->flags & OOT_SDK_INITIALIZATION)) return NULL;
+    if (sdk && (sdk->flags & OOT_SDK_GRAPHICS) && !(sdk->flags & OOT_SDK_APPLICATION)) return NULL;
     if (sdk && (sdk->flags & OOT_SDK_OBSERVED_MAIN_TLR) &&
         (config->tls_size < 0x114 || config->main_thread_handle > UINT32_C(0x3fffffff))) return NULL;
     if (sdk && (sdk->flags & OOT_SDK_MAIN_THREAD) &&
@@ -258,6 +261,10 @@ static OotStartupContext *create_context(OotRuntimeImage *image,
             !host_counter_read(&c->clock_origin)) goto failed;
         c->host_frequency = info.counter_frequency;
     }
+    if(sdk && (sdk->flags & OOT_SDK_GRAPHICS)){
+        failure=OOT_STARTUP_CONTEXT_ALLOCATION;
+        c->graphics=oot_graphics_create();if(!c->graphics)goto failed;
+    }
     if (error) *error = OOT_STARTUP_CONTEXT_OK;
     return c;
 failed:
@@ -319,6 +326,10 @@ int oot_startup_context_init_enabled(const OotStartupContext *c)
 { return c && c->sdk_enabled && !!(c->sdk.flags & OOT_SDK_INITIALIZATION); }
 int oot_startup_context_application_enabled(const OotStartupContext *c)
 { return oot_startup_context_init_enabled(c) && !!(c->sdk.flags & OOT_SDK_APPLICATION); }
+int oot_startup_context_graphics_enabled(const OotStartupContext *c)
+{ return oot_startup_context_application_enabled(c) && !!(c->sdk.flags & OOT_SDK_GRAPHICS) && c->graphics; }
+int oot_startup_context_graphics_report(const OotStartupContext *c,OotGraphicsReport *out)
+{ return oot_startup_context_graphics_enabled(c) && oot_graphics_snapshot(c->graphics,out); }
 const OotApplicationServices *oot_startup_context_application_services(const OotStartupContext *c)
 { return oot_startup_context_application_enabled(c) ? &c->application:NULL; }
 uint64_t oot_startup_context_application_resource_queries(const OotStartupContext *c)
@@ -335,6 +346,7 @@ int oot_startup_context_romfs_stats(const OotStartupContext *c,OotRomFsStats *ou
 int oot_startup_context_handler_valid(const OotStartupContext *c, uint32_t id)
 { return oot_startup_context_native_enabled(c) && (oot_sdk_native_handler_valid(id) ||
     (oot_startup_context_application_enabled(c) && (id==OOT_APPLICATION_GRAPHICS_NOTIFICATIONS || id==OOT_APPLICATION_DESIRED_LANGUAGE || id==OOT_APPLICATION_RESOURCE_USER_ID || oot_romfs_handler_valid(id))) ||
+    (oot_startup_context_graphics_enabled(c) && (id==OOT_GRAPHICS_BOOT || id==OOT_GRAPHICS_CHECK)) ||
     (oot_startup_context_init_enabled(c) && (id==OOT_NATIVE_MATH_LOG || id==OOT_NATIVE_OS_GET_SYSTEM_TICK || oot_native_platform_handler_valid(id) || oot_native_services_handler_valid(id)))); }
 int oot_startup_context_returns_value(const OotStartupContext *c, uint32_t id)
 { return (oot_startup_context_application_enabled(c) && (id==OOT_APPLICATION_DESIRED_LANGUAGE || id==OOT_APPLICATION_RESOURCE_USER_ID || oot_romfs_returns_value(id))) || (oot_startup_context_init_enabled(c) && (id==OOT_NATIVE_OS_GET_SYSTEM_TICK || oot_native_platform_returns_value(id) || oot_native_services_returns_value(id))); }
@@ -373,6 +385,17 @@ int oot_startup_context_native_call(OotStartupContext *c, uint32_t id,
         (state->nzcv & UINT32_C(0x0fffffff))) {
         if (report) *report=(OotNativeReport){OOT_NATIVE_FAULT,id,OOT_NATIVE_BAD_STATE,0};
         return OOT_NATIVE_FAULT;
+    }
+    if(oot_startup_context_graphics_enabled(c) && (id==OOT_GRAPHICS_BOOT || id==OOT_GRAPHICS_CHECK)){
+        if(!c->platform.initialized)return OOT_NATIVE_UNSUPPORTED;
+        if(c->native.calls==UINT64_MAX){
+            if(report)*report=(OotNativeReport){OOT_NATIVE_FAULT,id,OOT_NATIVE_LIMIT,0};
+            return OOT_NATIVE_FAULT;
+        }
+        status=oot_graphics_call(c->graphics,id,state,&result);
+        if(status==OOT_NATIVE_IMPLEMENTED){++c->native.calls;*state=result;}
+        if(report)*report=(OotNativeReport){(uint32_t)status,id,status==OOT_NATIVE_FAULT ? OOT_NATIVE_BAD_STATE:OOT_NATIVE_OK,0};
+        return status;
     }
     if(oot_startup_context_application_enabled(c) && oot_romfs_handler_valid(id)) {
         if(!c->romfs)return OOT_NATIVE_UNSUPPORTED;

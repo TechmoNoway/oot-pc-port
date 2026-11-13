@@ -92,7 +92,7 @@ def narrow_cas_program():
     return words+[0x910043ff,0xd4200000],[59]*8
 
 
-def package(completed,application,atomic=False,integer_fp=False,simd_cohort=False,narrow_cas=False,resource=False):
+def package(completed,application,atomic=False,integer_fp=False,simd_cohort=False,narrow_cas=False,resource=False,graphics=False,graphics_calls=False):
     raw,goal,audit=fixture(completed)
     main=raw.modules[1];sdk=raw.modules[2]
     struct.pack_into('<III',main.image,0x804,0x910004a5,0x910008c6,0xd4200000)
@@ -110,11 +110,18 @@ def package(completed,application,atomic=False,integer_fp=False,simd_cohort=Fals
             0xaa0003f3,branch(main.base+0x818,sdk.base+0xe30,True),0x8b130000,0xd4200000]
         struct.pack_into('<'+'I'*len(words),main.image,0x804,*words)
         for offset in (0xe10,0xe20,0xe30):struct.pack_into('<I',sdk.image,offset,0xd65f03c0)
+    if graphics_calls:
+        words=[simd.fixtures.movi(1,0,14,0x5a,0),simd.fixtures.movi(1,0,14,0xa5,31),
+            branch(main.base+0x80c,sdk.base+0xe10,True),0xaa1f03e0,0xaa1f03e1,
+            branch(main.base+0x818,sdk.base+0xe20,True),branch(main.base+0x81c,sdk.base+0xe30,True),
+            branch(main.base+0x820,sdk.base+0xe20,True),0xd4200000]
+        struct.pack_into('<'+'I'*len(words),main.image,0x804,*words)
+        for offset in (0xe10,0xe20,0xe30):struct.pack_into('<I',sdk.image,offset,0xd65f03c0)
     boot,boot_nodes,report=make_boot(raw,goal,audit,32768)
     nodes=list(boot_nodes)
     for module,lo,hi in [(main,0x100,0x150),(main,0x200,0x214),(sdk,0x100,0x150),
                         (sdk,0x500,0x528),(main,0x700,0x73c),(main,0x780,0x788),
-                        (main,0x800,0x804+len(words)*4 if simd_cohort or narrow_cas or resource else 0x820 if atomic or integer_fp else 0x810)]:
+                        (main,0x800,0x804+len(words)*4 if simd_cohort or narrow_cas or resource or graphics_calls else 0x820 if atomic or integer_fp else 0x810)]:
         for off in range(lo,hi,4):
             word=module.unpack('<I',off)[0]
             if not word:continue
@@ -128,7 +135,7 @@ def package(completed,application,atomic=False,integer_fp=False,simd_cohort=Fals
                 row.update(semantic_supported=False,selection_stop='application-only narrow CAS')
             if word&0xffe0001f==0xd4000001:row['service_immediate']=word>>5&65535
             nodes.append(row)
-    if resource:
+    if resource or graphics_calls:
         for offset in (0xe10,0xe20,0xe30):
             nodes.append(dict(address=sdk.base+offset,word=0xd65f03c0,semantic_supported=False,
                               native_boundary=True,selection_stop='synthetic resource provider boundary'))
@@ -143,9 +150,13 @@ def package(completed,application,atomic=False,integer_fp=False,simd_cohort=Fals
         for offset,handler in ((0xe10,64),(0xe20,322 if application else 31),(0xe30,322 if application else 31)):
             natives.append(dict(handler_id=handler,entry=sdk.base+offset,size=4,
                                 body_sha256=hashlib.sha256(sdk.read(offset,4)).hexdigest()))
+    if graphics_calls:
+        for offset,handler in ((0xe10,64),(0xe20,448),(0xe30,449)):
+            natives.append(dict(handler_id=handler,entry=sdk.base+offset,size=4,
+                                body_sha256=hashlib.sha256(sdk.read(offset,4)).hexdigest()))
     units={};source,summary=emit_startup(raw,sorted(nodes,key=lambda n:n['address']),manifest,config,
         sdk_config=model,sdk_goal=goal,native_functions=natives,sdk_init=True,units=units,entry_override=boot.base,
-        host_linked=True,host_constructors=report['module_order'],application=application)
+        host_linked=True,host_constructors=report['module_order'],application=application,graphics=graphics)
     return blob,dict(units,**{'startup.c':source}),goal
 
 class ApplicationBootTests(unittest.TestCase):
