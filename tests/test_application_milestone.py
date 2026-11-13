@@ -4,7 +4,7 @@ from pathlib import Path
 import hashlib,struct,sys,unittest
 ROOT=Path(__file__).resolve().parent.parent
 sys.path[:0]=[str(ROOT/'tools'),str(ROOT/'tests')]
-from run_milestone import application_evidence
+from run_milestone import application_evidence,application_endpoint
 from input_formats import InputError
 from test_sdk_init_milestone import completed
 
@@ -24,6 +24,37 @@ def evidence():
     return report,bundle,old
 
 class ApplicationMilestoneTests(unittest.TestCase):
+    def test_endpoint_alternatives_are_exclusive_and_svc_zero_is_valid(self):
+        for values in (('export',None,None),(None,0xffffffff,None),(None,None,0)):
+            application_endpoint(*values)
+        for values in ((None,None,None),('',None,None),('export',1,None),('export',None,1),
+                       (None,1,1),(None,True,None),(None,None,True),(None,None,-1),(None,None,65536)):
+            with self.subTest(values=values),self.assertRaises(InputError):application_endpoint(*values)
+
+    def test_svc_endpoint_requires_exact_original_word_source_and_no_native_guard(self):
+        report,bundle,old=evidence();e=report['iterations'][-1]['execution']
+        word=0xd4000001 | 0x1234 << 5
+        e.update(service=0x1234,word=word,native_handler_stop=False)
+        row=dict(address=0x2000,word=word,service=0x1234,module='main',source_sha256='22'*32,
+                 word_sha256=hashlib.sha256(struct.pack('<I',word)).hexdigest())
+        bundle.update(application_svc_sites=[row],entry_audit=dict(modules=[dict(name='main',source_sha256='22'*32)]))
+        application_evidence(report,bundle,old,7,100,None,expected_svc=0x1234)
+        for key,value in (('address',0x2004),('word',0),('service',31),('module','sdk'),
+                          ('source_sha256','33'*32),('word_sha256','44'*32)):
+            bad=deepcopy(bundle);bad['application_svc_sites'][0][key]=value
+            with self.subTest(key=key),self.assertRaises(InputError):
+                application_evidence(report,bad,old,7,100,None,expected_svc=0x1234)
+        for key,value in (('pc','0x2004'),('word',0xd503201f),('service',31),('native_handler_stop',True),('error',8)):
+            bad=deepcopy(report);bad['iterations'][-1]['execution'][key]=value
+            with self.subTest(key=key),self.assertRaises(InputError):
+                application_evidence(bad,bundle,old,7,100,None,expected_svc=0x1234)
+        for value in (True,-1,65536):
+            with self.assertRaises(InputError):application_evidence(report,bundle,old,7,100,None,expected_svc=value)
+        with self.assertRaises(InputError):application_evidence(report,bundle,old,7,100,'boundary',expected_svc=0x1234)
+        with self.assertRaises(InputError):application_evidence(report,bundle,old,7,100,None,expected_word=word,expected_svc=0x1234)
+        bundle['application_svc_sites'].append(row)
+        with self.assertRaises(InputError):application_evidence(report,bundle,old,7,100,None,expected_svc=0x1234)
+
     def test_declared_instruction_frontier_requires_exact_original_source_and_word(self):
         report,bundle,old=evidence();e=report['iterations'][-1]['execution']
         e.update(error=8,service=0,native_handler_stop=False,word=0xffffffff)

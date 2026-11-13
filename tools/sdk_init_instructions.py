@@ -1,8 +1,9 @@
-"""Initialization-only SIMD transfers, bounded scalar FP and pointer stripping.
+"""Profile-gated SIMD transfers, bounded scalar FP and pointer stripping.
 
 The enclosing profile owns a separate vector bank. Earlier SDK/PAC/integer
 decoders remain unchanged. Scalar FP permits default/FZ FPCR and owned FPSR;
-this is a finite initialization subset, not a complete floating-point emulator.
+this is a finite subset, not a complete floating-point emulator. Application
+conversions and register bit operations require the separate application gate.
 Architectural reference: Arm Instruction Set Reference Guide D4.49/D4.57,
 https://documentation-service.arm.com/static/6245c734b059dc5ff9a8bdab
 and Arm A64 ISA encoding reference,
@@ -38,6 +39,14 @@ def sdk_init_vector_kind(word,application=False):
     if type(word) is not int or not 0<=word<=0xffffffff:return None
     if application and word&0x7fbefc00==0x1e220000:return 'integer_fp'
     if application and word&0x7fbefc00==0x1e380000:return 'fp_integer'
+    if application and word&0xdfbffc00==0x5e21d800:return 'simd_integer_fp'
+    if application:
+        if word&0xbfe0fc00==0x0ea01c00:return 'simd_orr'
+        if word&0xbfe0fc00==0x2ee01c00:return 'simd_bif'
+        if word&0xbf20fc00==0x2e208c00 and (word>>22&3!=3 or word>>30&1):return 'simd_cmeq'
+        if (word>>16&31) not in (0,16):
+            if word&0xffe0fc00==0x5e000400:return 'simd_dup_element'
+            if word&0xffe08400==0x6e000400:return 'simd_ins_element'
     if word&0xffa00c00==0x1e200400:return 'fp_cond_compare'
     if word&0xff800000==0x1f000000:return 'fp_fmadd'
     if word&0xffbffc00==0x1e21c000:return 'fp_sqrt'
@@ -87,6 +96,22 @@ def decode_sdk_init_instruction(word,pc,application=False):
     if vector=='integer_fp':
         return Instruction(pc,word,'sdk_init_vector',width=64 if word>>22&1 else 32,
             rd=word&31,rn=word>>5&31,immediate=64 if word>>31 else 32,condition=word>>16&1,operation=23)
+    if vector=='simd_integer_fp':
+        width=64 if word>>22&1 else 32
+        return Instruction(pc,word,'sdk_init_vector',width=width,
+            rd=word&31,rn=word>>5&31,immediate=width,condition=word>>29&1,operation=25)
+    if vector in ('simd_orr','simd_bif','simd_cmeq'):
+        return Instruction(pc,word,'sdk_init_vector',width=128 if word>>30&1 else 64,
+            rd=word&31,rn=word>>5&31,rm=word>>16&31,
+            access_size=1<<(word>>22&3) if vector=='simd_cmeq' else 0,
+            operation={'simd_orr':26,'simd_cmeq':29,'simd_bif':30}[vector])
+    if vector in ('simd_dup_element','simd_ins_element'):
+        imm5=word>>16&31
+        element=imm5&-imm5
+        return Instruction(pc,word,'sdk_init_vector',width=element*8 if vector=='simd_dup_element' else 128,
+            rd=word&31,rn=word>>5&31,access_size=element,immediate=imm5//(2*element),
+            condition=(word>>11&15)//element if vector=='simd_ins_element' else 0,
+            operation=27 if vector=='simd_dup_element' else 28)
     if vector=='fp_cond_compare':
         return Instruction(pc,word,'sdk_init_vector',width=64 if word>>22&1 else 32,
             rn=word>>5&31,rm=word>>16&31,condition=word>>12&15,nzcv=word&15,operation=22)

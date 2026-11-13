@@ -29,6 +29,26 @@ def owner(modules, pc):
     return matches[0]
 
 
+def application_sites(modules,nodes):
+    """Private original-word records, never selection or execution authority."""
+    from application_frontier import FAMILIES
+    from sdk_init_instructions import sdk_init_vector_kind
+    simd=[];services=[]
+    for n in nodes:
+        m=owner(modules,n['address'])
+        if m.name=='hostboot' or n.get('native_boundary'):continue
+        word=n['word']
+        require(word==m.unpack('<I',n['address']-m.base)[0],'application site differs from original word')
+        is_simd=sdk_init_vector_kind(word,application=True) in FAMILIES
+        is_svc=word&0xffe0001f==0xd4000001
+        if not is_simd and not is_svc:continue
+        record=dict(address=n['address'],word=word,module=m.name,source_sha256=m.source_sha256,
+                    word_sha256=hashlib.sha256(struct.pack('<I',word)).hexdigest())
+        if is_simd:simd.append(record)
+        if is_svc:services.append(dict(record,service=word>>5&65535))
+    return simd,services
+
+
 def selection(linker, max_instructions=8192, extra_entries=(), sdk=False, native_entries=(), sdk_init=False,decode_cache=None,application=False):
     require(not linker.started and not linker.applied, 'startup requires fresh raw, unrelocated images')
     if sdk_init:
@@ -671,6 +691,7 @@ def prepare_bundle(linker, output, max_instructions=8192, extra_entries=(), conf
         report['application_runtime']=True;summary['application_runtime']=True
         report['application_selection']=application_selection
         report['application_pointer_selection']=application_pointers
+        report['application_simd_sites'],report['application_svc_sites']=application_sites(emitter.modules,nodes)
         report['application_word_boundaries']=[dict(address=n['address'],word=n['word'],
             module=owner(linker.modules,n['address']).name,
             source_sha256=owner(linker.modules,n['address']).source_sha256,

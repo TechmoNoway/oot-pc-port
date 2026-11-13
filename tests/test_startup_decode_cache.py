@@ -10,6 +10,16 @@ from test_startup_audit import linked
 from test_arm64_analysis import branch,RET
 
 class StartupDecodeCacheTests(unittest.TestCase):
+    def test_application_simd_decode_does_not_cross_profiles(self):
+        from arm64_decode import Decoder
+        from startup_audit import _decode_entry_word
+        cache=StartupDecodeCache();syntax=Decoder()
+        for word in (0x7e21d808,0x4ea21c20,0x5e180423,0x6e180420,0x6e228c20,0x6ee21c20):
+            for application in (False,True,False):
+                decoded=cache.decode(syntax,word,0x1000,True,True,application)
+                self.assertEqual(decoded,_decode_entry_word(syntax,word,0x1000,True,True,application))
+                self.assertEqual(decoded[3]=='sdk_init_vector',application)
+
     def test_exact_reports_original_bytes_and_fresh_native_boundaries(self):
         linker=linked({0:branch(0,0x40),0x40:0x91000400,0x44:RET,0x60:RET})
         base=linker.modules[0].base;before=bytes(linker.modules[0].image)

@@ -53,6 +53,15 @@ static unsigned vector_family(uint32_t word)
 int oot_startup_vector_kind(uint32_t word) { return vector_family(word)!=0; }
 int oot_startup_application_vector_kind(uint32_t word)
 { uint32_t fixed=word&UINT32_C(0x7fbefc00);
+  if((word&UINT32_C(0xdfbffc00))==UINT32_C(0x5e21d800))return 3;
+  if((word&UINT32_C(0xbfe0fc00))==UINT32_C(0x0ea01c00))return 4;
+  if((word&UINT32_C(0xbfe0fc00))==UINT32_C(0x2ee01c00))return 8;
+  if((word&UINT32_C(0xbf20fc00))==UINT32_C(0x2e208c00) &&
+      (((word>>22)&3u)!=3 || (word&UINT32_C(0x40000000))))return 7;
+  if(((word>>16)&31u) && ((word>>16)&31u)!=16){
+      if((word&UINT32_C(0xffe0fc00))==UINT32_C(0x5e000400))return 5;
+      if((word&UINT32_C(0xffe08400))==UINT32_C(0x6e000400))return 6;
+  }
   return fixed==UINT32_C(0x1e220000) ? 1:fixed==UINT32_C(0x1e380000) ? 2:0; }
 
 static uint64_t vector_movi(uint32_t word)
@@ -143,11 +152,40 @@ static int vector_prepare(const OotStartupVectorState *state, uint32_t word,
         (state->fpsr&~UINT32_C(0x0800009f))) return OOT_STARTUP_VECTOR_FAULT;
     rn=(word>>5)&31u;rt=word&31u;rt2=(word>>10)&31u;
     candidate=*state;output=*registers;output.pc+=4;
-    if(family==20){
-        uint64_t value=0;uint32_t flags=0;
-        unsigned width=(word&UINT32_C(0x400000)) ? 64:32,source_width=(word>>31) ? 64:32;
-        int status=oot_startup_float_from_integer(width,source_width,(word>>16)&1u,
-            oot_arm64_read(registers,rn,source_width,0),&value,&flags);
+    if(family>=23 && family<=27){
+        unsigned rm=(word>>16)&31u;
+        total=(word&UINT32_C(0x40000000)) ? 16:8;
+        if(family==24 || family==25){
+            unsigned imm5=(word>>16)&31u,destination,source;
+            element=imm5&(~imm5+1u);
+            destination=imm5/(2*element);
+            source=family==24 ? destination:((word>>11)&15u)/element;
+            if(family==24){memset(candidate.q[rt],0,16);destination=0;}
+            /* Original source is required even when Rn and Rd alias. Low INS
+             * source-index bits are architecturally ignored, not reserved. */
+            memcpy(candidate.q[rt]+destination*element,state->q[rn]+source*element,element);
+        }else{
+            memset(candidate.q[rt],0,16);
+            if(family==26){
+                element=1u<<((word>>22)&3u);
+                for(unsigned n=0;n<total;n+=element)
+                    memset(candidate.q[rt]+n,memcmp(state->q[rn]+n,state->q[rm]+n,element) ? 0:255,element);
+            }else for(unsigned n=0;n<total;++n)
+                candidate.q[rt][n]=family==23 ? (uint8_t)(state->q[rn][n]|state->q[rm][n]):
+                    (uint8_t)((state->q[rt][n]&state->q[rm][n])|(state->q[rn][n]&(uint8_t)~state->q[rm][n]));
+        }
+        *next=candidate;*result=output;*write=planned;return OOT_STARTUP_VECTOR_IMPLEMENTED;
+    }
+    if(family==20 || family==22){
+        uint64_t value=0,input=0;uint32_t flags=0;
+        unsigned width=(word&UINT32_C(0x400000)) ? 64:32;
+        unsigned source_width=family==22 ? width:((word>>31) ? 64:32);
+        unsigned is_unsigned=family==22 ? (word>>29)&1u:(word>>16)&1u;
+        if(family==22){
+            /* Snapshot the original SIMD lane: Q31 is a register, not XZR. */
+            for(unsigned n=0;n<width/8;++n)input|=(uint64_t)state->q[rn][n]<<(8*n);
+        }else input=oot_arm64_read(registers,rn,source_width,0);
+        int status=oot_startup_float_from_integer(width,source_width,is_unsigned,input,&value,&flags);
         if(status)return status;
         candidate.fpsr|=flags;memset(candidate.q[rt],0,16);
         for(unsigned n=0;n<width/8;++n)candidate.q[rt][n]=(uint8_t)(value>>(8*n));

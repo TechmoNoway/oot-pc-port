@@ -94,6 +94,41 @@ clears the upper GPR bits; destination ZR discards the result. Together both
 directions cover 16,384 complete field/width/signedness reference cases per
 compiler. Other fixed-point or rounding variants stay unsupported.
 
+Application-only scalar SCVTF/UCVTF also accept integer bits from the low S/D
+lane and produce a same-width S/D float (application kind 3). All 32 vector
+registers are ordinary operands, including Q31 and source/destination aliases.
+These forms reuse the exact integer conversion helper, clear the entire
+128-bit destination before writing the scalar result and accumulate Inexact.
+The existing nearest/ties-even FPCR zero/FZ domain and transactional fault
+checks remain unchanged; INIT still rejects these words. Synthetic validation
+on MSVC and GCC covers 4,546 conversions per compiler against pinned ARM state
+and an independent rational oracle, including all 4,096 register/width/sign
+combinations. Synthetic conversion checks are separate from the original-code
+progress measurements below.
+
+The application register-only cohort also includes vector ORR (and its MOV
+alias), scalar DUP element, INS element-to-element, vector integer CMEQ and BIF.
+These operations use the original input bank, preserve FPCR/FPSR and treat Q31
+as an ordinary register. Q=0 clears the upper 64 bits; scalar DUP clears every
+unrelated byte. INS preserves unrelated destination lanes and ignores the low
+source-index bits specified by its element size. CMEQ compares complete integer
+lanes, including NaN-shaped bit patterns, without interpreting floating values.
+BIF retains destination bits where the mask is one and inserts source bits
+where it is zero. Independent byte oracles and pinned-reference comparisons
+cover all sizes/lanes, ignored INS variants, register fields and three-way
+aliases on both compilers.
+
+Application manifests record source-bound selected SIMD/SVC sites separately
+from unsupported-word boundaries. These records grant no runtime permission.
+`tools/application_frontier.py survey` redecodes historical boundaries against
+current production support; its counts are records, not whole-game coverage.
+The progress proof requires the former blocked word to retire at the exact
+baseline checkpoint in a full single-step trace with unchanged original module
+source/text identities. The runner checks that trace against the native
+all-row digest and the compact/accelerated run. An optional terminal SVC is
+identified by its exact original word, service and source site; it remains
+unsupported rather than receiving a fabricated success result.
+
 ## Read-only game content
 
 The application preference defaults explicitly to `en-US`. The owned
@@ -169,7 +204,7 @@ Filesystem mounts, graphics/shaders, audio, input, broader SDK consumers and
 guest thread scheduling require their own owned behavior and evidence.
 
 
-## Measured original-code progress
+## Preceding application/content result
 
 The application/content milestone retains all three original constructor returns
 and seven initialization stages, then executes 308,487 original instructions
@@ -179,15 +214,15 @@ preference twice and mounts the verified 186,587-file / 598-directory RomFS.
 Four files are hash-verified, opened, read and closed, delivering 3,427 bytes.
 The raw source remains in the NUP; the decoded cache occupies 2,991,025,900 bytes.
 
-The measured endpoint is the original scalar-SIMD `UCVTF S8, S0` form. Its integer
+That milestone's endpoint was the original scalar-SIMD `UCVTF S8, S0` form. Its integer
 operand is in a vector register; it belongs to a separate encoding family from
-the completed W/X-source conversions. It remains an explicit untranslated
-boundary. The original instruction/source identity and full retired trace are
+the completed W/X-source conversions. The new application SIMD cohort now
+implements that family. The original instruction/source identity and full retired trace are
 recorded privately. This is an integrated startup/content diagnostic, not a
 rendered frame or completed game startup.
 
 
-## Final validation evidence
+## Preceding application/content validation
 
 `build/milestones/application-content-v1/` passes all 42 required stages with
 616 Python tests without skips, seven CTest groups and 283,401 common
@@ -210,3 +245,40 @@ entropy input, re-executes the runner's original post-native evidence checks and
 fresh diagnostic comparisons, then completes the unfinished GCC command and
 summary. The recovery script and pre-recovery manifest hashes remain private
 with the run evidence. No required stage is skipped or replaced by a marker.
+
+
+## Measured application SIMD progress
+
+Fresh source-bound pilots on MSVC and GCC complete the same three constructors
+and seven initialization stages, then retire 311,527 original instructions after
+entry. They retain the language/thread/mount behavior and four verified file
+reads totaling 3,427 bytes, with no open file handles at the stop. The executables
+retire 1,833,173 original instructions plus 51 scaffold instructions and perform
+50 separately counted native calls.
+
+Both full single-step replays match the compact accelerated runs and prove that
+the former blocked UCVTF instruction retires at exactly the historical retirement
+checkpoint plus one. Their complete ordered trace SHA-256 is:
+
+`de98f56fac8f07207ed590c11aa864a917e0169e63d2a6f8cb38353e4cf67057`
+
+The genuine next boundary is the original byte acquire compare-and-swap CASAB.
+It is recorded with its exact selected original word, module/source and word
+hash; no service or instruction success is fabricated. Read-only, source-bound
+selection hints cover two observed 12-case SDK jump tables. The original table
+loads, scaled address calculations and indirect branches still execute and keep
+their actual-target checks; the hints add no runtime permission.
+
+The private pilot reports are under `build/application-simd-pilots/*-v3/`.
+These pilots establish the measured diagnostic, not a playable game. The new
+`config/milestones/application-simd.json` retains all earlier baselines and the
+historical progress checkpoint. Its fresh full milestone run passed all 42 required stages, with 641 Python
+tests without skips, seven CTest groups and 283,401 common native/reference
+comparisons per compiler. All earlier raw/SDK/logging/initialization prefixes and
+static outcomes remain unchanged. Both application full replays retain the
+source-bound progress proof and matching native digest. The current source gate is:
+
+`970180c2b5903c4acc7592cdcd36592b2d4b397072eb66e1e0b0d32fd6891810`.
+
+No stage was skipped or recovered by editing pass markers. The preceding
+application/content report above remains historical evidence.

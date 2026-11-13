@@ -2,7 +2,27 @@
 
 Development is organized around complete capabilities and measured blocker cohorts. A milestone includes its dependent instruction/runtime changes, verifier integration, synthetic native evidence, fresh private surveys, documentation and a reviewed commit/push on `dev`. The assistant completes these substeps autonomously within the authorized scope and reports the result at the milestone boundary. Small instruction families no longer require separate user prompts or separate releases.
 
-## Current milestone: SDK initialization and host-linked boot
+## Current milestone: application SIMD progress
+
+The [application profile](application-startup.md) adds the six measured
+register-only SIMD families while preserving the complete initialization,
+read-only content providers and all preceding execution profiles. The
+[implementation plan](superpowers/plans/2026-11-13-application-simd-progress.md)
+records the independent semantic contract and focused synthetic checks.
+
+The final runner additionally verifies the former original instruction frontier
+as a source-bound retired STEP in full single-step traces on both compilers,
+with matching native all-row digests and compact/accelerated results. Static
+cohort counts and actual original-code progress remain separate evidence.
+The next measured unsupported word, original SVC or guarded export is an exact
+diagnostic endpoint; it is not gameplay or a fabricated successful service.
+
+The fresh `build/milestones/application-simd-v1/` run passes all 42 stages,
+including 641 Python tests without skips, seven CTest groups, retained legacy
+surveys/prefixes and both full original-frontier proofs. The exact measured next
+boundary is CASAB at 311,527 post-entry instructions; gameplay is not implemented.
+
+## Preceding SDK initialization and host-linked boot
 
 The [SDK initialization profile](sdk-initialization.md) supplies owned platform and startup providers while retaining original SDK Start, application startup, module constructors and the exact nnMain transition. Its [acceleration extension](startup-acceleration.md) adds sealed split translation units, incremental native builds, checked whole-function leaves and a separate offline-linked boot scaffold. Original rtld text cannot execute on that linked package. Raw flags 1/3/7/15 remain separate diagnostics.
 
@@ -39,9 +59,10 @@ Completion requires exact synthetic state/memory prefixes, original-word/control
 From the repository root, with the project environment, MSVC build, GCC and pinned ZBIC dependency available:
 
 ```powershell
-.venv\Scripts\python.exe -B tools/run_milestone.py `
-  --config config/milestones/application-content.json `
-  --output build/milestones/application-content-v1
+. .\build\environment-repair\Enter-ZeldaBuild.ps1
+& $py -B tools/run_milestone.py `
+  --config config/milestones/application-simd.json `
+  --output build/milestones/application-simd-v1
 ```
 
 Choose a fresh output directory for each run. The configuration selects the native build, prepared inputs, preceding survey baselines, GCC factory test modules, expected report artifacts and an explicit startup diagnostic stop. It contains paths and check selections, never keys or captured game bytes. `--native-only` runs the synthetic portion without private game inputs or baseline files. The full startup configuration includes experimental original-code execution; the separate builder requires `--execute` when used directly.

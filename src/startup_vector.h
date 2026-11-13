@@ -34,8 +34,13 @@ OOT_MEMORY_API void oot_startup_vector_init(OotStartupVectorState *state);
  * nearest rounding and cumulative FPSR. Other arithmetic/control modes, non-temporal
  * pairs and repeated-destination pair loads remain excluded. */
 OOT_MEMORY_API int oot_startup_vector_kind(uint32_t word);
-/* New non-scaled SCVTF/UCVTF S/D from W/X and FCVTZS/FCVTZU back to W/X;
- * earlier kind/prepare reject. Kind 1 is from integer, 2 is to integer. */
+/* Application-only non-scaled conversions; earlier kind/prepare reject.
+ * Kind 1: SCVTF/UCVTF S/D from W/X. Kind 2: FCVTZS/FCVTZU back to W/X.
+ * Kind 3: SCVTF/UCVTF from the low S/D integer lane to same-width float,
+ * including ordinary Q31 and aliases; clear the full scalar destination.
+ * Kinds 4..8: vector ORR, scalar DUP element, INS element, vector CMEQ, BIF.
+ * Q=0 clears the upper half; INS alone preserves unrelated destination lanes.
+ * INS low source-index bits are ignored. All inputs use original vector state. */
 OOT_MEMORY_API int oot_startup_application_vector_kind(uint32_t word);
 /* Prepare a private copy and at most one 1/2/4/8/16/32-byte store record. No guest
  * bytes change here. Load operands use one serialized whole-record capture;

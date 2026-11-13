@@ -115,7 +115,15 @@ def host_init_evidence(report,bundle,stages,minimum_calls):
     return evidence
 
 
-def application_evidence(report,bundle,baseline,stages,minimum_post_entry,expected_symbol,romfs_input=None,expected_word=None):
+def application_endpoint(expected_symbol,expected_word,expected_svc):
+    require(sum(v is not None for v in (expected_symbol,expected_word,expected_svc))==1,
+            'application requires exactly one export, instruction or SVC endpoint')
+    require(expected_symbol is None or isinstance(expected_symbol,str) and bool(expected_symbol),'invalid application export endpoint')
+    require(expected_word is None or type(expected_word) is int and 0<=expected_word<=0xffffffff,'invalid application instruction endpoint')
+    require(expected_svc is None or type(expected_svc) is int and 0<=expected_svc<=65535,'invalid application SVC endpoint')
+
+
+def application_evidence(report,bundle,baseline,stages,minimum_post_entry,expected_symbol,romfs_input=None,expected_word=None,expected_svc=None):
     """A verified post-entry diagnostic is progress, never a playable game."""
     require(report.get('format')=='oot-startup-experiment' and report.get('status')=='diagnostic-complete' and
         report.get('application_runtime') is True and report.get('host_linked') is True and
@@ -125,7 +133,17 @@ def application_evidence(report,bundle,baseline,stages,minimum_post_entry,expect
     require(old.get('error')==15 and old.get('sdk_initialization_completed') is True and
         baseline.get('host_linked') is True,'application baseline is not completed host initialization')
     require(e.get('status')==2,'application did not reach a diagnostic boundary')
-    if expected_word is None:
+    application_endpoint(expected_symbol,expected_word,expected_svc)
+    if expected_svc is not None:
+        from application_frontier import validate_site
+        require(e.get('error')==9 and e.get('native_handler_stop') is False and
+            e.get('service')==expected_svc and e.get('word')==(0xd4000001 | expected_svc<<5),
+            'application did not reach its declared original SVC boundary')
+        sites=[r for r in bundle.get('application_svc_sites',[]) if r.get('address')==int(e['pc'],16)]
+        require(len(sites)==1 and type(sites[0].get('service')) is int and sites[0]['service']==expected_svc,
+                'application SVC lacks one exact selected source site')
+        validate_site(sites[0],bundle,int(e['pc'],16),e['word'])
+    elif expected_word is None:
         require(isinstance(expected_symbol,str) and expected_symbol and e.get('error')==9 and
             e.get('native_handler_stop') is True and e.get('service')==31,
             'application did not reach its declared unsupported export boundary')
@@ -150,7 +168,7 @@ def application_evidence(report,bundle,baseline,stages,minimum_post_entry,expect
         e.get('original_retired',0)+e['host_scaffold_retired']==e['retired'],'application original/scaffold/constructor accounting differs')
     require(bundle.get('package',{}).get('image_phase')=='host-offline-linked' and
         bundle['host_boot'].get('original_rtld_execution_allowed') is False,'application lost its separate linked boot provenance')
-    if expected_word is None:
+    if expected_word is None and expected_svc is None:
         rows=[f for f in bundle.get('native_audit',{}).get('functions',[]) if expected_symbol in f.get('names',[])]
         require(len(rows)==1 and rows[0]['handler_id']==31 and int(e['pc'],16)==rows[0]['entry'] and
             e['word']==rows[0]['entry_word'],'application stopped at a different original export')
@@ -370,9 +388,10 @@ def execute(config, output, native_only=False):
             config.get('sdk_init_fast_functions') is True,'application milestone requires the complete preceding host initialization lane')
         require(all(isinstance(config.get(k),str) and config[k] for k in
             ('baseline_sdk_init','application_seed_report','application_romfs_index')),'application provenance configuration is absent')
-        guard=config.get('application_expected_guard');word=config.get('application_expected_word')
-        require((isinstance(guard,str) and bool(guard) and word is None) or
-            (guard is None and type(word) is int and 0<=word<=0xffffffff),'application requires one exact declared export or instruction endpoint')
+        application_endpoint(config.get('application_expected_guard'),config.get('application_expected_word'),config.get('application_expected_svc'))
+        if 'application_progress_baseline' in config or config['name']=='application-simd':
+            require(isinstance(config.get('application_progress_baseline'),str) and bool(config['application_progress_baseline']),
+                    'application SIMD milestone requires an original progress baseline')
         require(type(config.get('application_min_post_entry')) is int and config['application_min_post_entry']>0,
             'application requires a positive measured post-entry capability')
     if config.get('sdk_init_experiment'):
@@ -717,7 +736,8 @@ def execute(config, output, native_only=False):
                 app_keys=('status','error','pc','retired','word','service','trace_sha256','trace_steps','trace_rows',
                     'native_calls','native_stats','sdk_stages_completed','sdk_initialization_completed','game_entry_reached',
                     'init_stats','original_retired','host_scaffold_retired','constructors_completed',
-                    'application_entry_retired','post_entry_retired','application_services','application_thread','romfs')
+                    'application_entry_retired','post_entry_retired','application_services','application_thread','romfs',
+                    'native_handler_stop','relative_relocation_probes','relative_relocations_matching_offline_link')
                 for mode in ('cmake','gcc'):
                     folder=run.output/('application-'+mode)
                     args=py+['tools/build_startup.py',prepared,'--output',folder,'--compiler',mode,'--sdk','--native-sdk',
@@ -742,13 +762,27 @@ def execute(config, output, native_only=False):
                         'application executable or generated source seal differs')
                     e=application_evidence(result,bundle,baseline,config['sdk_init_required_stages'],
                         config['application_min_post_entry'],config.get('application_expected_guard'),romfs_input,
-                        expected_word=config.get('application_expected_word'))
+                        expected_word=config.get('application_expected_word'),expected_svc=config.get('application_expected_svc'))
                     require(e.get('fast_function_calls',0)>0,'application experiment did not exercise accelerated leaves')
                     diagnostic=folder/'diagnostic';diagnostic.mkdir()
                     shutil.copyfile(Path(last['bundle'])/'startup.ootmem',diagnostic/'startup.ootmem')
                     reference=execute_startup(Path(last['executable']),diagnostic,1000000000,10000,'compact',entropy,False,romfs_index=romfs_index)
                     (diagnostic/'report.json').write_text(json.dumps(reference,indent=2)+'\n',encoding='utf-8')
                     require(all(e.get(k)==reference.get(k) for k in app_keys),'application acceleration differs from diagnostic single-step execution')
+                    if config.get('application_progress_baseline'):
+                        from application_frontier import verify_progress_trace
+                        old_report=read_json(build_destination(ROOT/config['application_progress_baseline']))
+                        old_last=old_report['iterations'][-1]
+                        old_bundle=read_json(build_destination(Path(old_last['bundle'])/'manifest.json'))
+                        full_dir=folder/'progress-full';full_dir.mkdir()
+                        shutil.copyfile(Path(last['bundle'])/'startup.ootmem',full_dir/'startup.ootmem')
+                        full=execute_startup(Path(last['executable']),full_dir,1000000000,10000,'full',entropy,False,romfs_index=romfs_index)
+                        (full_dir/'report.json').write_text(json.dumps(full,indent=2)+'\n',encoding='utf-8')
+                        require(all(e.get(k)==full.get(k) for k in app_keys),'full application replay differs from compact execution')
+                        proof=verify_progress_trace(Path(full['trace_file']),old_last['execution'],old_bundle,bundle)
+                        require(proof['trace_sha256']==full['trace_sha256'],'application full trace changed during progress verification')
+                        (full_dir/'progress.json').write_text(json.dumps(proof,indent=2)+'\n',encoding='utf-8')
+                        summary.setdefault('application_progress',{})[mode]=proof
                     app_experiments[mode]=e
                 require(all(app_experiments['cmake'].get(k)==app_experiments['gcc'].get(k) for k in app_keys),
                     'native compilers reached different original application prefixes or provider states')
