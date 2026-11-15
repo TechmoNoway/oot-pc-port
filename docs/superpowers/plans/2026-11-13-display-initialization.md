@@ -27,18 +27,20 @@ VI-entry prefix and retire the original caller, then stop at OpenDefaultDisplay.
 Keep that prototype unchanged. The actual-tree context RED confirmed the missing
 API before promotion; its GCC context GREEN now passes. Actual-tree focused
 checks pass: 14 native display/graphics cases per compiler and 17 pure
-audit/progress/configuration cases, without skips. Current phase is the fresh
+audit/progress/configuration cases, without skips. The completed historical
 50-stage run at `build/milestones/display-initialization-v1/`, frozen at source
-`5eada05fe79791bf3da82835ccb7960f5df2942174e23bb621f402ba3735d9ff`.
-Do not edit src/tools/tests/config/vendor headers during that run. Further
-Display/Layer/vsync/NVN work needs a separate source candidate until this
-checkpoint is delivered. No complete display milestone has yet passed.
+`5eada05fe79791bf3da82835ccb7960f5df2942174e23bb621f402ba3735d9ff`,
+passes all 50 stages. Its final manifest and both full native display proofs were
+verified in the teammate transfer. Preserve these original artifacts and hashes.
+Further Display/Layer/vsync/NVN work is a separate capability milestone.
 
-The user requested a quota checkpoint after the active stage. Native validation
-is now complete: 703 Python tests without skips, seven CTest groups and283,401
-common comparisons per compiler pass. Remaining original-analysis/execution stages
-continue in the existing full run. Save the reviewed code and handoff without
-claiming that this checkpoint is a completed50-stage milestone.
+The original quota checkpoint preceded the final result. The completed run passes
+703 Python tests without skips, seven CTest groups and 283,401 common comparisons
+per compiler. The [integration record](../../source-integration.md) distinguishes
+this historical result from revalidation on the current Windows workspace.
+The 2026-11-15 local integration run also passes all 50 stages, with the same
+test counts and full display digest on MSVC 19.44/GCC 14.2. Its current raw
+source gate is `073ce3db08d4fa8115a24b14ebfc14f4b0edd3e8213d48796dac4b6f0ebec0d4`.
 
 ## Full runner integration
 

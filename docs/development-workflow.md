@@ -11,12 +11,18 @@ hidden Win32 window and presentation-supported Vulkan surface. Its immutable
 prototype passed both original full compiler replays and historical VI-entry
 prefix/original-return proofs. Source audit retains three original pre-boot
 constructor groups and closes all other unsupported VI consumers. Actual-tree
-RED/GREEN and focused integration pass; a fresh 50-stage validation/delivery is next.
+RED/GREEN and focused integration pass. The transferred final 50-stage milestone
+passes with 703 Python tests without skips, seven CTest groups and 283,401 common
+comparisons per compiler. Its historical raw source fingerprint is
+`5eada05fe79791bf3da82835ccb7960f5df2942174e23bb621f402ba3735d9ff`.
 Guest Display/Layer/vsync objects, rendering and usable input remain further work.
-The full run is active and its native-evidence stage passes703 Python tests,
-seven CTest groups and283,401 common comparisons per compiler. At the user's
-quota request, save a reviewed code checkpoint and [handoff](agent-handoff.md)
-while explicitly retaining the pending full original-execution validation.
+The earlier quota handoff preceded that completed result. Consult the
+[source integration record](source-integration.md) for the current workspace,
+preserved transfer evidence and separate local revalidation; historical success
+alone does not establish a successful run with relocated inputs and toolchains.
+The local integration run now passes all 50 stages on MSVC 19.44/GCC 14.2 with
+the same test counts, both full display proofs and a matching current source gate.
+Its private output is `build/integration-20261115/validation-display-v1/`.
 
 ## Preceding milestone: independent graphics bootstrap
 

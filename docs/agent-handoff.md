@@ -1,136 +1,131 @@
 # Agent handoff
 
-Read this file before continuing. The user requested saving a reviewable checkpoint
-because their quota is nearly exhausted. Finish/check the current validation before
-starting the next feature. The overall game goal is still incomplete: no original
-rendered frame or usable input has been established.
-
-Quota checkpoint: the previously active native validation stage is complete and
-passed 703 Python tests without skips, seven CTest groups and 283,401 common
-comparisons per compiler. Code is saved as a reviewed checkpoint; the remaining
-full 50-stage original-analysis/execution run is still active. This is not a claim
-that all 50 stages passed. Preserve its source and consult its manifest.
-
-Checkpoint source verification covers all 257 source files, with canonical text
-content hash `e6d44d8897a24f61f35eda364d7809379cf5ba40994832aee02fe8f5f9eba642`.
-This hash accounts for configured Git text line endings; the local raw fingerprint
-for the active run is recorded below. Read `git log -1` for the checkpoint SHA.
+The current user request is to integrate the teammate source and reduce duplicate
+storage. That integration fast-forwards dev from f8a7162 to 66a6549; no implementation
+conflicts were present. The overall game goal remains incomplete: no original
+rendered frame or usable input has been established. Do not start the next runtime
+feature without its own capability milestone. The local integration validation
+has passed all 50 stages with the current source gate matching.
 
 ## Workspace and standing decisions
 
-- Active workspace: `G:\Zelda\oot-pc-port`, branch `dev`, remote
-  `https://github.com/TechmoNoway/oot-pc-port.git`. The older `E:` checkout and
-  historical `C:\GAMES` build caches are not this workspace.
-- Respond to the user in Vietnamese. Keep source, documentation and commit messages
-  in English. Implementation is independent; Fritchii/Hookshot are references only.
-- GitHub account `AnhTc0` / `anhtc0` was explicitly confirmed and used successfully.
-  Do not ask for the username again. Use
-  `git -c credential.username=AnhTc0 -c credential.interactive=false push origin HEAD:dev`.
-  Never print or persist credential/token contents. Commit/push dev is authorized.
-- Preserve original bytes, PAC, all existing budgets/profile gates and every
-  previous proof. Unknown services/objects remain real unsupported stops. No dummy
-  handles, fake sessions, no-op success, patched instructions or invented caps.
+- Active workspace: `C:\GAMES\Zelda Ocarina Of Time\oot-pc-port`, branch `dev`,
+  remote `https://github.com/TechmoNoway/oot-pc-port.git`. The teammate's historical
+  `G:\Zelda\oot-pc-port` paths are not the current workspace.
+- Respond in Vietnamese. Keep source, documentation and commit messages in English.
+  Implementation is independent; retain all applicable third-party notices.
+- This machine's existing Git Credential Manager account is `TechmoNoway`, verified
+  without exposing tokens. Commit/push dev is authorized. Use
+  `git -c credential.username=TechmoNoway -c credential.interactive=false push origin HEAD:dev`.
+  Never print or persist credential/token contents.
+- Preserve original bytes, PAC, budgets/profile gates and every previous proof.
+  Unknown services/objects remain unsupported stops. Do not fabricate handles,
+  sessions or success, patch instructions or invent capabilities.
+- The local `.venv\Scripts\python.exe` is healthy (Python 3.14.10). Current native
+  tools are MSVC 19.44 and GCC 14.2; CMake is installed with VS2022 BuildTools.
+  Do not run the archived machine-specific environment script or reuse its CMake
+  cache/virtual environment. The pinned ZBIC Git checkout is `toolchain/zbic-src`.
 
-## Delivered graphics checkpoint
+## Completed historical display milestone
 
-Commit `7434802ef157cb8f76c8185e89fa66a90f9a6fac` is verified on origin/dev.
-[GitHub Windows Checks](https://github.com/TechmoNoway/oot-pc-port/actions/runs/43451205858)
-passed. Its tree was clean at delivery. Local
-`build/milestones/graphics-bootstrap-v1/run.json` passed all 46 stages: 687 Python
-tests without skips, seven CTest groups and 283,401 common comparisons/compiler.
-Both original full replays match digest
-`13dbf98c07554aa03ec450ac375df72b63eba8db6b6a74ee12848edce4a1b1de`.
-The real Vulkan boot/check resumes the original caller and stops in VI initialization
-at the guarded GSV session getter. This is device readiness, not gameplay.
-
-## Current VI implementation and validation
-
-The source implements a separate flags254/contextDISPLAY2048 profile over graphics:
-one real hidden Win32 window, a Vulkan surface, queried queue presentation support,
-transactional rollback/counters, creator-thread lifetime and a separate report.
-Only the source-proved public VI initializer is typed. All other unsupported VI/VI2
-consumers remain closed; three original constructor groups/six aliases retain their
-actual original execution and vtable/callee proofs. No guest Display, Layer, vsync
-object or native-window handle is returned yet.
-
-Actual-tree context RED failed for the absent API before promotion, then GREEN
-passed. Actual-tree focused checks pass 14 native display/graphics cases per compiler
-plus 17 pure audit/progress/configuration cases, without skips. Standalone real GPU
-window/surface creation/support and window/class cleanup passed on MSVC and GCC.
-
-The immutable source prototype is `build/application-display-candidate`, fingerprint
-`0159325d1cbe68751e32258771161e0d294949c76c56b510656fa36e2ba110ce`.
-Both `build/display-pilots/{cmake,gcc}-v1/` original pilots pass full native hashes,
-single-step/accelerated equivalence, historical first-VI-entry prefix restoration
-and original caller continuation. They reach guarded OpenDefaultDisplay, with
-1,833,185 retired instructions (51 scaffold), 311,488 after entry and 52 native calls.
-GS boot=1/check=0 and VI init=1; the old check lies inside the replaced parent.
-Their complete digest is
-`e330868f9e2bbdff0c7bf2b88258ecac138974fd33c7303b8ca2147d1a98bc21`.
-Lower retirement than graphics is correct parent elision; larger counters do not
-establish progress. Keep the immutable prototype unchanged.
-
-The complete current validation is `build/milestones/display-initialization-v1/`,
-configured by `config/milestones/display-initialization.json`. It retains all 46 old
-stages and adds a GCC pure-test pattern, source audit and two display lanes: 50 total.
-It started 2026-11-13 22:46:51 Asia/Bangkok on frozen local source
+The transfer contains the final `build/milestones/display-initialization-v1/`
+manifest and summary: all 50 stages passed, with 703 Python tests without skips,
+seven CTest groups and 283,401 common comparisons per compiler. The quota-checkpoint
+prose previously in this file preceded that final result. The exact archived raw
+source fingerprint is
 `5eada05fe79791bf3da82835ccb7960f5df2942174e23bb621f402ba3735d9ff`.
-At checkpoint preparation its native-evidence stage passed and original surveys
-were running; consult the actual manifest, not this prose,
-for its current outcome. A full display milestone has not yet been claimed passed.
+All 257 source files were independently verified. At integration, all 318 tracked
+files matched the checkout after Git text normalization; subsequent changes are
+documentation only. Do not change historical
+fingerprints to match local line endings or describe historical passes as new local
+validation. See [the integration record](source-integration.md).
 
-**Do not change src/tools/tests/config/vendor headers while that run is active.**
-The runner rejects a changed source fingerprint. Documentation and ignored research
-may be updated. Do not launch extra heavy native compilation during `msvc-suite`;
-its existing 1,800-second stage budget is tight. Do not increase timeouts to hide a
-failure. The source-only integration copy is `build/application-display-integration`.
+The flags254/contextDISPLAY2048 profile owns a real hidden Win32 window and Vulkan
+surface with queried presentation support, transactional rollback/counters and
+creator-thread lifetime. Only the proved VI initializer is typed. Three original
+constructor groups/six aliases retain original execution and vtable/callee proofs.
+No guest Display, Layer, native-window or vsync object is returned yet.
 
-## Read the live state and finish safely
+Both original full display replays restore the first-VI-entry historical prefix
+and retire the original caller after native return. They reach guarded
+OpenDefaultDisplay, with 1,833,185 retired instructions (51 scaffold), 311,488 after
+entry and 52 native calls. GS boot=1/check=0 and VI init=1; the old GS check is inside
+the replaced parent. Their full digest is
+`e330868f9e2bbdff0c7bf2b88258ecac138974fd33c7303b8ca2147d1a98bc21`.
+Lower retirement than graphics is correct parent elision, not lost progress.
+
+The earlier graphics milestone passed 46 stages, 687 Python tests, seven CTest
+groups and 283,401 comparisons/compiler. Its full digest remains
+`13dbf98c07554aa03ec450ac375df72b63eba8db6b6a74ee12848edce4a1b1de`.
+Keep all earlier profiles and proofs unchanged.
+
+## Current integration validation
+
+The relocated reference view is private and explicitly marked historical:
+`build/integration-20261115/historical-path-view/`. Original transfer bytes remain
+preserved separately. Only derived JSON path strings were relocated; no historical
+outcome or source fingerprint was promoted into local validation.
+
+The fresh local full run uses `build/integration-20261115/display-local.json`,
+`build/integration-20261115/native-build/` and output
+`build/integration-20261115/validation-display-v1/`. Its frozen raw source SHA256 is
+`073ce3db08d4fa8115a24b14ebfc14f4b0edd3e8213d48796dac4b6f0ebec0d4`.
+It uses the verified local prepared inputs/RomFS index, not old G: paths. Its final
+manifest passes all 50 stages, with 703 Python tests without skips, seven CTest
+groups and 283,401 common comparisons per compiler. Both full display proofs match
+the historical digest above, with real readiness/presentation support and original
+caller continuation. The run finished 2026-11-15 09:47:53 UTC.
+
+The original process ended after 45 recorded stages, with no failed stage or source
+change. The private `build/resume_merged_validation.py` completed the same run;
+its log is `build/merge-validation-resume.log`. It preserved original command
+results and entropy, reexecuted every original post-command validation gate with
+fresh diagnostic/full-replay directories, and executed every pending command.
+The earlier manifest and narrow recovery changes are recorded under
+`build/integration-20261115/`; do not treat the original log stopping at stage45
+as the current process state.
 
 ```powershell
-Set-Location G:\Zelda\oot-pc-port
-. .\build\environment-repair\Enter-ZeldaBuild.ps1
-$run = Get-Content build/milestones/display-initialization-v1/run.json -Raw | ConvertFrom-Json
+Set-Location 'C:\GAMES\Zelda Ocarina Of Time\oot-pc-port'
+$run = Get-Content build/integration-20261115/validation-display-v1/run.json -Raw | ConvertFrom-Json
 $run.status
 $run.stages.PSObject.Properties | ForEach-Object { "$($_.Name): $($_.Value.status)" }
-Get-Content build/research/display-handoff/full-milestone-v1.log -Tail 6
+Get-Content build/merge-validation-resume.log -Tail 8
 git status --short
 git log -3 --oneline
 ```
 
-The environment script supplies the working `.venv-dev` Python 3.14, MSVC19.44,
-CMake3.31 and GCC16.2 paths. The older `.venv` is broken. If the run is still active,
-wait/monitor its existing process; do not start a duplicate run or alter source.
-In this chat its execution session was54702; a different chat may need to locate
-the process by the exact `run_milestone.py` output path and read the manifest/log.
+No validation process for this run should remain active. Preserve the passed
+artifacts. Future source changes require a fresh run/output directory; do not
+overwrite the sealed artifacts or use the one-off recovery wrapper for new work.
+Do not launch extra heavy compilation during msvc-suite: this machine used
+1,796.6 seconds of its existing 1,800-second budget. Do not increase the timeout
+to hide a failure. Require a final passed manifest, all required stages, both full
+display proofs and a matching current source gate before future delivery. Never
+edit a result into success or weaken baseline/input checks.
 
-The user explicitly requested this quota checkpoint after the native stage, so a
-code commit may precede the full milestone result. Do not confuse that checkpoint
-with final milestone delivery. Do not restart or terminate the existing full run
-merely because a checkpoint was committed; Git metadata/docs do not alter its
-frozen runtime source. Wait for its result before implementing future code.
+## Preserved transfer and cleanup
 
-If passed, require all 50 stages, its `summary.json`, both native full display proofs
-and the current source gate before calling it complete. Record measured test counts,
-update README/workflow/display plan/handoff and verify the reviewed Git contents,
-commit/push dev, remote SHA and CI. If failed, inspect the first failure, fix the
-actual cause and use a fresh output directory for a new full run. Keep failed logs.
-Do not edit a manifest into success or restore old source just to match a fingerprint.
+The original Git bundle, manifests, dependency snapshots, original raw source and
+metadata remain under `build/transfers/teammate-66a6549/`. Its consolidation map
+records all 29,025 original files and their preserved local destinations/hashes.
+Immutable duplicate artifacts share NTFS hard links; mutable reports remain
+independent. Seven conflicting local build-tool reports/binaries retain both
+versions. The verified sibling package was removed only after all preserved
+members were checked. A local backup branch retains pre-integration dev.
+Do not delete the preserved baselines, prepared inputs, source archive or current
+validation output. Private generated code, original content and binaries stay out
+of Git.
+Post-build verification again passes all 29,025 preserved members. Cleanup removed
+the duplicate outer package and recovered 57,394,421,760 bytes; the original NUP
+and all historical inputs/evidence remain preserved.
+The post-validation pass shared 2,561 byte-identical sealed artifacts and removed
+2,898 new synthetic-test intermediate objects. It recovered another approximately
+6.9 GB; tested DLLs, generated source, native caches and reports remain available.
+`build/integration-20261115/cleanup-dedup.json` records its checks and exact scope.
 
-To rerun only when justified after a failure/source change:
+## Next runtime milestone, after integration
 
-```powershell
-& $py -u tools/run_milestone.py --config config/milestones/display-initialization.json `
-  --output build/milestones/display-initialization-v2
-```
-
-Run manifests fingerprint local raw file bytes. Git normalizes text line endings;
-verify committed source content equivalence rather than assuming a fresh checkout's
-raw fingerprint must equal a historical Windows working tree. The graphics delivery
-recorded both hashes and checked all245 source files. Do not change or falsify
-historical fingerprints. Private prepared inputs/traces are intentionally ignored.
-
-## Future task, after this checkpoint
 
 Use the [display plan](superpowers/plans/2026-11-13-display-initialization.md) and
 [next object plan](superpowers/plans/2026-11-13-display-objects-next.md). The actual
