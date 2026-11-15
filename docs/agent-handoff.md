@@ -1,13 +1,80 @@
 # Agent handoff
 
+## Active ordered implementation
+
+The user authorized implementing the reference-review recommendations in order:
+shared verified objects/checkpoint recovery, Display/Layer and the reached NVN
+subset, then shader/rendering work. The first milestone has passed every gate.
+`tools/object_cache.py` independently shares content-verified objects between
+startup profiles and synthetic native fixtures. Every required executable/library
+is linked and exercised. The full `build/milestones/build-cache-v3/validation/`
+run passes 52/52 stages: 718 Python tests without skips, seven CTest groups and
+283,401 common native/reference comparisons per compiler. Its frozen source is
+`5f0d3cae98204560d03fc5aa8e397550a8af988d83b2c84e952229648b81c01a`.
+Both full display digests remain
+`e330868f9e2bbdff0c7bf2b88258ecac138974fd33c7303b8ca2147d1a98bc21`.
+The run finished 2026-11-15 15:43:20 UTC, including a controlled interruption and
+normal supported recovery. No validation/observer process should remain active.
+No guest runtime capability changed. Review/commit/push this infrastructure
+milestone on dev, then start the separately authorized Display/Layer milestone.
+Further fingerprinted source changes require a fresh full run for that milestone.
+
+The supported schema-2 checkpoint includes input/toolchain content identities,
+owned artifact seals, native build binaries/rules, command/environment identity,
+exclusive output ownership and gated Windows Job Object command lifetimes.
+Focused checkpoint/workflow tests pass 18 cases, including actual process-tree
+termination/restart and same-size/same-timestamp corruption. Object-cache tests
+pass on both compilers; SDK vector tests pass 24 cases on each. Controlled
+synthetic cold/warm measurements are documented in [build-cache.md](build-cache.md).
+Use one full milestone at a time per checkout: synthetic report destinations are
+shared. Never resume a failed run or substitute an earlier run's successful tests.
+
+The earlier `build-cache-v1/validation/` attempt passed 714 Python tests, all seven
+CTest groups, native comparisons, static audits and the first raw startup lane.
+It was deliberately stopped before delivery to make direct post-command replays
+use the same owned process-tree lifetime as staged commands. Its controller path,
+arguments and recorded child relationship were verified before termination; its
+incomplete manifest is explicitly failed and preserved. Do not resume or promote
+that attempt. The v2 attempt passed 716 Python tests and seven CTest groups,
+static audits, both raw compiler lanes and SDK/MSVC. An aggressive QA observer
+exposed Windows read/delete sharing interference with atomic run.json publication.
+The controller exited, and both its last committed and unpublished checkpoints
+were preserved. That attempt is explicitly failed, not eligible for promotion.
+The publication helper now retries only transient sharing/access denials within
+a bounded interval; actual Windows handle tests cover release and persistent
+denial. The v3 run reran every stage, then the verified controller was deliberately
+terminated during the display/MSVC direct full replay (223,206 trace bytes).
+`build/interrupt_display_replay_v3.py` performed the scoped interruption. The
+ordinary CLI `--resume` reused only sealed commands, reexecuted all postconditions
+and fresh full proofs, ran pending display/GCC and finished passed. No stage or
+fingerprint was edited into success. Evidence/logs are in the v3 parent directory;
+`resume_count` is 1. Earlier graphics observers timed out/missed their window and
+did not interrupt the controller. They are not the successful recovery evidence.
+
+Read-only next-milestone research is in
+`build/research/display-objects-20261115/`. Its ignored extent-parser candidate
+passes synthetic malformed-metadata checks and proves 46 unique original targets
+across 53 vtable slots. The entire historical display trace is rehashed to the
+native digest and contains zero calls to those targets before the current stop.
+A host-only probe queries the real primary mode (1920x1080, refresh field 180);
+it establishes no guest capability. `vblank_source.c/h` now implements a private
+DXGI worker and real level-signaled events; synthetic signal/reset/ownership/
+failure/overflow/cleanup tests and 16-edge physical wait/reset checks pass on both
+compilers. `event_handle_candidate.c` passes synthetic atomic sparse record
+publication and observed scoped SVC adapter checks on both compilers. These are
+ignored candidates, not registered guest services. Complete source producer/
+consumer binding, host peer integration and the new profile before promotion.
+Read `next-slice.md` in that directory for the concrete remaining work and why
+admitting unchecked original object member methods is not the chosen boundary.
+
 The latest task reviewed Hookshot, NX2navi and Fritchii for development throughput
 and runtime lessons; see [the pinned reference review](reference-review-2026-11-15.md).
-It changes documentation only. The earlier source/storage integration fast-forwards
+That review changed documentation only. The earlier source/storage integration fast-forwards
 dev from f8a7162 to 66a6549; no implementation conflicts were present.
 The overall game goal remains incomplete: no original
 rendered frame or usable input has been established. Do not start the next runtime
 feature without its own capability milestone. The local integration validation
-has passed all 50 stages with the current source gate matching.
+has passed all 50 stages with that checkpoint's source gate matching.
 
 ## Workspace and standing decisions
 

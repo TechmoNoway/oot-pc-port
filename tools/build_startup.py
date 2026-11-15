@@ -12,7 +12,6 @@ import sys
 import time
 
 from input_formats import InputError, require, inspect_npdm
-from lifter_validation import find_cmake
 from link_exefs import build_destination, load_prepared
 from module_linker import Linker
 from prepare_startup import prepare_bundle, owner
@@ -62,91 +61,37 @@ def prepared_npdm(prepared):
     return raw
 
 
-def build_native(bundle, mode, native_cache=None, sdk_init=False,romfs_sha=None):
+def build_native(bundle, mode, native_cache=None, sdk_init=False,romfs_sha=None,object_store=None):
     from startup_sources import cached_sources
-    started=time.perf_counter()
-    native_cache=native_cache or bundle/'native'
+    from object_cache import SharedCompiler
+    started=time.perf_counter();native_cache=native_cache or bundle/'native'
+    native_cache.mkdir(parents=True,exist_ok=True)
     binding=None
     if romfs_sha is not None:
         require(len(romfs_sha)==64 and all(c in '0123456789abcdef' for c in romfs_sha),'invalid RomFS input seal')
-        native_cache.mkdir(parents=True,exist_ok=True)
         binding=(native_cache/'romfs_binding.h').resolve()
         content='#define OOT_ROMFS_INPUT_SHA256 "'+romfs_sha+'"\n'
         if not binding.exists() or binding.read_text()!=content:binding.write_text(content,encoding='utf-8')
     before_units={p.name:p.stat().st_mtime_ns for p in (native_cache/'sources').glob('*.c')}
     sources,split=cached_sources(bundle,native_cache)
-    source=next(p for p in sources if p.name=='startup.c')
-    log=bundle/'compile.log'
-    def run(argv):
-        with log.open('a',encoding='utf-8') as stream:
-            r=subprocess.run(list(map(str,argv)),cwd=ROOT,stdout=stream,stderr=subprocess.STDOUT,timeout=900 if sdk_init else 300)
-        require(r.returncode==0,f'startup compilation failed; see {log}')
-    if mode=='gcc':
-        compiler=shutil.which('gcc') or 'C:/msys64/ucrt64/bin/gcc.exe'
-        require(Path(compiler).is_file(),'GCC is unavailable')
-        exe=bundle/'oot-startup.exe'
-        names=('main','startup_cli','startup_context','startup_dispatch','guest_memory',
-               'runtime_image','host_win32','pauth','checked_read','sdk_native','native_platform','native_services','native_math','startup_vector','startup_float','startup_init_atomic','application_services','native_romfs','native_graphics')
-        if split:
-            from concurrent.futures import ThreadPoolExecutor
-            import threading
-            objects=native_cache/'objects';objects.mkdir(parents=True,exist_ok=True)
-            flags=['-std=c17','-O2','-Wall','-Wextra','-Wpedantic','-Werror','-DOOT_HAS_STARTUP_PROGRAM','-D_CRT_SECURE_NO_WARNINGS','-D_WIN32_WINNT=0x0A00','-I',str(ROOT/'src'),'-I',str(ROOT/'third_party/vulkan/include')]
-            headers=b''.join(str(p.relative_to(ROOT)).encode()+p.read_bytes() for p in sorted([*(ROOT/'src').glob('*.h'),*(ROOT/'third_party/vulkan/include').rglob('*.h')]))
-            lift_headers=b''.join((ROOT/'src'/n).read_bytes() for n in ('arm64_lift.h','guest_memory.h','pauth.h'))
-            tool=subprocess.check_output([compiler,'--version'])+hashlib.sha256(Path(compiler).read_bytes()).digest()
-            paths=[ROOT/'src'/(n+'.c') for n in names]+sources
-            def compile_one(path):
-                file_flags=flags+(['-DOOT_ROMFS_BINDING_HEADER="'+binding.as_posix()+'"'] if binding and path.name=='startup_cli.c' else [])
-                extra=binding.read_bytes() if binding and path.name=='startup_cli.c' else b''
-                key=hashlib.sha256(tool+repr(file_flags).encode()+extra+(lift_headers if path.name.startswith('lift_') else headers)+path.read_bytes()).hexdigest()
-                obj=objects/(path.stem+'-'+key+'.o')
-                reused=obj.exists()
-                if not reused:
-                    partial=obj.with_suffix('.'+secrets.token_hex(6)+'.partial')
-                    try:
-                        run([compiler,*file_flags,'-c',path,'-o',partial]);partial.replace(obj)
-                    finally:partial.unlink(missing_ok=True)
-                return obj,reused
-            with ThreadPoolExecutor(max_workers=4) as pool:compiled=list(pool.map(compile_one,paths))
-            objs=[p for p,_ in compiled];reused_objects=sum(hit for _,hit in compiled);compiled_objects=len(compiled)-reused_objects
-            response=bundle/'link.rsp'
-            response.write_text('\n'.join('"'+p.resolve().as_posix()+'"' for p in objs)+'\n',encoding='utf-8')
-            run([compiler,'@'+str(response),'-lbcrypt','-o',exe])
-        else:
-            run([compiler,'-std=c17','-O2','-Wall','-Wextra','-Wpedantic','-Werror',
-                 '-DOOT_HAS_STARTUP_PROGRAM','-D_CRT_SECURE_NO_WARNINGS','-D_WIN32_WINNT=0x0A00',
-                 *(['-DOOT_ROMFS_BINDING_HEADER="'+binding.as_posix()+'"'] if binding else []),'-I',ROOT/'src','-I',ROOT/'third_party/vulkan/include',*[ROOT/'src'/(n+'.c') for n in names],*sources,'-lbcrypt','-o',exe])
-        identity=subprocess.check_output([compiler,'--version'],text=True).splitlines()[0]
-    else:
-        cmake=find_cmake();native=native_cache or bundle/'native'
-        native.mkdir(parents=True,exist_ok=True)
-        names='\n'.join(p.resolve().as_posix() for p in sources if p!=source);delimiter='='
-        while ']'+delimiter+']' in names:delimiter+='='
-        parts='set(OOT_STARTUP_PARTS\n'+''.join('['+delimiter+'['+p.resolve().as_posix()+']'+delimiter+']\n' for p in sources if p!=source)+')\n'
-        parts_file=(native/'startup-parts.cmake').resolve()
-        if not parts_file.exists() or parts_file.read_text(encoding='utf-8')!=parts:parts_file.write_text(parts,encoding='utf-8')
-        before_objects={str(p):p.stat().st_mtime_ns for p in native.rglob('*.obj')}
-        run([cmake,'-S',ROOT,'-B',native,'-G','Visual Studio 17 2022','-A','x64',
-             '-DOOT_ROMFS_BINDING_HEADER='+(binding.as_posix() if binding else ''),'-DOOT_STARTUP_SOURCE='+str(source),'-DOOT_STARTUP_PARTS=','-DOOT_STARTUP_PARTS_FILE='+str(parts_file),'-DPython3_EXECUTABLE='+sys.executable])
-        run([cmake,'--build',native,'--config','Release','--target','oot-pc-port'])
-        exe=native/'Release/oot-pc-port.exe'
-        identities=list((native/'CMakeFiles').glob('*/CMakeCCompiler.cmake'))
-        require(len(identities)==1,'missing startup compiler identity')
-        import re
-        identity=' '.join(re.findall(r'set\(CMAKE_C_COMPILER(?:_ID|_VERSION)? "([^"]+)"\)',identities[0].read_text()))
-        require('MSVC' in identity,'startup CMake build must exercise MSVC')
-        saved=bundle/'oot-startup.exe'
-        shutil.copyfile(exe,saved);exe=saved
-        after_objects=list(native.rglob('*.obj'))
-        compiled_objects=sum(before_objects.get(str(p))!=p.stat().st_mtime_ns for p in after_objects)
-        reused_objects=len(after_objects)-compiled_objects
-    require(exe.is_file(),'startup executable was not produced')
+    compiler=SharedCompiler(mode,store=object_store,log=bundle/'compile.log')
+    names=('main','startup_cli','startup_context','startup_dispatch','guest_memory',
+           'runtime_image','host_win32','pauth','checked_read','sdk_native','native_platform','native_services',
+           'native_math','startup_vector','startup_float','startup_init_atomic','application_services',
+           'native_romfs','native_graphics')
+    paths=[ROOT/'src'/(name+'.c') for name in names]+sources
+    common=compiler.defines({'OOT_HAS_STARTUP_PROGRAM':None,'_CRT_SECURE_NO_WARNINGS':None,
+                            '_WIN32_WINNT':'0x0A00'})+compiler.includes([ROOT/'src',ROOT/'third_party/vulkan/include'])
+    def flags(path):
+        extra=compiler.defines({'OOT_ROMFS_BINDING_HEADER':'"'+binding.as_posix()+'"'}) if binding and path.name=='startup_cli.c' else []
+        return common+extra
+    exe=bundle/'oot-startup.exe'
+    cache=compiler.build(paths,exe,flags,libraries=['bcrypt'],timeout=900 if sdk_init else 300)
+    identity=compiler.description
     stats=dict(format='oot-startup-build',compiler=identity,seconds=time.perf_counter()-started,
         generated_units=len(sources),changed_units=sum(before_units.get(p.name)!=p.stat().st_mtime_ns for p in sources),
         split_sources=split,source_manifest_sha256=hashlib.sha256((bundle/'sources.json').read_bytes()).hexdigest() if split else None,
-        compiled_objects=compiled_objects if split or mode!='gcc' else None,
-        reused_objects=reused_objects if split or mode!='gcc' else None)
+        compiled_objects=cache['compiled_objects'],reused_objects=cache['reused_objects'],object_cache=cache)
     if romfs_sha:stats.update(romfs_index_sha256=romfs_sha,romfs_binding_sha256=hashlib.sha256(binding.read_bytes()).hexdigest())
     (bundle/'build.json').write_text(json.dumps(stats,indent=2)+'\n',encoding='utf-8')
     return exe,identity
@@ -159,7 +104,8 @@ def execute(exe,bundle,limit,quantum,trace_mode='compact',entropy_file=None,fast
     if romfs_index is not None:args+=['--romfs-index',str(romfs_index)]
     if fast_functions:args+=['--fast-functions','1']
     if entropy_file is not None:args+=['--entropy-file',str(entropy_file)]
-    r=subprocess.run(args,capture_output=True,text=True,timeout=600)
+    from milestone_checkpoint import owned_run
+    r=owned_run(args,ROOT,os.environ.copy(),600)
     (bundle/'execution.log').write_text(r.stdout+r.stderr,encoding='utf-8')
     require(r.returncode in (0,1,3) and r.stdout.strip(),'startup execution failed before a diagnostic; see execution.log')
     report=json.loads(r.stdout)

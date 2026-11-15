@@ -56,8 +56,7 @@ class MilestoneStateTests(unittest.TestCase):
     def test_failed_command_is_recorded_and_never_marked_complete(self):
         with tempfile.TemporaryDirectory(dir=ROOT/"build") as temporary:
             run = MilestoneRun(Path(temporary)/"run", "test", ["probe"])
-            with patch("run_milestone.subprocess.run", return_value=subprocess.CompletedProcess([], 7)):
-                with self.assertRaises(InputError): run.command("probe", ["synthetic-command"], {})
+            with self.assertRaises(InputError): run.command("probe", [sys.executable,"-c","raise SystemExit(7)"], {})
             r = json.loads((run.output/"run.json").read_text())
             self.assertEqual((r["status"], r["stages"]["probe"]["status"]), ("failed", "failed"))
             self.assertTrue((run.output/"probe.log").is_file())

@@ -2,7 +2,17 @@
 
 Development is organized around complete capabilities and measured blocker cohorts. A milestone includes its dependent instruction/runtime changes, verifier integration, synthetic native evidence, fresh private surveys, documentation and a reviewed commit/push on `dev`. The assistant completes these substeps autonomously within the authorized scope and reports the result at the milestone boundary. Small instruction families no longer require separate user prompts or separate releases.
 
-## Current milestone: native VI display initialization
+## Current infrastructure milestone: verified build reuse and recovery
+
+The [shared object cache and checkpoint recovery](build-cache.md) milestone passes
+52/52 stages with 718 Python tests without skips, seven CTest groups and 283,401
+common comparisons per compiler. It preserves every original profile/digest and
+changes no guest runtime API. A real direct replay was interrupted and the ordinary
+`--resume` path completed the run with sealed commands and fresh postconditions.
+The current source gate matches the passed private v3 manifest. Continue with the
+separate Display/Layer capability; prototype host event code is not a guest API.
+
+## Preceding milestone: native VI display initialization
 
 The [display design](superpowers/specs/2026-11-13-display-initialization-design.md)
 and [plan](superpowers/plans/2026-11-13-display-initialization.md) add flags254 over
@@ -147,7 +157,7 @@ The SDK configuration also requires a current SDK/NPDM/thread-identity audit, fr
 
 The native configuration adds the original-function/record-layout audit and both hybrid executables. Event 3 represents a whole native operation rather than an original ARM instruction: `trace_steps = retired + native_calls` and `trace_rows = trace_steps + 1`. Both kinds count toward work quota. Host state and the guarded-operation stop kind must match across compilers. Callback/native return checks, copied registry lifetimes, interior/body tampering, incomplete goals and original/native trace equivalence are covered by synthetic tests.
 
-`run.json` records pending/running/passed/failed stage states and log paths. Failures leave their evidence available and produce a nonzero exit. It never marks an incomplete run passed. Stale native artifacts, changed source code during the run, mismatched inputs/models or remaining selected instruction frontiers reject completion. The source fingerprint covers CMake, source, tools, tests and milestone configurations. Reusing an existing output is rejected, so earlier successful evidence cannot silently stand in for a new run.
+`run.json` records pending/running/passed/failed stage states and log paths. Failures leave their evidence available and produce a nonzero exit. It never marks an incomplete run passed. Stale native artifacts, changed source code during the run, mismatched inputs/models or remaining selected instruction frontiers reject completion. The source fingerprint covers CMake, source, tools, tests and milestone configurations. Reusing an existing output requires the explicit schema-2 interrupted-run recovery described in [verified build reuse and checkpoint recovery](build-cache.md); earlier successful evidence cannot silently stand in for a new run.
 
 `summary.json` and `summary.md` collect aggregate evidence; comparisons, full surveys, startup packages, generated C and detailed traces remain private under the run directory. After successful validation, the assistant updates the README/status and capability documents, reviews the source diff and verifies that the current code fingerprint still matches the passed run. It then commits and pushes `dev` and verifies a clean synchronized tree. Later code changes require a fresh run. Game content, keys and native binaries remain ignored. Regression execution is synthetic; the separately labeled opt-in startup experiment executes its selected original prefix and must never be described as a playable port.
 

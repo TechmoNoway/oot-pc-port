@@ -13,7 +13,7 @@ import shutil
 import struct
 import subprocess
 import sys
-from threading import Lock
+from threading import RLock
 import time
 import xml.etree.ElementTree as ET
 
@@ -331,70 +331,195 @@ def validate_display_config(config):
 
 
 class MilestoneRun:
-    def __init__(self, output, name, stages):
-        self.output = build_destination(output)
-        require(not self.output.exists(), "choose a fresh milestone output directory")
-        self.output.mkdir(parents=True)
-        self.lock, self.started_ns = Lock(), time.time_ns()
-        self.manifest = {"schema_version": 1, "name": name, "status": "running",
-            "started_utc": datetime.now(timezone.utc).isoformat(), "source_sha256": source_digest(),
-            "stages": {name: {"status": "pending"} for name in stages}}
-        self.save()
+    def __init__(self, output, name, stages, binding=None, resume=False):
+        from milestone_checkpoint import Evidence,RunOwner,identity
+        self.output=build_destination(output);self.lock=RLock()
+        self.owner=None;self.resuming=resume;self.command_env={}
+        if not resume:
+            require(not self.output.exists(),"choose a fresh milestone output directory")
+            self.output.mkdir(parents=True)
+        require(self.output.is_dir(),'milestone output is missing')
+        try:
+            if binding is not None:self.owner=RunOwner(self.output)
+            if resume:
+                require(binding is not None,'resume requires an explicit complete input binding')
+                self.manifest=read_json(self.output/'run.json')
+                require(self.manifest.get('schema_version')==2 and self.manifest.get('status')=='running',
+                    'only interrupted schema-2 running milestones may resume')
+                require(self.manifest.get('name')==name and list(self.manifest['stages'])==list(stages),
+                    'resume stage plan differs')
+                require(self.manifest.get('source_sha256')==source_digest() and
+                    self.manifest.get('binding_sha256')==identity(binding),'resume source/config/input/toolchain differs')
+                for row in self.manifest['stages'].values():
+                    require(row['status']in('pending','running','passed'),'failed stages require a fresh run')
+                    if row['status']=='running'and row.get('child_pid'):
+                        from milestone_checkpoint import process_alive
+                        require(not process_alive(row['child_pid']),'an interrupted command child is still active')
+                self.started_ns=self.manifest['started_ns']
+                self.evidence=Evidence(self.output,self.manifest['artifacts']);self.evidence.verify()
+                from milestone_checkpoint import verify_native_build
+                verify_native_build(ROOT,self.manifest.get('native_artifacts',{}))
+                self.manifest['resume_count']=self.manifest.get('resume_count',0)+1
+                self.attempt=self.manifest['resume_count']+1
+                for stage,row in self.manifest['stages'].items():
+                    if row['status']=='running':
+                        archive=self.output/'interrupted'/('attempt-'+str(self.attempt));archive.mkdir(parents=True,exist_ok=True)
+                        args=row.get('command')or[]
+                        if '--output'in args:
+                            folder=Path(args[args.index('--output')+1]);target=archive/folder.name
+                            require(folder.resolve().is_relative_to(self.output)and target.resolve().is_relative_to(self.output),
+                                'interrupted output move escapes run')
+                            if folder.exists():folder.rename(target)
+                        log=self.output/(stage+'.log')
+                        if log.exists():log.rename(archive/log.name)
+                        row.update(status='pending',verified=False,interrupted_attempt=self.attempt-1,child_pid=None)
+                self.manifest.setdefault('recoveries',[]).append(dict(attempt=self.attempt,utc=datetime.now(timezone.utc).isoformat()))
+            else:
+                self.started_ns=time.time_ns();self.attempt=1
+                self.manifest=dict(schema_version=2,name=name,status='running',started_ns=self.started_ns,
+                    started_utc=datetime.now(timezone.utc).isoformat(),source_sha256=source_digest(),
+                    binding_sha256=identity(binding)if binding is not None else None,artifacts={},
+                    stages={n:dict(status='pending',verified=False)for n in stages})
+                self.evidence=Evidence(self.output,self.manifest['artifacts'])
+                if binding is not None:
+                    path=self.output/'checkpoint-binding.json'
+                    path.write_text(json.dumps(binding,indent=2)+'\n',encoding='utf-8');self.evidence.add(path)
+            self.strict_verification=binding is not None
+            self.save()
+        except BaseException:
+            self.close();raise
+
+    def close(self):
+        if self.owner:self.owner.close();self.owner=None
 
     def save(self):
-        temporary = self.output/"run.tmp"
-        temporary.write_text(json.dumps(self.manifest, indent=2)+"\n", encoding="utf-8")
-        temporary.replace(self.output/"run.json")
+        from milestone_checkpoint import replace_checkpoint
+        temporary=self.output/'run.tmp'
+        require(temporary.resolve().is_relative_to(self.output),'checkpoint publication escapes output')
+        temporary.write_text(json.dumps(self.manifest,indent=2)+'\n',encoding='utf-8')
+        replace_checkpoint(temporary,self.output/'run.json')
 
-    def action(self, name, callback, command=None):
+    def _command_evidence(self,name,command):
+        self.evidence.add(self.output/(name+'.log'))
+        for i,arg in enumerate(command):
+            if arg=='--output'and i+1<len(command):
+                folder=Path(command[i+1])
+                if folder.is_dir():self.evidence.tree(folder)
+            try:
+                candidate=Path(arg)
+                if candidate.is_absolute()and candidate.resolve().is_relative_to(self.output):self.evidence.add(candidate)
+            except (OSError,ValueError):pass
+
+    def action(self,name,callback,command=None):
         with self.lock:
-            row = self.manifest["stages"][name]
-            require(row["status"] == "pending", "milestone stage already attempted")
-            row.update(status="running", command=command); self.save()
-        print(f"Starting {name}", flush=True)
-        started = time.monotonic()
-        try:
-            value = callback()
+            row=self.manifest['stages'][name]
+            if row['status']=='passed':
+                require(self.resuming and command is None,'milestone stage already attempted')
+                print('Revalidating '+name,flush=True)
+                try:
+                    value=callback();self.evidence.root();self.save();return value
+                except BaseException:
+                    self.manifest.update(status='failed',error='post-command revalidation failed: '+name)
+                    self.save();self.close();raise
+            require(row['status']=='pending','milestone stage already attempted')
+            row.update(status='running',command=command,environment_sha256=self.command_env.get(name));self.save()
+        print('Starting '+name,flush=True);started=time.monotonic()
+        try:value=callback()
         except Exception as error:
             with self.lock:
-                row.update(status="failed", error=str(error), seconds=round(time.monotonic()-started, 3))
-                self.manifest.update(status="failed", error=str(error)); self.save()
+                row.update(status='failed',error=str(error),seconds=round(time.monotonic()-started,3))
+                self.manifest.update(status='failed',error=str(error));self.save();self.close()
             raise
         with self.lock:
-            row.update(status="passed", seconds=round(time.monotonic()-started, 3)); self.save()
-        print(f"Passed {name}", flush=True)
-        return value
+            if command is not None:self._command_evidence(name,command)
+            else:self.evidence.root()
+            if name in ('native-configure','native-build'):
+                from milestone_checkpoint import seal_native_build
+                option='-B'if name=='native-configure'else'--build'
+                self.manifest['native_artifacts']=seal_native_build(ROOT,Path(command[command.index(option)+1]))
+            row.update(status='passed',verified=command is None,child_pid=None,seconds=round(time.monotonic()-started,3))
+            self.save()
+        print('Passed '+name,flush=True);return value
 
-    def command(self, name, argv, env):
+    def command(self,name,argv,env):
+        from milestone_checkpoint import environment_identity
+        command=list(map(str,argv));token=environment_identity(env)
+        with self.lock:
+            row=self.manifest['stages'][name]
+            if row['status']=='passed':
+                require(self.resuming and row.get('command')==command and row.get('environment_sha256')==token,
+                    'resume command/environment differs')
+                print('Reusing sealed command '+name,flush=True);return None
+            self.command_env[name]=token
         def invoke():
-            with (self.output/(name+".log")).open("w", encoding="utf-8") as log:
-                result = subprocess.run(list(map(str, argv)), cwd=ROOT, env=env, stdout=log,
-                                        stderr=subprocess.STDOUT, timeout=1800)
-            require(result.returncode == 0, f"{name} failed; see {name}.log")
-        return self.action(name, invoke, list(map(str, argv)))
+            from milestone_checkpoint import CommandJob
+            with (self.output/(name+'.log')).open('w',encoding='utf-8')as log:
+                job=CommandJob(command,ROOT,env,log)
+                try:
+                    with self.lock:self.manifest['stages'][name]['child_pid']=job.child.pid;self.save()
+                    job.start();code=job.child.wait(timeout=1800)
+                finally:
+                    job.close();job.child.wait()
+            require(code==0,name+' failed; see '+name+'.log')
+        return self.action(name,invoke,command)
+
+    def mark_verified(self,names):
+        with self.lock:
+            for name in names:
+                row=self.manifest['stages'][name];require(row['status']=='passed','unexecuted command cannot be verified')
+                command=row.get('command')or[]
+                self._command_evidence(name,command);row['verified']=True
+            self.evidence.root();self.save()
+
+    def proof_directory(self,folder,name):
+        if not self.resuming:return folder/name
+        parent=folder/('replay-attempt-'+str(self.attempt));parent.mkdir(parents=True,exist_ok=True)
+        return parent/name
+
+    def publish_proof(self,folder,name,actual):
+        canonical=folder/name
+        if canonical==actual:return
+        require(actual.resolve().is_relative_to(self.output)and canonical.resolve().is_relative_to(self.output),
+            'proof publication escapes output')
+        canonical.mkdir(exist_ok=True)
+        for source in actual.glob('*.json'):
+            target=canonical/source.name
+            if target.exists()and target.read_bytes()!=source.read_bytes():
+                saved=actual/('previous-'+str(self.attempt)+'-'+source.name)
+                require(not saved.exists(),'previous proof snapshot already exists');shutil.copyfile(target,saved)
+            temporary=target.with_suffix('.json.tmp');shutil.copyfile(source,temporary);temporary.replace(target)
 
     def finish(self):
-        require(self.manifest["status"] != "failed" and all(r["status"] == "passed" for r in self.manifest["stages"].values()), "milestone has incomplete/failed stages")
-        require(source_digest() == self.manifest["source_sha256"], "source changed during validation; run again with fresh output")
-        self.manifest.update(status="passed", finished_utc=datetime.now(timezone.utc).isoformat()); self.save()
+        require(self.manifest['status']!='failed'and all(r['status']=='passed'for r in self.manifest['stages'].values()),
+            'milestone has incomplete/failed stages')
+        require(not self.strict_verification or all(r.get('verified')is True for r in self.manifest['stages'].values()),
+            'milestone command post-verification is incomplete')
+        require(source_digest()==self.manifest['source_sha256'],'source changed during validation; run again with fresh output')
+        self.evidence.root();self.evidence.verify()
+        from milestone_checkpoint import verify_native_build
+        verify_native_build(ROOT,self.manifest.get('native_artifacts',{}))
+        self.manifest.update(status='passed',finished_utc=datetime.now(timezone.utc).isoformat())
+        self.save();self.close()
 
 
 def collect_native(run, native, config):
     reports = {}
+    recovered=getattr(run,"resuming",False) and run.manifest["stages"]["native-evidence"].get("verified") is True
     for mode in ("cmake", "gcc"):
-        path = ROOT/f"build/lifter-validation/{mode}-report.json"
+        path = (run.output/f"{mode}-report.json") if recovered else ROOT/f"build/lifter-validation/{mode}-report.json"
         require(path.stat().st_mtime_ns >= run.started_ns, "stale native differential report")
         r = read_json(path)
         require(r["result"] == "passed" and r["synthetic_only"] and r["game_code_executed"] is False, "invalid native differential evidence")
         compiler = r["native_build"]["compiler"]
         require(("MSVC" in compiler) if mode == "cmake" else ("gcc" in compiler.lower()), "required compiler was not exercised")
-        shutil.copyfile(path, run.output/path.name); reports[mode] = r
+        if not recovered:shutil.copyfile(path, run.output/path.name)
+        reports[mode] = r
         for label in config["factory_reports"]:
-            path = ROOT/f"build/lifter-validation/{mode}-{label}-dispatch-report.json"
+            path = (run.output/f"{mode}-{label}-dispatch-report.json") if recovered else ROOT/f"build/lifter-validation/{mode}-{label}-dispatch-report.json"
             require(path.stat().st_mtime_ns >= run.started_ns, "stale factory report")
             f = read_json(path)
             require(f["synthetic_only"] and f["game_code_executed"] is False and f["whole_call_cases"] > 0 and f["prefix_checks"] >= f["whole_call_cases"], "invalid factory evidence")
-            shutil.copyfile(path, run.output/path.name)
+            if not recovered:shutil.copyfile(path, run.output/path.name)
     require(reports["cmake"]["trial_count"] == reports["gcc"]["trial_count"] and reports["cmake"]["forms"] == reports["gcc"]["forms"], "compiler evidence covers different cases")
     junit = ET.parse(run.output/"ctest.xml").getroot()
     require(int(junit.get("failures", "0")) == 0 and int(junit.get("errors", "0")) == 0, "CTest reported failures")
@@ -402,12 +527,12 @@ def collect_native(run, native, config):
     require({"host_self_test", "guest_memory_self_test", "ordered_memory_self_test", "pauth_self_test", "leaf_dispatch_self_test", "python_tests"} <= names, "required CTest groups did not execute")
     if config.get('startup_experiment'):require('startup_context_self_test' in names,'startup context self-test did not execute')
     require(not list(junit.iter("skipped")) and not list(junit.iter("failure")) and not list(junit.iter("error")), "CTest contains skipped or failed groups")
-    log = native/"Testing/Temporary/LastTest.log"
+    log = (run.output/"ctest-details.log") if recovered else native/"Testing/Temporary/LastTest.log"
     require(log.stat().st_mtime_ns >= run.started_ns, "stale CTest log")
     text = log.read_text(encoding="utf-8", errors="replace")
     counts = re.findall(r"Ran (\d+) tests in", text)
     require(counts and "\nOK\n" in text and "OK (skipped=" not in text, "complete Python suite did not pass without skips")
-    shutil.copyfile(log, run.output/"ctest-details.log")
+    if not recovered:shutil.copyfile(log, run.output/"ctest-details.log")
     return {"native_trials_per_compiler": reports["cmake"]["trial_count"], "python_tests": int(counts[-1]),
             "ctest_groups": len(names), "compilers": {k: v["native_build"]["compiler"] for k, v in reports.items()}}
 
@@ -466,7 +591,7 @@ def run_graphics_lanes(run,config,env):
             e.get('application_graphics',{}).get('ready') is True and
             (e['application_graphics'].get('boots'),e['application_graphics'].get('checks'))==(1,1),
             'graphics did not exercise the measured real bootstrap/check')
-        full_dir=folder/'progress-full';full_dir.mkdir()
+        full_dir=run.proof_directory(folder,'progress-full');full_dir.mkdir()
         shutil.copyfile(Path(last['bundle'])/'startup.ootmem',full_dir/'startup.ootmem')
         full=execute_startup(Path(last['executable']),full_dir,1000000000,10000,'full',entropy,False,romfs_index=romfs)
         (full_dir/'report.json').write_text(json.dumps(full,indent=2)+'\n',encoding='utf-8')
@@ -479,9 +604,11 @@ def run_graphics_lanes(run,config,env):
         old_bundle=read_json(build_destination(Path(old['bundle'])/'manifest.json'))
         proof=verify_graphics_progress_trace(old_trace,old_full,old_bundle,Path(full['trace_file']),full,bundle)
         (full_dir/'graphics-progress.json').write_text(json.dumps(proof,indent=2)+'\n',encoding='utf-8')
+        run.publish_proof(folder,'progress-full',full_dir)
         experiments[mode]=e;proofs[mode]=proof
     require(all(experiments['cmake'].get(k)==experiments['gcc'].get(k) for k in keys),
             'native compilers reached different graphics prefixes or owned state')
+    run.mark_verified(['graphics-experiment-'+m for m in ('cmake','gcc')])
     return dict(graphics_experiments=experiments,graphics_progress=proofs)
 
 
@@ -542,7 +669,7 @@ def run_display_lanes(run,config,env):
             (display.get('calls'),display.get('initializations'))==(1,1) and graphics.get('ready') is True and
             (graphics.get('boots'),graphics.get('checks'))==(1,0),
             'display did not exercise the measured real window/surface initialization')
-        full_dir=folder/'progress-full';full_dir.mkdir()
+        full_dir=run.proof_directory(folder,'progress-full');full_dir.mkdir()
         shutil.copyfile(Path(last['bundle'])/'startup.ootmem',full_dir/'startup.ootmem')
         full=execute_startup(Path(last['executable']),full_dir,1000000000,10000,'full',entropy,False,romfs_index=romfs)
         (full_dir/'report.json').write_text(json.dumps(full,indent=2)+'\n',encoding='utf-8')
@@ -554,13 +681,15 @@ def run_display_lanes(run,config,env):
         old_bundle=read_json(build_destination(Path(old['bundle'])/'manifest.json'))
         proof=verify_display_progress_trace(old_trace,old_full,old_bundle,Path(full['trace_file']),full,bundle)
         (full_dir/'display-progress.json').write_text(json.dumps(proof,indent=2)+'\n',encoding='utf-8')
+        run.publish_proof(folder,'progress-full',full_dir)
         experiments[mode]=e;proofs[mode]=proof
     require(all(experiments['cmake'].get(k)==experiments['gcc'].get(k) for k in keys),
             'native compilers reached different display prefixes or owned state')
+    run.mark_verified(['display-experiment-'+m for m in ('cmake','gcc')])
     return dict(display_experiments=experiments,display_progress=proofs)
 
 
-def execute(config, output, native_only=False):
+def execute(config, output, native_only=False, resume=False):
     require(os.name == "nt", "milestone runner requires Windows")
     require(isinstance(config, dict) and config.get("schema_version") == 1 and isinstance(config.get("name"), str) and re.fullmatch(r"[a-z][a-z0-9-]*", config["name"]), "invalid milestone config")
     require(all(isinstance(config.get(k), str) and config[k] for k in ("native_build", "prepared", "baseline_default", "baseline_plt")), "missing milestone paths")
@@ -661,7 +790,9 @@ def execute(config, output, native_only=False):
     if not native_only and config.get('display_experiment'):
         stages.insert(stages.index('comparison'),'display-audit')
         for mode in ('cmake','gcc'):stages.insert(stages.index('summary'),'display-experiment-'+mode)
-    run = MilestoneRun(output, config["name"], stages)
+    from milestone_checkpoint import execution_binding
+    binding=execution_binding(ROOT,config,native_only)
+    run = MilestoneRun(output, config["name"], stages,binding=binding,resume=resume)
     run.manifest["scope"] = "synthetic native only" if native_only else "synthetic native and static private game analysis"
     if not native_only and config.get('startup_experiment'):
         run.manifest['scope']='synthetic validation, static audits and explicitly authorized experimental original startup execution'
@@ -689,6 +820,7 @@ def execute(config, output, native_only=False):
             futures = [pool.submit(msvc), pool.submit(gcc_lane)]
             for future in futures: future.result()
         summary = run.action("native-evidence", lambda: collect_native(run, native, config))
+        run.mark_verified(stages[:stages.index("native-evidence")+1])
         if not native_only:
             def survey(scope):
                 argv = py+["tools/survey_function_profiles.py", prepared, "--report", run.output/(scope+".json")]
@@ -783,6 +915,7 @@ def execute(config, output, native_only=False):
                     require(not a['entry_graph']['truncated'],'startup entry audit was truncated')
                     summary['startup_audit']={'initializer_summary':a['initializer_summary'],'entry_instructions':a['entry_graph']['instruction_count'],'static_frontier':a['entry_graph']['frontier_counts']}
             run.action("comparison", compare)
+            run.mark_verified(stages[:stages.index("comparison")+1])
             if config.get('startup_experiment'):
                 experiments={}
                 seeds=[]
@@ -800,6 +933,7 @@ def execute(config, output, native_only=False):
                         prior=baseline['iterations'][-1]['execution']
                         require(all(experiments[mode][k]==prior[k] for k in ('status','error','pc','retired','word','service','trace_sha256')),'legacy original startup prefix changed')
                 require(all(experiments['cmake'][k]==experiments['gcc'][k] for k in ('status','error','pc','retired','word','service','trace_sha256')),'native compilers reached different startup prefixes')
+                run.mark_verified(['startup-experiment-'+m for m in ('cmake','gcc')])
                 summary['startup_experiments']=experiments
             if config.get('sdk_experiment'):
                 audit=read_json(run.output/'sdk-audit.json')
@@ -811,7 +945,11 @@ def execute(config, output, native_only=False):
                 if config['sdk_expected_error']==15:
                     require(config['sdk_required_stages']==len(audit['mandatory_stage_entries']),'SDK initialization requires every audited stage')
                 entropy=run.output/'process-entropy.bin'
-                with entropy.open('xb') as stream:stream.write(os.urandom(32))
+                if not entropy.exists():
+                    require('process-entropy.bin' not in run.manifest['artifacts'],'sealed process entropy is missing')
+                    with entropy.open('xb') as stream:stream.write(os.urandom(32))
+                require(entropy.is_file() and entropy.stat().st_size==32,'original private process entropy is missing')
+                run.evidence.add(entropy);run.save()
                 sdk_experiments={}
                 if config.get('native_experiment'):
                     sdk_baseline=read_json(ROOT/config['baseline_sdk'])
@@ -832,6 +970,7 @@ def execute(config, output, native_only=False):
                         prior=sdk_baseline['iterations'][-1]['execution']
                         require(all(sdk_experiments[mode][k]==prior[k] for k in ('status','error','pc','retired','word','service','trace_sha256')),'preceding SDK original prefix changed')
                 require(all(sdk_experiments['cmake'][k]==sdk_experiments['gcc'][k] for k in ('status','error','pc','retired','word','service','trace_sha256','sdk_stages_completed','sdk_initialization_completed')),'native compilers reached different SDK prefixes')
+                run.mark_verified(['sdk-experiment-'+m for m in ('cmake','gcc')])
                 summary['sdk_experiments']=sdk_experiments
                 summary['sdk_initialization_completed']=config['sdk_expected_error']==15
             if config.get('native_experiment'):
@@ -867,6 +1006,7 @@ def execute(config, output, native_only=False):
                 require(all(native_experiments['cmake'][k]==native_experiments['gcc'][k] for k in
                     ('status','error','pc','retired','word','service','trace_sha256','native_calls','native_stats','sdk_stages_completed')),
                     'native SDK compiler execution differs')
+                run.mark_verified(['native-sdk-experiment-'+m for m in ('cmake','gcc')])
                 summary['native_sdk_experiments']=native_experiments
                 summary['sdk_initialization_completed']=config['native_expected_error']==15
             if config.get('sdk_init_experiment'):
@@ -922,7 +1062,7 @@ def execute(config, output, native_only=False):
                     if config.get('sdk_init_fast_functions'):
                         require(init_experiments[mode].get('fast_function_calls',0)>0,'SDK init never exercised whole-function execution')
                         from build_startup import execute as execute_startup
-                        diagnostic=folder/'diagnostic';diagnostic.mkdir()
+                        diagnostic=run.proof_directory(folder,'diagnostic');diagnostic.mkdir()
                         shutil.copyfile(Path(last['bundle'])/'startup.ootmem',diagnostic/'startup.ootmem')
                         reference=execute_startup(Path(last['executable']),diagnostic,1000000000,10000,'compact',entropy,False)
                         (diagnostic/'report.json').write_text(json.dumps(reference,indent=2)+'\n',encoding='utf-8')
@@ -940,6 +1080,10 @@ def execute(config, output, native_only=False):
                     require(all(init_experiments['cmake'][key]==init_experiments['gcc'][key] for key in
                         ('host_linked','host_scaffold_retired','original_retired','constructors_completed','fast_function_calls')),
                         'native compiler host-boot completion evidence differs')
+                for m in ('cmake','gcc'):
+                    f=run.output/('sdk-init-'+m)
+                    if config.get('sdk_init_fast_functions'):run.publish_proof(f,'diagnostic',run.proof_directory(f,'diagnostic'))
+                run.mark_verified(['sdk-init-experiment-'+m for m in ('cmake','gcc')])
                 summary['sdk_init_experiments']=init_experiments
                 summary['sdk_initialization_completed']=True
             if config.get('application_experiment'):
@@ -993,14 +1137,14 @@ def execute(config, output, native_only=False):
                         config['application_min_post_entry'],config.get('application_expected_guard'),romfs_input,
                         expected_word=config.get('application_expected_word'),expected_svc=config.get('application_expected_svc'))
                     require(e.get('fast_function_calls',0)>0,'application experiment did not exercise accelerated leaves')
-                    diagnostic=folder/'diagnostic';diagnostic.mkdir()
+                    diagnostic=run.proof_directory(folder,'diagnostic');diagnostic.mkdir()
                     shutil.copyfile(Path(last['bundle'])/'startup.ootmem',diagnostic/'startup.ootmem')
                     reference=execute_startup(Path(last['executable']),diagnostic,1000000000,10000,'compact',entropy,False,romfs_index=romfs_index)
                     (diagnostic/'report.json').write_text(json.dumps(reference,indent=2)+'\n',encoding='utf-8')
                     require(all(e.get(k)==reference.get(k) for k in app_keys),'application acceleration differs from diagnostic single-step execution')
                     if config.get('application_progress_baseline') or config.get('application_resource_progress_baseline'):
                         from application_frontier import verify_progress_trace,verify_resource_progress_trace,verify_full_trace
-                        full_dir=folder/'progress-full';full_dir.mkdir()
+                        full_dir=run.proof_directory(folder,'progress-full');full_dir.mkdir()
                         shutil.copyfile(Path(last['bundle'])/'startup.ootmem',full_dir/'startup.ootmem')
                         full=execute_startup(Path(last['executable']),full_dir,1000000000,10000,'full',entropy,False,romfs_index=romfs_index)
                         (full_dir/'report.json').write_text(json.dumps(full,indent=2)+'\n',encoding='utf-8')
@@ -1025,6 +1169,12 @@ def execute(config, output, native_only=False):
                     app_experiments[mode]=e
                 require(all(app_experiments['cmake'].get(k)==app_experiments['gcc'].get(k) for k in app_keys),
                     'native compilers reached different original application prefixes or provider states')
+                for m in ('cmake','gcc'):
+                    f=run.output/('application-'+m)
+                    run.publish_proof(f,'diagnostic',run.proof_directory(f,'diagnostic'))
+                    if config.get('application_progress_baseline') or config.get('application_resource_progress_baseline'):
+                        run.publish_proof(f,'progress-full',run.proof_directory(f,'progress-full'))
+                run.mark_verified(['application-experiment-'+m for m in ('cmake','gcc')])
                 summary['application_experiments']=app_experiments
             if config.get('graphics_experiment'):summary.update(run_graphics_lanes(run,config,env))
             if config.get('display_experiment'):summary.update(run_display_lanes(run,config,env))
@@ -1060,10 +1210,12 @@ def execute(config, output, native_only=False):
                 c=summary['bounded_cohort']
                 lines += ['',f"Bounded memory: {summary['bounded_profiles']}; new leaves: {c['candidate_memory_leaves']} ({c['new_loop_leaves']} loops); upgraded roots: {c['newly_accepted_roots']}; distinct closure edges: {c['unique_call_edges']}."]
             (run.output/"summary.md").write_text("\n".join(lines)+"\n", encoding="utf-8")
-        run.action("summary", publish_summary); run.finish()
+        run.action("summary", publish_summary)
+        require(execution_binding(ROOT,config,native_only)==binding,"input/toolchain changed during validation")
+        run.finish()
     except Exception as error:
         with run.lock:
-            run.manifest.update(status="failed", error=str(error)); run.save()
+            run.manifest.update(status="failed", error=str(error)); run.save(); run.close()
         raise
     print(json.dumps({"status": "passed", "output": str(run.output), **summary}), flush=True)
     return run
@@ -1074,9 +1226,10 @@ def main():
     parser.add_argument("--config", type=Path, default=ROOT/"config/milestones/integer-frontier.json")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--native-only", action="store_true", help="validate synthetic code without private game inputs/surveys")
+    parser.add_argument("--resume",action="store_true",help="resume an interrupted run only with identical sealed inputs and evidence")
     args = parser.parse_args()
     try:
-        execute(read_json(args.config), args.output, args.native_only)
+        execute(read_json(args.config), args.output, args.native_only,args.resume)
         return 0
     except (OSError, ValueError, subprocess.SubprocessError, ET.ParseError) as error:
         print(f"Milestone validation failed: {error}", file=sys.stderr)

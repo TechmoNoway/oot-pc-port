@@ -6,6 +6,13 @@ An independent project exploring a native Windows x86-64 port of Ocarina of Time
 
 Early development. The Windows host builds and passes its native self-tests. The separate [experimental startup bootstrap](docs/startup-bootstrap.md) and [SDK runtime foundation](docs/sdk-runtime.md) compile selected original instructions into a private Windows executable, execute them only with explicit opt-in, and record precise stop diagnostics. The completed host-linked initialization profile reaches the original `nnMain` transition. A separate [application profile](docs/application-startup.md) continues into its original body, supplies coherent main-thread updates and mounts verified read-only game content. The game is not playable yet.
 
+The [verified build cache and checkpoint recovery](docs/build-cache.md) milestone
+passes 52/52 stages: 718 Python tests, seven CTest groups and 283,401 common
+native/reference comparisons per compiler. A real interrupted display replay
+resumes successfully through the supported CLI. Cross-profile display builds
+reuse 328/335 verified objects, while preserving fresh execution and the original
+full trace digest. Guest Display/Layer objects, rendering and input remain next.
+
 The preceding [application SIMD profile](docs/application-startup.md) passes the former scalar-SIMD conversion frontier and runs 311,527 original instructions after entry in matching MSVC/GCC pilots. Six application-only register SIMD families have independent full-state ARM checks. The profile queries its explicit `en-US` preference and mounts a hash-bound read-only RomFS containing 186,587 files and 598 directories. The original game opens, reads and closes four real files (3,427 bytes). That checkpoint stopped at byte acquire compare-and-swap `CASAB`.
 
 The fresh `build/milestones/application-simd-v1/` run passes all 42 stages: 641 Python tests without skips, seven CTest groups and 283,401 common native/reference comparisons per compiler. Both application lanes retain the earlier initialization/content state, reach the exact CASAB boundary and prove the old UCVTF frontier in full single-step traces. That validated implementation/configuration fingerprint matches the passed run; rendering and gameplay are still incomplete.
@@ -18,7 +25,7 @@ The preceding [graphics bootstrap](docs/superpowers/specs/2026-11-13-graphics-bo
 
 The separate [VI display initializer](docs/superpowers/specs/2026-11-13-display-initialization-design.md) owns a real hidden Win32 window and presentation-supported Vulkan surface. The transferred final `build/milestones/display-initialization-v1/` evidence passes all 50 stages: 703 Python tests without skips, seven CTest groups and 283,401 common comparisons per compiler. Both original full compiler replays prove historical entry-prefix restoration and original caller continuation, reaching guarded `OpenDefaultDisplay` with digest `e330868f9e2bbdff0c7bf2b88258ecac138974fd33c7303b8ca2147d1a98bc21`. That historical run is distinct from validation on a different machine; see the [source integration record](docs/source-integration.md). Guest Display/Layer/vsync objects, a rendered frame and usable input remain further work.
 
-The merged `dev` source independently passes all 50 stages on the local Windows workspace on 2026-11-15, with the same test counts and full display digest on MSVC 19.44/GCC 14.2. Its final source fingerprint matches the working tree. The verified teammate transfer is consolidated under ignored `build/`, with immutable duplicate artifacts sharing disk storage.
+The preceding merged `dev` checkpoint independently passed all 50 stages on the local Windows workspace on 2026-11-15, with the same test counts and full display digest on MSVC 19.44/GCC 14.2. Its final source fingerprint matches that frozen integration checkout. The verified teammate transfer is consolidated under ignored `build/`, with immutable duplicate artifacts sharing disk storage.
 
 The preceding `build/milestones/application-content-v1/` run passes all 42 stages: 616 Python tests without skips, seven CTest groups and 283,401 common native/reference comparisons per compiler. Both compilers retire 1,830,133 original instructions plus 51 scaffold instructions and perform 46 native calls. Accelerated and single-step complete trace digests agree, earlier raw/SDK/logging/initialization evidence is preserved, and the final source fingerprint matches.
 
@@ -56,7 +63,7 @@ The fresh original-byte 1.1.1 survey preserves all 16,805 preceding memory-leaf 
 
 Work proceeds through complete capability milestones. Each authorized milestone includes implementation, verifier/runtime integration, MSVC/GCC checks, fresh hash-matched surveys/audit, status documentation and a reviewed commit/push on `dev`. The assistant handles the dependent substeps without requiring another prompt for each instruction family.
 
-The [milestone runner](docs/development-workflow.md) executes the complete evidence pipeline from one command, records stage checkpoints/logs and writes a private aggregate summary. Source changes, failed/skipped required checks, stale evidence or mismatched baselines prevent a successful final status. See [the current milestone configuration](config/milestones/display-initialization.json).
+The [milestone runner](docs/development-workflow.md) executes the complete evidence pipeline from one command, records stage checkpoints/logs and writes a private aggregate summary. Source changes, failed/skipped required checks, stale evidence or mismatched baselines prevent a successful final status. See [the current milestone configuration](config/milestones/build-cache.json).
 
 The hybrid direction prioritizes native implementations of coherent SDK families while retaining original game translation and necessary low-level services. The remaining platform, applet, account and filesystem consumers require real owned behavior; unimplemented paths remain explicit boundaries. The initialization experiment now accounts for the application heap and reaches the checked `nnMain` transition. The application profile now executes its body and provides the owned read-only RomFS family. Graphics/shaders, input, audio, scheduling and remaining measured SDK consumers still require integration. See [architecture](docs/architecture.md) and [development workflow](docs/development-workflow.md).
 

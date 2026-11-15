@@ -194,64 +194,24 @@ def compile_library(programs, mode="cmake", extra_source="", startup=False, *, s
         source.write_text("\n".join(chunks) + "\n" + extra_source, encoding="utf-8")
         sources=[source]
 
-    def run(command):
-        result = subprocess.run(command, capture_output=True, text=True, timeout=180)
-        with (directory / "compile.log").open("a", encoding="utf-8") as log:
-            log.write(result.stdout + result.stderr)
-        require(result.returncode == 0, f"native compilation failed; see {directory / 'compile.log'}")
+    from object_cache import SharedCompiler
+    compiler = SharedCompiler(mode, log=directory/'compile.log')
+    names = ['guest_memory','runtime_image','host_win32','leaf_dispatch','frame_dispatch',
+             'stack_dispatch','pauth','checked_read','plt_bridge']
+    if startup:
+        names += ['startup_context','startup_dispatch','sdk_native','native_platform','native_services',
+                  'native_math','startup_vector','startup_float','startup_init_atomic',
+                  'application_services','native_romfs','native_graphics']
+    inputs = [*sources, *[ROOT/'src'/(name+'.c') for name in names]]
+    flags = compiler.defines({'OOT_MEMORY_SHARED_EXPORTS':None,'_CRT_SECURE_NO_WARNINGS':None,
+                              '_WIN32_WINNT':'0x0A00'}) + compiler.includes([ROOT/'src',ROOT/'third_party/vulkan/include'])
+    library = directory/('lifted.dll' if os.name=='nt' else 'lifted.so')
+    cache_stats = compiler.build(inputs,library,flags,shared=True,libraries=['bcrypt'],timeout=180)
+    compiler_info = compiler.description
 
-    if mode == "gcc":
-        compiler = shutil.which("gcc")
-        require(compiler is not None, "gcc is not available on PATH")
-        library = directory / ("lifted.dll" if os.name == "nt" else "lifted.so")
-        command=[compiler, "-std=c17", "-O2", "-Wall", "-Wextra", "-Wpedantic", "-Werror",
-             "-DOOT_MEMORY_SHARED_EXPORTS", "-D_CRT_SECURE_NO_WARNINGS", "-D_WIN32_WINNT=0x0A00",
-             "-I", str(ROOT / "src"),"-I",str(ROOT/'third_party/vulkan/include')]
-        inputs=[*map(str,sources), str(ROOT / "src/guest_memory.c"),
-             str(ROOT / "src/runtime_image.c"), str(ROOT / "src/host_win32.c"), str(ROOT / "src/leaf_dispatch.c"),
-             str(ROOT / "src/frame_dispatch.c"), str(ROOT / "src/stack_dispatch.c"), str(ROOT / "src/pauth.c"), str(ROOT / "src/checked_read.c"), str(ROOT / "src/plt_bridge.c"),
-             *([str(ROOT / 'src'/name) for name in ('startup_context.c','startup_dispatch.c','sdk_native.c','native_platform.c','native_services.c','native_math.c','startup_vector.c','startup_float.c','startup_init_atomic.c','application_services.c','native_romfs.c','native_graphics.c')] if startup else []),
-             ]
-        if split_programs:
-            objects=[]
-            for index,item in enumerate(inputs):
-                obj=directory/f"unit-{index:03d}.o"
-                run(command+["-c",item,"-o",str(obj)]);objects.append(str(obj))
-            run([compiler,"-shared",*objects,"-lbcrypt","-o",str(library)])
-        else:
-            run(command+["-shared",*inputs,"-lbcrypt","-o",str(library)])
-        compiler_info = subprocess.run([compiler, "--version"], capture_output=True, text=True, check=True).stdout.splitlines()[0]
-    else:
-        cmake = find_cmake()
-        (directory / "CMakeLists.txt").write_text(
-            'cmake_minimum_required(VERSION 3.20)\nproject(lift_validation LANGUAGES C)\n'
-            'add_library(lifted SHARED '+ ' '.join('"'+s.as_posix()+'"' for s in sources)+f' "{(ROOT / "src/guest_memory.c").as_posix()}" '
-            f'"{(ROOT / "src/runtime_image.c").as_posix()}" "{(ROOT / "src/host_win32.c").as_posix()}" '
-            f'"{(ROOT / "src/leaf_dispatch.c").as_posix()}" "{(ROOT / "src/frame_dispatch.c").as_posix()}" '
-            f'"{(ROOT / "src/stack_dispatch.c").as_posix()}" "{(ROOT / "src/pauth.c").as_posix()}" "{(ROOT / "src/checked_read.c").as_posix()}" "{(ROOT / "src/plt_bridge.c").as_posix()}" '+
-            (' '.join('"'+(ROOT/p).as_posix()+'"' for p in ('src/startup_context.c','src/startup_dispatch.c','src/sdk_native.c','src/native_platform.c','src/native_services.c','src/native_math.c','src/startup_vector.c','src/startup_float.c','src/startup_init_atomic.c','src/application_services.c','src/native_romfs.c','src/native_graphics.c')) if startup else '')+')\n'+
-            'target_link_libraries(lifted PRIVATE bcrypt)\n'
-            'target_compile_definitions(lifted PRIVATE OOT_MEMORY_SHARED_EXPORTS _CRT_SECURE_NO_WARNINGS _WIN32_WINNT=0x0A00)\n'
-            'target_compile_features(lifted PRIVATE c_std_17)\n'
-            f'target_include_directories(lifted PRIVATE "{(ROOT / "src").as_posix()}" "{(ROOT/"third_party/vulkan/include").as_posix()}")\n'
-            'if(MSVC)\n target_compile_options(lifted PRIVATE /W4 /WX'+(' /MP4' if split_programs else '')+')\n'
-            'else()\n target_compile_options(lifted PRIVATE -Wall -Wextra -Wpedantic -Werror)\nendif()\n',
-            encoding="utf-8")
-        run([cmake, "-S", str(directory), "-B", str(directory / "native"), "-DCMAKE_BUILD_TYPE=Release"])
-        run([cmake, "--build", str(directory / "native"), "--config", "Release"])
-        suffix = "*.dll" if os.name == "nt" else "*.so"
-        libraries = list((directory / "native").rglob(suffix))
-        require(len(libraries) == 1, "expected one generated native validation library")
-        library = libraries[0]
-        metadata = list((directory / "native/CMakeFiles").glob("*/CMakeCCompiler.cmake"))
-        require(len(metadata) == 1, "expected CMake C compiler metadata")
-        compiler_text = metadata[0].read_text(encoding="utf-8")
-        compiler_info = " ".join(re.findall(
-            r'set\(CMAKE_C_COMPILER(?:_ID|_VERSION)? "([^"]+)"\)', compiler_text))
-        require(bool(compiler_info), "missing native compiler identity")
     return CDLL(str(library)), {"mode": mode, "compiler": compiler_info,
                                 "directory": str(directory), "programs": reports,
-                                "translation_units": [s.name for s in sources]}
+                                "translation_units": [s.name for s in sources], "object_cache":cache_stats}
 
 
 def validate_program(library, program):

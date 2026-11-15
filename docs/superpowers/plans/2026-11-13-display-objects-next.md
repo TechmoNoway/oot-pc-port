@@ -32,6 +32,25 @@ targets, aliases, relocations and pre-frontier execution before adding guards.
 
 ## Ordered implementation tasks
 
+The 2026-11-15 ignored research candidate is at
+`build/research/display-objects-20261115/`. It independently walks record boundaries
+from the original frame-data start, checks the canonical table/FDE relationship
+and accepts only the observed narrow CIE forms. It proves 46 unique targets across
+the 53 slots; synthetic mutations cover bad encodings, counts, extents, interior
+records, CIE references, augmentation and overlapping functions. This remains a
+candidate, not production parser/registry authority. Complete source/mapping/
+relocation provenance and the production negative-test matrix before promotion.
+
+An independent scan rehashes all 1,833,238 historical display rows to the recorded
+native digest and finds zero observations of those 46 entries before the current
+stop. This supports closing them in a later separate profile; it does not prove
+their behavior. Both current original caller/return proofs must still be rerun.
+Private source research also confirms default settings, decrementing public close
+routes and the member/native-window identity route; do not substitute guessed
+settings or force-close behavior. The current Vulkan bootstrap already enables
+the swapchain device extension. Actual swapchain lifetime, commands, synchronization
+and presentation remain unimplemented.
+
 The [2026-11-15 reference review](../../reference-review-2026-11-15.md) identifies
 shared verified object caching and supported checkpoint recovery as development
 throughput work. Existing incremental builds remain useful; measure cross-profile
