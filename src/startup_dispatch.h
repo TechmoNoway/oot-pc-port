@@ -14,6 +14,7 @@
 #define OOT_STARTUP_APPLICATION 32u
 #define OOT_STARTUP_GRAPHICS 64u
 #define OOT_STARTUP_DISPLAY 128u
+#define OOT_STARTUP_OBJECTS 256u
 #define OOT_STARTUP_MAX_NATIVE_FUNCTIONS 64u
 #define OOT_STARTUP_INIT_MAX_NATIVE_FUNCTIONS 4096u
 #define OOT_STARTUP_MAX_INSTRUCTIONS 16384u
@@ -157,6 +158,10 @@ OOT_MEMORY_API OotStartupDispatcher *oot_startup_dispatch_create_graphics(OotRun
 /* Separate flags254 display profile, requiring the graphics context and its
  * real host owner. The earlier flags126 profile retains its old boundary. */
 OOT_MEMORY_API OotStartupDispatcher *oot_startup_dispatch_create_display(OotRuntimeImage *image,
+    OotStartupContext *context,OotPauth *pauth,const OotStartupProgram *program,
+    uint64_t limit,uint32_t *error);
+/* Separate flags510 object profile with a trusted bound source declaration. */
+OOT_MEMORY_API OotStartupDispatcher *oot_startup_dispatch_create_objects(OotRuntimeImage *image,
     OotStartupContext *context,OotPauth *pauth,const OotStartupProgram *program,
     uint64_t limit,uint32_t *error);
 OOT_MEMORY_API OotStartupDispatcher *oot_startup_dispatch_create_application(OotRuntimeImage *image,

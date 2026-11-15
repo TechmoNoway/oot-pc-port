@@ -22,6 +22,7 @@ const OotNativeFunction *oot_startup_compiled_native_functions(size_t *count);
 uint64_t oot_startup_compiled_original_oe_entry(void);
 const OotStartupFastFunction *oot_startup_compiled_fast_functions(size_t *count);
 const OotStartupConstructor *oot_startup_compiled_constructors(size_t *count);
+const OotObjectDeclaration *oot_startup_compiled_objects(void);
 
 typedef struct TraceFile {
     FILE *file;
@@ -159,9 +160,15 @@ int oot_startup_cli(int argc, char **argv)
         fputs("Executable has no compiled RomFS input identity.\n",stderr);goto cleanup;
 #endif
     }
+    if(program->flags&OOT_STARTUP_OBJECTS){
+        if(!oot_startup_context_bind_objects(context,oot_startup_compiled_objects())){
+            fputs("Object source declaration or retained image rejected.\n",stderr);goto cleanup;
+        }
+    }
     pauth=oot_pauth_create(OOT_PAUTH_QARMA5_VA39,NULL);
     if (!pauth) { fputs("Startup PAC context failed.\n",stderr); goto cleanup; }
-    dispatcher=(program->flags&OOT_STARTUP_DISPLAY) ? oot_startup_dispatch_create_display(image,context,pauth,program,limit,&error) :
+    dispatcher=(program->flags&OOT_STARTUP_OBJECTS) ? oot_startup_dispatch_create_objects(image,context,pauth,program,limit,&error) :
+        (program->flags&OOT_STARTUP_DISPLAY) ? oot_startup_dispatch_create_display(image,context,pauth,program,limit,&error) :
         (program->flags&OOT_STARTUP_GRAPHICS) ? oot_startup_dispatch_create_graphics(image,context,pauth,program,limit,&error) :
         (program->flags&OOT_STARTUP_APPLICATION) ? oot_startup_dispatch_create_application(image,context,pauth,program,limit,&error) :
         (program->flags&OOT_STARTUP_HOST_LINKED) ? oot_startup_dispatch_create_host(image,context,pauth,program,limit,&error) :
@@ -283,6 +290,13 @@ int oot_startup_cli(int argc, char **argv)
     if(fast_functions)printf(",\"fast_function_calls\":%" PRIu64,oot_startup_dispatch_fast_calls(dispatcher));
     if(program->flags&OOT_STARTUP_APPLICATION)printf(",\"application_runtime\":true,\"application_entry_retired\":%s,\"post_entry_retired\":%" PRIu64,
         oot_startup_dispatch_application_entry_retired(dispatcher) ? "true":"false",oot_startup_dispatch_post_entry_retired(dispatcher));
+    if(program->flags&OOT_STARTUP_OBJECTS){
+        OotObjectsReport objects={0};printf(",\"objects_runtime\":true");
+        if(oot_startup_context_objects_report(context,&objects))printf(",\"display_objects\":{\"display_open\":%u,\"layer_open\":%u,\"event_open\":%u,\"references\":%" PRIu64 ",\"calls\":%" PRIu64 ",\"opens\":%" PRIu64 ",\"closes\":%" PRIu64 ",\"creates\":%" PRIu64 ",\"destroys\":%" PRIu64 ",\"window_getters\":%" PRIu64 ",\"vsync_events\":%" PRIu64 ",\"waits\":%" PRIu64 ",\"resets\":%" PRIu64 ",\"clears\":%" PRIu64 ",\"handle_closes\":%" PRIu64 "}",
+            objects.display_open,objects.layer_open,objects.event_open,objects.references,objects.calls,objects.opens,
+            objects.closes,objects.creates,objects.destroys,objects.window_getters,objects.vsync_events,objects.waits,
+            objects.resets,objects.clears,objects.handle_closes);
+    }
     if(program->flags&OOT_STARTUP_DISPLAY){
         OotDisplayReport display={0};printf(",\"display_runtime\":true");
         if(oot_startup_context_display_report(context,&display))printf(",\"application_display\":{\"ready\":%s,\"presentation_supported\":%s,\"calls\":%" PRIu64 ",\"initializations\":%" PRIu64 "}",

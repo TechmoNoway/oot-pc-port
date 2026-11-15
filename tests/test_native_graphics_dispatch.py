@@ -11,7 +11,7 @@ from test_sdk_init_vectors import VectorState
 ROOT=boot.ROOT
 NAMES=('guest_memory','runtime_image','host_win32','leaf_dispatch','frame_dispatch','stack_dispatch',
     'pauth','checked_read','plt_bridge','startup_dispatch','sdk_native','native_platform','native_services',
-    'native_math','startup_vector','startup_float','startup_init_atomic','application_services','native_romfs')
+    'native_math','startup_vector','startup_float','startup_init_atomic','application_services','native_romfs','native_objects','native_vblank')
 
 class GraphicsDispatchTests(unittest.TestCase):
     def test_native_boot_check_quota_and_complete_vector_bank(self):

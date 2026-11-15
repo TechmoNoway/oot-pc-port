@@ -1,3 +1,6 @@
+#ifndef _WIN32_WINNT
+#define _WIN32_WINNT 0x0A00
+#endif
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #define VK_NO_PROTOTYPES
@@ -7,9 +10,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include <wchar.h>
+#include <limits.h>
 #include "native_graphics.h"
 
 struct OotGraphics {
+    uint32_t references;
     HMODULE module;
     PFN_vkGetInstanceProcAddr get_instance;
     PFN_vkDestroyInstance destroy_instance;
@@ -165,10 +170,10 @@ static int initialize_display(OotGraphics *g,const void *owner)
 OotGraphics *oot_graphics_create(void)
 {
     OotGraphics *g=calloc(1,sizeof(*g));
-    if(g){g->report.version=1;g->display_report.version=1;}return g;
+    if(g){g->references=1;g->report.version=1;g->display_report.version=1;}return g;
 }
 void oot_graphics_destroy(OotGraphics *g)
-{ if(g){release_resources(g);memset(g,0,sizeof(*g));free(g);} }
+{ if(g && !--g->references){release_resources(g);memset(g,0,sizeof(*g));free(g);} }
 int oot_graphics_snapshot(const OotGraphics *g,OotGraphicsReport *out)
 {
     if(!g || !out || !disjoint(g,sizeof(*g),out,sizeof(*out)))return 0;
@@ -219,4 +224,155 @@ int oot_graphics_call(OotGraphics *g,uint32_t id,const OotArm64State *s,OotArm64
         ++next.report.boots;
     }else ++next.report.checks;
     ++next.report.calls;*g=next;*out=result;return 0;
+}
+
+struct OotGraphicsDisplayPeer {
+    OotGraphics *graphics;
+    HMONITOR monitor;
+    DWORD thread;
+    uint32_t references;
+    MONITORINFOEXW info;
+    OotGraphicsPeerReport report;
+};
+struct OotGraphicsLayerPeer {
+    OotGraphicsDisplayPeer *display;
+    HINSTANCE module;
+    ATOM window_class;
+    HWND window;
+    VkSurfaceKHR surface;
+    PFN_vkDestroySurfaceKHR destroy_surface;
+    OotGraphicsPeerReport report;
+};
+
+static int monitor_info(HMONITOR monitor,MONITORINFOEXW *info,OotGraphicsPeerReport *report)
+{
+    MONITORINFOEXW queried={0};DEVMODEW mode={0};DPI_AWARENESS_CONTEXT previous;
+    int ok=0;previous=SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+    if(!previous)return 0;
+    queried.cbSize=sizeof(queried);mode.dmSize=sizeof(mode);
+    if(GetMonitorInfoW(monitor,(MONITORINFO*)&queried) &&
+       (queried.dwFlags&MONITORINFOF_PRIMARY) &&
+       EnumDisplaySettingsExW(queried.szDevice,ENUM_CURRENT_SETTINGS,&mode,0) &&
+       (mode.dmFields&(DM_PELSWIDTH|DM_PELSHEIGHT))==(DM_PELSWIDTH|DM_PELSHEIGHT) &&
+       mode.dmPelsWidth && mode.dmPelsHeight &&
+       (int64_t)queried.rcMonitor.right-queried.rcMonitor.left==mode.dmPelsWidth &&
+       (int64_t)queried.rcMonitor.bottom-queried.rcMonitor.top==mode.dmPelsHeight){
+        *info=queried;*report=(OotGraphicsPeerReport){mode.dmPelsWidth,mode.dmPelsHeight,
+            (mode.dmFields&DM_DISPLAYFREQUENCY)&&mode.dmDisplayFrequency>1?mode.dmDisplayFrequency:0,0,0,0};ok=1;
+    }
+    if(!SetThreadDpiAwarenessContext(previous))ok=0;
+    return ok;
+}
+OotGraphicsDisplayPeer *oot_graphics_display_peer_open(OotGraphics *g)
+{
+    POINT point={0,0};OotGraphicsDisplayPeer *display;
+    if(!g || !live(g) || !g->display_report.ready || g->window_thread!=GetCurrentThreadId() ||
+       !IsWindow(g->window) || g->references==UINT32_MAX)return NULL;
+    display=calloc(1,sizeof(*display));if(!display)return NULL;
+    display->monitor=MonitorFromPoint(point,MONITOR_DEFAULTTOPRIMARY);
+    if(!display->monitor || !monitor_info(display->monitor,&display->info,&display->report)){
+        free(display);return NULL;
+    }
+    display->graphics=g;display->thread=GetCurrentThreadId();display->references=1;++g->references;
+    return display;
+}
+int oot_graphics_display_peer_live(const OotGraphicsDisplayPeer *display)
+{
+    MONITORINFOEXW info;OotGraphicsPeerReport report;
+    return display && display->references && display->thread==GetCurrentThreadId() &&
+        live(display->graphics) && monitor_info(display->monitor,&info,&report) &&
+        !wcscmp(info.szDevice,display->info.szDevice) && report.width==display->report.width &&
+        report.height==display->report.height && report.refresh==display->report.refresh;
+}
+int oot_graphics_display_peer_report(const OotGraphicsDisplayPeer *display,OotGraphicsPeerReport *out)
+{
+    if(!display || !out || !disjoint(display,sizeof(*display),out,sizeof(*out)) ||
+       !oot_graphics_display_peer_live(display))return 0;
+    *out=display->report;return 1;
+}
+void *oot_graphics_display_peer_monitor(const OotGraphicsDisplayPeer *display)
+{ return oot_graphics_display_peer_live(display)?display->monitor:NULL; }
+void oot_graphics_display_peer_close(OotGraphicsDisplayPeer *display)
+{
+    if(!display || display->thread!=GetCurrentThreadId() || --display->references)return;
+    oot_graphics_destroy(display->graphics);memset(display,0,sizeof(*display));free(display);
+}
+static void release_layer_window(OotGraphicsLayerPeer *layer)
+{
+    if(layer->surface)layer->destroy_surface(layer->display->graphics->instance,layer->surface,NULL);
+    if(layer->window)DestroyWindow(layer->window);
+    if(layer->window_class)UnregisterClassW((LPCWSTR)(ULONG_PTR)layer->window_class,layer->module);
+    layer->surface=VK_NULL_HANDLE;layer->window=NULL;layer->window_class=0;
+}
+OotGraphicsLayerPeer *oot_graphics_layer_peer_open(OotGraphicsDisplayPeer *display,uint32_t width,uint32_t height)
+{
+    OotGraphicsLayerPeer *layer=NULL;OotGraphics *g;
+    PFN_vkCreateWin32SurfaceKHR create_surface=NULL;PFN_vkGetPhysicalDeviceSurfaceSupportKHR support=NULL;
+    VkWin32SurfaceCreateInfoKHR ci={0};VkSurfaceKHR created=VK_NULL_HANDLE;VkBool32 supported=VK_FALSE;
+    /* Borderless client area: a monitor-sized game surface must not exceed
+     * Windows' decorated-window tracking limit and silently lose client rows. */
+    WNDCLASSEXW wc={0};wchar_t name[80];RECT rectangle={0},client={0};DWORD style=WS_POPUP;
+    DPI_AWARENESS_CONTEXT previous=NULL;int ok=0;
+    if(!oot_graphics_display_peer_live(display) || display->references==UINT32_MAX ||
+       !width || width>3840 || !height || height>2160)return NULL;
+    g=display->graphics;layer=calloc(1,sizeof(*layer));if(!layer)return NULL;layer->display=display;
+    if(!procedure(g,"vkCreateWin32SurfaceKHR",&create_surface,sizeof(create_surface)) ||
+       !procedure(g,"vkDestroySurfaceKHR",&layer->destroy_surface,sizeof(layer->destroy_surface)) ||
+       !procedure(g,"vkGetPhysicalDeviceSurfaceSupportKHR",&support,sizeof(support)))goto done;
+    layer->module=GetModuleHandleW(NULL);if(!layer->module)goto done;
+    if(swprintf(name,sizeof(name)/sizeof(*name),L"oot-pc-port-layer-%p",(void*)layer)<0)goto done;
+    previous=SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);if(!previous)goto done;
+    wc.cbSize=sizeof(wc);wc.lpfnWndProc=DefWindowProcW;wc.hInstance=layer->module;wc.lpszClassName=name;
+    layer->window_class=RegisterClassExW(&wc);if(!layer->window_class)goto done;
+    layer->window=CreateWindowExW(0,(LPCWSTR)(ULONG_PTR)layer->window_class,L"oot-pc-port",style,
+        display->info.rcMonitor.left,display->info.rcMonitor.top,(int)width,(int)height,
+        NULL,NULL,layer->module,NULL);
+    if(!layer->window)goto done;
+    layer->report.dpi=GetDpiForWindow(layer->window);if(!layer->report.dpi)goto done;
+    rectangle.right=(LONG)width;rectangle.bottom=(LONG)height;
+    if(!AdjustWindowRectExForDpi(&rectangle,style,FALSE,0,layer->report.dpi))goto done;
+    int64_t outer_width=(int64_t)rectangle.right-rectangle.left,outer_height=(int64_t)rectangle.bottom-rectangle.top;
+    if(outer_width<=0 || outer_height<=0 || outer_width>INT_MAX || outer_height>INT_MAX ||
+       !SetWindowPos(layer->window,NULL,display->info.rcMonitor.left,display->info.rcMonitor.top,
+        (int)outer_width,(int)outer_height,SWP_NOACTIVATE|SWP_NOZORDER) ||
+       !GetClientRect(layer->window,&client) || client.left || client.top ||
+       client.right!=(LONG)width || client.bottom!=(LONG)height ||
+       MonitorFromWindow(layer->window,MONITOR_DEFAULTTONULL)!=display->monitor)goto done;
+    ci.sType=VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR;ci.hinstance=layer->module;ci.hwnd=layer->window;
+    if(create_surface(g->instance,&ci,NULL,&created)!=VK_SUCCESS || !created)goto done;
+    layer->surface=created;
+    if(support(g->physical,g->report.queue_family,layer->surface,&supported)!=VK_SUCCESS || supported!=VK_TRUE)goto done;
+    ShowWindow(layer->window,SW_SHOWNOACTIVATE);
+    if(!IsWindowVisible(layer->window))goto done;
+    layer->report.width=width;layer->report.height=height;layer->report.refresh=display->report.refresh;
+    layer->report.visible=1;layer->report.presentation_supported=1;ok=1;
+done:
+    if(previous && !SetThreadDpiAwarenessContext(previous))ok=0;
+    if(!ok){release_layer_window(layer);free(layer);return NULL;}
+    ++display->references;return layer;
+}
+int oot_graphics_layer_peer_live(const OotGraphicsLayerPeer *layer)
+{
+    RECT client;DPI_AWARENESS_CONTEXT previous;int ok;
+    if(!layer || !oot_graphics_display_peer_live(layer->display) || !layer->surface || !layer->window_class ||
+       !IsWindow(layer->window) || !IsWindowVisible(layer->window))return 0;
+    previous=SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);if(!previous)return 0;
+    ok=GetClientRect(layer->window,&client) && !client.left && !client.top &&
+        client.right==(LONG)layer->report.width && client.bottom==(LONG)layer->report.height &&
+        GetDpiForWindow(layer->window)==layer->report.dpi &&
+        MonitorFromWindow(layer->window,MONITOR_DEFAULTTONULL)==layer->display->monitor;
+    if(!SetThreadDpiAwarenessContext(previous))ok=0;
+    return ok;
+}
+int oot_graphics_layer_peer_report(const OotGraphicsLayerPeer *layer,OotGraphicsPeerReport *out)
+{
+    if(!layer || !out || !disjoint(layer,sizeof(*layer),out,sizeof(*out)) || !oot_graphics_layer_peer_live(layer))return 0;
+    *out=layer->report;return 1;
+}
+void oot_graphics_layer_peer_close(OotGraphicsLayerPeer *layer)
+{
+    OotGraphicsDisplayPeer *display;
+    if(!layer || layer->display->thread!=GetCurrentThreadId())return;
+    display=layer->display;release_layer_window(layer);memset(layer,0,sizeof(*layer));free(layer);
+    oot_graphics_display_peer_close(display);
 }

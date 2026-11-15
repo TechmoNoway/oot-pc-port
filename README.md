@@ -6,12 +6,21 @@ An independent project exploring a native Windows x86-64 port of Ocarina of Time
 
 Early development. The Windows host builds and passes its native self-tests. The separate [experimental startup bootstrap](docs/startup-bootstrap.md) and [SDK runtime foundation](docs/sdk-runtime.md) compile selected original instructions into a private Windows executable, execute them only with explicit opt-in, and record precise stop diagnostics. The completed host-linked initialization profile reaches the original `nnMain` transition. A separate [application profile](docs/application-startup.md) continues into its original body, supplies coherent main-thread updates and mounts verified read-only game content. The game is not playable yet.
 
+The [default Display/Layer implementation](docs/display-objects.md) passes all
+56 validation stages, 742 Python tests without skips, eight CTest groups and
+283,401 common native/reference comparisons per compiler. Both full original
+replays open the source-constructed objects, own a real visible 1920x1080
+window/surface, and reach guarded `GetDisplayVsyncEvent` at 311,502 post-entry
+instructions with matching trace hashes. Physical probes on both compilers
+verify actual client dimensions and 16 VBlank waits/resets. Guest event
+publication and NVN rendering remain further work; this is not a game frame.
+
 The [verified build cache and checkpoint recovery](docs/build-cache.md) milestone
 passes 52/52 stages: 718 Python tests, seven CTest groups and 283,401 common
 native/reference comparisons per compiler. A real interrupted display replay
 resumes successfully through the supported CLI. Cross-profile display builds
 reuse 328/335 verified objects, while preserving fresh execution and the original
-full trace digest. Guest Display/Layer objects, rendering and input remain next.
+full trace digest. That checkpoint changes no guest Display/Layer behavior.
 
 The [Display object foundation](docs/display-object-foundation.md) adds original
 vtable/relocation/unwind provenance and a separate owned DXGI VBlank backend.

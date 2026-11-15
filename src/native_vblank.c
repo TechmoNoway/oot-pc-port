@@ -24,6 +24,9 @@ struct OotVblankSource {
 
 static int dxgi_open(void *opaque,HMONITOR monitor)
 {
+    /* Standard COM interface identity, kept local so the timing owner does not
+     * require an additional import library for a single GUID data symbol. */
+    static const IID factory_id={0x770aae78,0xf26f,0x4dba,{0xa8,0x29,0x25,0x3c,0x83,0xd1,0xb3,0x87}};
     DxgiBackend *state=opaque;IDXGIFactory1 *factory=NULL;
     HRESULT (WINAPI *create)(REFIID,void **)=NULL;FARPROC raw;
     state->module=LoadLibraryExW(L"dxgi.dll",NULL,LOAD_LIBRARY_SEARCH_SYSTEM32);
@@ -31,7 +34,7 @@ static int dxgi_open(void *opaque,HMONITOR monitor)
     raw=GetProcAddress(state->module,"CreateDXGIFactory1");
     _Static_assert(sizeof(raw)==sizeof(create),"Windows function pointer representation");
     memcpy(&create,&raw,sizeof(create));if(!create)return 0;
-    if(create(&IID_IDXGIFactory1,(void**)&factory)!=S_OK || !factory)return 0;
+    if(create(&factory_id,(void**)&factory)!=S_OK || !factory)return 0;
     for(UINT a=0;a<64 && !state->output;++a){
         IDXGIAdapter1 *adapter=NULL;
         if(IDXGIFactory1_EnumAdapters1(factory,a,&adapter)!=S_OK || !adapter)break;

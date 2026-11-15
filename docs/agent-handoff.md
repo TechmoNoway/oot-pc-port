@@ -2,6 +2,54 @@
 
 ## Active ordered implementation
 
+The default Display/Layer object implementation passed a fresh full run at
+`build/milestones/display-objects-v1/validation-v2/`, using the parent's
+`local-config.json` and native build. All 56 stages passed and verified, with
+742 Python tests without skips, eight CTest groups and 283401 common native/
+reference comparisons per compiler. It finished 2026-11-15 23:23:00 UTC. No full
+validation/controller process remains active. Its matching frozen source gate is
+`39d2d6a0a2acf170f2118aeb40ce8563a91f89e3ad6f01dafd92c0e4b73f88f1`.
+Any further fingerprinted source changes require a new full run. This is distinct
+from the earlier foundation below. See [display-objects.md](display-objects.md).
+Delivery commit, verified remote and subsequent CI state are kept in the parent's
+ignored `delivery.json`; no game input, trace or executable belongs in Git.
+
+The first `validation/` attempt is explicitly failed and preserved. GCC exposed
+the legacy display fixture including windows.h before declaring Win32 10 API
+availability; `tests/native_display_test.c` now declares that version first.
+The exact controller was verified and stopped, its output lock released and all
+owned test children gone before the source change. Focused legacy display,
+new peer and both object tests pass GCC after this fix. Do not resume or promote
+that failed attempt; v2 is a complete fresh run with no reused test outcomes.
+
+The separate flags510/context4096 profile binds five public object APIs, original
+static identities, all eight VI/VI2 tables (103 slots/85 targets), and real owned
+monitor/visible borderless window/Vulkan surface peers. Registry: 2833 entries,
+unchanged 4096 limit. It retains original constructors and checks five live vptrs.
+Both fresh full compiler replays pass OpenDefaultDisplay/CreateLayer and reach
+guarded GetDisplayVsyncEvent at 311502 post-entry instructions with 54 native
+calls, 1833199 retired instructions and 1833254 rows. Their matching digest is
+`245009909241218c8095aad733c646bab258491881bad62fb83eaea67fc8b4e7`.
+Both progress proofs restore the complete historical display prefix, observe
+four original constructor/vptr-materialization steps and retire both original
+caller continuations. The older display digest remains `e330868f9e2bbdff0c7bf2b88258ecac138974fd33c7303b8ca2147d1a98bc21`.
+Private pilots/research are under `build/research/display-objects-20261115/`.
+`physical-public-peers-v1/report.json` records both production public-API compiler
+probes: actual 1920x1080 visible presentation-supported window/surface, 16 real
+DXGI VBlank waits/resets each. The decorated-window candidate lost 19 client rows
+to Windows tracking limits; the reviewed borderless implementation fixes actual
+dimensions rather than relaxing checks. The full run independently repeats the
+same production physical probe in its verified `physical-display-peers/` stage.
+
+The compiled production declaration has event flags zero. Handler456 and its
+scoped kernel token services are not enabled by the source generator. Their
+native owner has synthetic sparse-publication/lifecycle tests only; complete
+source producer/OS consumer closure remains necessary before a guest event is
+published. The next dependency is SystemEvent, then the actually reached refresh/
+NVN subset. There is still no original rendered frame or usable game input.
+
+The following sections retain the historical foundation/integration evidence.
+
 The Display object foundation passed fresh full validation at
 `build/milestones/display-foundation-v1/validation/`, using its parent's
 `local-config.json` and native build: all 52 stages passed and verified, 730 Python

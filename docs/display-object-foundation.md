@@ -1,5 +1,10 @@
 # Display object foundation
 
+This document records the delivered foundation checkpoint. The subsequent
+[default object profile](display-objects.md) adds a separate guest integration;
+references below to unchanged registries/current guards describe that historical
+foundation, rather than the newer object candidate.
+
 The next guest Display/Layer profile requires both complete source provenance and
 owned host resources. This slice supplies the static provenance audit and the host
 vertical-blank owner. It does not enable a new guest profile or return Display,

@@ -1,5 +1,14 @@
 # Next native Display/Layer task plan
 
+Progress note, 2026-11-16: the [default object candidate](../../display-objects.md)
+now implements the five public open/create/getter/close APIs and real host peers;
+fresh full validation passes all 56 stages. The final LayerWithHistory and embedded recorder
+require the complete eight-table/103-slot/85-target closure, superseding the
+initial four-table subset below. SystemEvent producer/OS consumer integration
+remains a separate dependency before the refresh/NVN frontier. The original
+numbered plan remains the historical design record; it is not a completed-event
+or completed-rendering claim.
+
 This is future work. First finish/read the current 50-stage VI initialization result
 in [the handoff](../../agent-handoff.md). Preserve its frozen source and all earlier
 profiles. User authorization is independent implementation with Fritchii/Hookshot

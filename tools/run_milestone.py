@@ -330,6 +330,18 @@ def validate_display_config(config):
             'display initialization requires its observed unsupported object boundary')
 
 
+def validate_objects_config(config):
+    require(type(config.get('objects_experiment',False))is bool,'invalid objects milestone flag')
+    if config.get('name')=='display-objects':require(config.get('objects_experiment')is True,'object milestone requires execution')
+    if not config.get('objects_experiment'):return
+    require(config.get('display_experiment')is True and isinstance(config.get('objects_baseline'),str)and
+        bool(config['objects_baseline']),'objects must retain the preceding display lane/full baseline')
+    require(type(config.get('objects_min_post_entry'))is int and config['objects_min_post_entry']>config['display_min_post_entry'],
+        'objects require the measured later original continuation')
+    require(config.get('objects_expected_guard')=='_ZN2nn2vi20GetDisplayVsyncEventEPNS_2os15SystemEventTypeEPNS0_7DisplayE',
+        'objects require the observed unsupported event boundary')
+
+
 class MilestoneRun:
     def __init__(self, output, name, stages, binding=None, resume=False):
         from milestone_checkpoint import Evidence,RunOwner,identity
@@ -612,22 +624,25 @@ def run_graphics_lanes(run,config,env):
     return dict(graphics_experiments=experiments,graphics_progress=proofs)
 
 
-def run_display_lanes(run,config,env):
+def run_display_lanes(run,config,env,objects=False):
     """A separate VI profile over real graphics, retaining every preceding lane."""
     from build_startup import execute as execute_startup,validated_romfs_input
     from display_progress import verify_display_progress_trace
+    from display_objects_progress import verify_objects_progress_trace
     from startup_sources import cached_sources
     prepared=ROOT/config['prepared'];entropy=run.output/'process-entropy.bin'
-    seed=read_json(build_destination(ROOT/config['display_seed_report']));prior=seed['iterations'][-1]
+    label='objects'if objects else'display'
+    seed=read_json(run.output/'display-cmake/run.json'if objects else build_destination(ROOT/config['display_seed_report']));prior=seed['iterations'][-1]
     provenance=read_json(build_destination(Path(prior['bundle'])/'manifest.json'))
-    sdk_audit=read_json(run.output/'sdk-audit.json');audit=read_json(run.output/'display-audit.json')
+    sdk_audit=read_json(run.output/'sdk-audit.json');audit=read_json(run.output/(label+'-audit.json'))
     require(seed.get('display_runtime') is True and seed.get('application_runtime') is True and
             seed.get('host_linked') is True and provenance.get('display_runtime') is True and
             provenance['sdk_npdm']['source_sha256']==sdk_audit['npdm']['source_sha256'] and
             provenance['sdk_audit']['goal_entry']==sdk_audit['goal_entry'],'display seed input/profile differs')
-    old_root=build_destination(ROOT/config['display_baseline']);old_run=read_json(old_root/'run.json')
-    require(old_run.get('status')=='passed' and old_run.get('name')=='graphics-bootstrap' and
-            {'graphics-audit','graphics-experiment-cmake','graphics-experiment-gcc','summary'}<=set(old_run.get('stages',{})) and
+    old_root=build_destination(ROOT/config[label+'_baseline']);old_run=read_json(old_root/'run.json')
+    old_label='display'if objects else'graphics'
+    require(old_run.get('status')=='passed' and (objects or old_run.get('name')=='graphics-bootstrap')and
+            {old_label+'-audit',old_label+'-experiment-cmake',old_label+'-experiment-gcc','summary'}<=set(old_run.get('stages',{})) and
             all(s.get('status')=='passed' for s in old_run['stages'].values()),
             'display requires the passed full graphics baseline')
     baseline=read_json(ROOT/config['baseline_sdk_init'])
@@ -638,16 +653,18 @@ def run_display_lanes(run,config,env):
         'post_entry_retired','application_services','application_thread','application_resource','application_graphics',
         'application_display','graphics_runtime','display_runtime','romfs','native_handler_stop',
         'relative_relocation_probes','relative_relocations_matching_offline_link')
+    if objects:keys+=('objects_runtime','display_objects')
     experiments={};proofs={}
     for mode in ('cmake','gcc'):
-        folder=run.output/('display-'+mode);cache=folder/'native-cache'
+        folder=run.output/(label+'-'+mode);cache=folder/'native-cache'
         args=[sys.executable,'-B','tools/build_startup.py',prepared,'--output',folder,'--compiler',mode,
             '--sdk','--native-sdk','--sdk-init','--host-linked','--application','--graphics','--display','--fast-functions',
             '--execute','--entropy-file',entropy,'--native-cache',cache,'--romfs-index',romfs,
             '--expand-targets','64','--limit','1000000000','--quantum','10000']
         for pc in prior['additional_entries']:args+=['--extra-entry',str(pc)]
         for pc in prior['application_entries']:args+=['--app-entry',str(pc)]
-        run.command('display-experiment-'+mode,args,env)
+        if objects:args+=['--objects']
+        run.command(label+'-experiment-'+mode,args,env)
         result=read_json(folder/'run.json');last=result['iterations'][-1]
         bundle=read_json(Path(last['bundle'])/'manifest.json')
         require(result.get('display_runtime') is True and bundle.get('display_runtime') is True and
@@ -662,7 +679,7 @@ def run_display_lanes(run,config,env):
             last['executable_sha256']==hashlib.sha256(Path(last['executable']).read_bytes()).hexdigest(),
             'display executable/generated source/RomFS seal differs')
         e=application_evidence(result,bundle,baseline,config['sdk_init_required_stages'],
-            config['display_min_post_entry'],config['display_expected_guard'],romfs_input)
+            config[label+'_min_post_entry'],config[label+'_expected_guard'],romfs_input)
         display=e.get('application_display',{});graphics=e.get('application_graphics',{})
         require(e.get('display_runtime') is True and e.get('fast_function_calls',0)>0 and
             display.get('ready') is True and display.get('presentation_supported') is True and
@@ -674,19 +691,20 @@ def run_display_lanes(run,config,env):
         full=execute_startup(Path(last['executable']),full_dir,1000000000,10000,'full',entropy,False,romfs_index=romfs)
         (full_dir/'report.json').write_text(json.dumps(full,indent=2)+'\n',encoding='utf-8')
         require(all(e.get(k)==full.get(k) for k in keys),'display full/single-step and compact/accelerated execution differ')
-        old_folder=old_root/('graphics-'+mode);old=read_json(old_folder/'run.json')['iterations'][-1]
+        old_folder=old_root/(old_label+'-'+mode);old=read_json(old_folder/'run.json')['iterations'][-1]
         old_full=read_json(old_folder/'progress-full/report.json');old_trace=build_destination(Path(old_full['trace_file']))
         require(old_trace.is_relative_to(old_folder.resolve()) and old_full['trace_sha256']==old['execution']['trace_sha256'],
                 'display baseline is not its verified full graphics trace')
         old_bundle=read_json(build_destination(Path(old['bundle'])/'manifest.json'))
-        proof=verify_display_progress_trace(old_trace,old_full,old_bundle,Path(full['trace_file']),full,bundle)
-        (full_dir/'display-progress.json').write_text(json.dumps(proof,indent=2)+'\n',encoding='utf-8')
+        verify=verify_objects_progress_trace if objects else verify_display_progress_trace
+        proof=verify(old_trace,old_full,old_bundle,Path(full['trace_file']),full,bundle)
+        (full_dir/(label+'-progress.json')).write_text(json.dumps(proof,indent=2)+'\n',encoding='utf-8')
         run.publish_proof(folder,'progress-full',full_dir)
         experiments[mode]=e;proofs[mode]=proof
     require(all(experiments['cmake'].get(k)==experiments['gcc'].get(k) for k in keys),
             'native compilers reached different display prefixes or owned state')
-    run.mark_verified(['display-experiment-'+m for m in ('cmake','gcc')])
-    return dict(display_experiments=experiments,display_progress=proofs)
+    run.mark_verified([label+'-experiment-'+m for m in ('cmake','gcc')])
+    return {label+'_experiments':experiments,label+'_progress':proofs}
 
 
 def execute(config, output, native_only=False, resume=False):
@@ -709,6 +727,7 @@ def execute(config, output, native_only=False, resume=False):
     validate_resource_progress_config(config)
     validate_graphics_config(config)
     validate_display_config(config)
+    validate_objects_config(config)
     if config.get('application_experiment'):
         require(config.get('sdk_init_experiment') is True and config.get('sdk_init_host_linked') is True and
             config.get('sdk_init_fast_functions') is True,'application milestone requires the complete preceding host initialization lane')
@@ -790,6 +809,10 @@ def execute(config, output, native_only=False, resume=False):
     if not native_only and config.get('display_experiment'):
         stages.insert(stages.index('comparison'),'display-audit')
         for mode in ('cmake','gcc'):stages.insert(stages.index('summary'),'display-experiment-'+mode)
+    if not native_only and config.get('objects_experiment'):
+        stages.insert(stages.index('comparison'),'objects-audit')
+        stages.insert(stages.index('comparison'),'objects-host-peers')
+        for mode in ('cmake','gcc'):stages.insert(stages.index('summary'),'objects-experiment-'+mode)
     from milestone_checkpoint import execution_binding
     binding=execution_binding(ROOT,config,native_only)
     run = MilestoneRun(output, config["name"], stages,binding=binding,resume=resume)
@@ -813,7 +836,7 @@ def execute(config, output, native_only=False, resume=False):
                 exe=run.output/'sdk-context-test.exe'
                 run.command('gcc-sdk-context-build',[gcc,'-std=c17','-O2','-Wall','-Wextra','-Wpedantic','-Werror',
                     '-D_CRT_SECURE_NO_WARNINGS','-D_WIN32_WINNT=0x0A00','-I',ROOT/'src',ROOT/'tests/startup_context_test.c',
-                    *[ROOT/'src'/(name+'.c') for name in ('startup_context','runtime_image','guest_memory','host_win32','sdk_native','native_platform','native_services','native_math','startup_vector','startup_float','startup_init_atomic','application_services','native_romfs','native_graphics')],
+                    *[ROOT/'src'/(name+'.c') for name in ('startup_context','runtime_image','guest_memory','host_win32','sdk_native','native_platform','native_services','native_math','startup_vector','startup_float','startup_init_atomic','application_services','native_romfs','native_graphics','native_objects','native_vblank')],
                     '-I',ROOT/'third_party/vulkan/include','-lbcrypt','-o',exe],e)
                 run.command('gcc-sdk-context-test',[exe,run.output/'sdk-context-test.ootmem'],e)
         with ThreadPoolExecutor(max_workers=2) as pool:
@@ -867,6 +890,32 @@ def execute(config, output, native_only=False, resume=False):
                     report=extend_display_audit(linker,original)
                     (run.output/'display-audit.json').write_text(json.dumps(report,indent=2)+'\n',encoding='utf-8')
                 run.action('display-audit',display_source_audit)
+            if config.get('objects_experiment'):
+                def objects_source_audit():
+                    from application_audit import audit_application
+                    from graphics_audit import extend_graphics_audit
+                    from display_audit import extend_display_audit
+                    from display_objects_audit import extend_objects_audit
+                    from module_linker import Linker
+                    from link_exefs import load_prepared
+                    original_modules=load_prepared(prepared)
+                    pristine=deepcopy(next(m for m in original_modules if m.name=='sdk'))
+                    linker=Linker(original_modules);require(linker.apply()['link_complete'],'objects offline link incomplete')
+                    original=extend_display_audit(linker,extend_graphics_audit(linker,audit_application(linker)))
+                    require(original==read_json(run.output/'display-audit.json'),'objects preceding display audit changed')
+                    report=extend_objects_audit(linker,original,pristine)
+                    (run.output/'objects-audit.json').write_text(json.dumps(report,indent=2)+'\n',encoding='utf-8')
+                run.action('objects-audit',objects_source_audit)
+                run.command('objects-host-peers',[sys.executable,'-B','tools/validate_display_peers.py',
+                    '--output',run.output/'physical-display-peers'],env)
+                physical=read_json(run.output/'physical-display-peers/report.json')
+                require(physical.get('format')=='oot-physical-display-peers'and
+                    set(physical.get('compilers',{}))=={'cmake','gcc'},'physical peer compiler evidence missing')
+                for mode,p in physical['compilers'].items():
+                    require(p.get('executable_sha256')==hashlib.sha256((run.output/'physical-display-peers'/mode/'probe.exe').read_bytes()).hexdigest()and
+                        p.get('observation',{}).get('successful_waits_and_resets')==16 and
+                        p['observation'].get('guest_code_executed')is False,'physical peer executable/observation differs')
+                run.mark_verified(['objects-host-peers'])
             def compare():
                 comparisons = {scope: compare_profiles(read_json(ROOT/config["baseline_"+scope]), read_json(run.output/(scope+".json"))) for scope in ("default", "plt")}
                 audit = read_json(run.output/"callees.json"); compare_baseline(audit, read_json(run.output/"plt.json"))
@@ -1178,6 +1227,7 @@ def execute(config, output, native_only=False, resume=False):
                 summary['application_experiments']=app_experiments
             if config.get('graphics_experiment'):summary.update(run_graphics_lanes(run,config,env))
             if config.get('display_experiment'):summary.update(run_display_lanes(run,config,env))
+            if config.get('objects_experiment'):summary.update(run_display_lanes(run,config,env,True))
         def publish_summary():
             (run.output/"summary.json").write_text(json.dumps(summary, indent=2)+"\n", encoding="utf-8")
             lines = ["# Milestone validation", "", f"Milestone: {config['name']}", "", f"Python tests: {summary['python_tests']}; CTest groups: {summary['ctest_groups']}; native comparisons per compiler: {summary['native_trials_per_compiler']}."]
@@ -1201,6 +1251,12 @@ def execute(config, output, native_only=False, resume=False):
                 startup_scope+=(' The separate VI profile owns a real hidden Win32 window and presentation-supported Vulkan surface, '
                     f"resumes its original caller and reaches the guarded Display-object API after {display['post_entry_retired']} post-entry instructions. "
                     'Whole-parent replacement elides original instructions; full-prefix/return proof establishes progress. No game frame/input is established.')
+            if 'objects_experiments' in summary:
+                objects=summary['objects_experiments']['cmake']
+                startup_scope+=(' The separate object profile opens the source-constructed default Display and Layer, '
+                    'owns a real visible borderless window and presentation-supported surface, and resumes both original callers. '
+                    f"It reaches the guarded SystemEvent API after {objects['post_entry_retired']} post-entry instructions. "
+                    'No guest event, NVN rendering, game frame or usable input is established.')
             lines += ["", (("Native regression execution is synthetic. Separate opt-in startup experiments execute selected original instructions under an experimental process model. "+startup_scope)
                 if 'startup_experiments' in summary else "All executed code is synthetic.")+" Static game analysis grants no runtime capabilities. See run.json for final status and per-stage logs."]
             if 'memory_callee_profiles' in summary:

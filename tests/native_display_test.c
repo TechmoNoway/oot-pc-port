@@ -1,4 +1,5 @@
 /* Independent synthetic Win32/surface dispatch; no window or GPU is created. */
+#define _WIN32_WINNT 0x0A00
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #define VK_NO_PROTOTYPES
