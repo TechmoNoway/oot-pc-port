@@ -2,6 +2,45 @@
 
 ## Active ordered implementation
 
+The Display object foundation passed fresh full validation at
+`build/milestones/display-foundation-v1/validation/`, using its parent's
+`local-config.json` and native build: all 52 stages passed and verified, 730 Python
+tests without skips, eight CTest groups and 283,401 common native/reference
+comparisons per compiler. Its frozen source is
+`4a9596fac27df51d47bcd60de19cd88d63a01c32e506631d64692d54c982ad59`.
+It finished 2026-11-15 17:26:26 UTC without interruption. Both fresh full display
+digests are unchanged at
+`e330868f9e2bbdff0c7bf2b88258ecac138974fd33c7303b8ca2147d1a98bc21`.
+No full validation process remains active. The new implementation files include `unwind_provenance.py`,
+`vtable_provenance.py`, `native_vblank.c/h`, their synthetic tests and the separate
+CMake host timing library/test. They enable no guest capability. See
+[display-object-foundation.md](display-object-foundation.md). The production static
+audit proves all four original tables/53 slots/46 targets. The production host
+fixture passes focused MSVC/GCC synthetic tests and separate physical 16-edge
+wait/reset probes on both compilers; hardware logs are in
+`build/research/display-objects-20261115/production-vblank-v1/`. A second probe
+links `src/native_vblank.c` as its own translation unit, consumes only its public
+header/API and passes the same physical 16-edge checks on both compilers; see
+`production-vblank-linked-v1/` in that research directory.
+The ignored `inspect_event_producer_chain.py` now traces both wrappers through
+the actual default callback constructor to the original OS readable-handle
+attachment. `event-default-producer-chain.json` retains full source/extent/slot
+observations; this is source research, not a production ABI proof or callback
+execution authority. Complete control-flow/argument/ownership and consumer proofs
+are still required before any guest SystemEvent publication. Current startup flags,
+handler registries, original selections and old full-prefix requirements remain
+unchanged. This foundation is not completion of the full Display/Layer milestone.
+`default-display-materializations.json` identifies the private original SDK
+constructor and its source-bound static receiver. The rehashed historical full
+trace confirms that constructor entry and both original vptr-store steps; see
+`default-display-prefix-observations.json`. This supports retaining original
+construction; verify source/relocation roles and live guest vptrs at binding too.
+The static consumer merge survey finds 2,762 current bindings, 11 matching existing
+guard entries and 35 additional private targets, without overlapping original
+function extents. This fits the existing 4,096-entry limit. See
+`consumer-merge-survey.json` and `runtime-integration-next.md` in the ignored
+research directory for the concrete next profile; these do not register handlers.
+
 The user authorized implementing the reference-review recommendations in order:
 shared verified objects/checkpoint recovery, Display/Layer and the reached NVN
 subset, then shader/rendering work. The first milestone has passed every gate.
@@ -15,9 +54,13 @@ Both full display digests remain
 `e330868f9e2bbdff0c7bf2b88258ecac138974fd33c7303b8ca2147d1a98bc21`.
 The run finished 2026-11-15 15:43:20 UTC, including a controlled interruption and
 normal supported recovery. No validation/observer process should remain active.
-No guest runtime capability changed. Review/commit/push this infrastructure
-milestone on dev, then start the separately authorized Display/Layer milestone.
-Further fingerprinted source changes require a fresh full run for that milestone.
+No guest runtime capability changed. Commit
+`09e8d4fa67493a5296b60e1feb90b15465b19d05` is verified on origin/dev. Its
+GitHub Checks run `43731739688` completed successfully (verified through the public
+GitHub API during the foundation slice).
+The separately authorized Display/Layer milestone remains active. The foundation
+pass validates its source/host dependencies, while guest object/event integration
+and the reached NVN subset still need their own complete capability milestone.
 
 The supported schema-2 checkpoint includes input/toolchain content identities,
 owned artifact seals, native build binaries/rules, command/environment identity,

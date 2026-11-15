@@ -13,6 +13,14 @@ resumes successfully through the supported CLI. Cross-profile display builds
 reuse 328/335 verified objects, while preserving fresh execution and the original
 full trace digest. Guest Display/Layer objects, rendering and input remain next.
 
+The [Display object foundation](docs/display-object-foundation.md) adds original
+vtable/relocation/unwind provenance and a separate owned DXGI VBlank backend.
+The source audit proves 53 slots across four tables and 46 distinct targets;
+both native compilers pass synthetic lifecycle tests and separate physical
+16-edge wait/reset probes. Its fresh regression passes 52/52 stages, 730 Python
+tests without skips and eight CTest groups, retaining both original full display
+digests. Guest object/event bindings remain in progress.
+
 The preceding [application SIMD profile](docs/application-startup.md) passes the former scalar-SIMD conversion frontier and runs 311,527 original instructions after entry in matching MSVC/GCC pilots. Six application-only register SIMD families have independent full-state ARM checks. The profile queries its explicit `en-US` preference and mounts a hash-bound read-only RomFS containing 186,587 files and 598 directories. The original game opens, reads and closes four real files (3,427 bytes). That checkpoint stopped at byte acquire compare-and-swap `CASAB`.
 
 The fresh `build/milestones/application-simd-v1/` run passes all 42 stages: 641 Python tests without skips, seven CTest groups and 283,401 common native/reference comparisons per compiler. Both application lanes retain the earlier initialization/content state, reach the exact CASAB boundary and prove the old UCVTF frontier in full single-step traces. That validated implementation/configuration fingerprint matches the passed run; rendering and gameplay are still incomplete.
