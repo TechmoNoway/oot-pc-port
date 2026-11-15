@@ -32,6 +32,13 @@ targets, aliases, relocations and pre-frontier execution before adding guards.
 
 ## Ordered implementation tasks
 
+The [2026-11-15 reference review](../../reference-review-2026-11-15.md) identifies
+shared verified object caching and supported checkpoint recovery as development
+throughput work. Existing incremental builds remain useful; measure cross-profile
+reuse without caching test outcomes. Keep the Display/Layer ownership and source
+proofs below unchanged. Reference stand-ins, permissive NVN fallbacks and reserved
+upstream additions are not implementation authority for this project.
+
 1. Verify the current checkout, live/full validation, delivered SHA and private
    prepared-input identities. Read the actual native guard/caller and current
    source audit; do not assume an older note is still the frontier.

@@ -1,8 +1,10 @@
 # Agent handoff
 
-The current user request is to integrate the teammate source and reduce duplicate
-storage. That integration fast-forwards dev from f8a7162 to 66a6549; no implementation
-conflicts were present. The overall game goal remains incomplete: no original
+The latest task reviewed Hookshot, NX2navi and Fritchii for development throughput
+and runtime lessons; see [the pinned reference review](reference-review-2026-11-15.md).
+It changes documentation only. The earlier source/storage integration fast-forwards
+dev from f8a7162 to 66a6549; no implementation conflicts were present.
+The overall game goal remains incomplete: no original
 rendered frame or usable input has been established. Do not start the next runtime
 feature without its own capability milestone. The local integration validation
 has passed all 50 stages with the current source gate matching.
@@ -126,6 +128,11 @@ The post-validation pass shared 2,561 byte-identical sealed artifacts and remove
 
 ## Next runtime milestone, after integration
 
+The reference review recommends a measured shared-object-cache/checkpoint milestone
+to reduce repeated compilation before further runtime work. Existing incremental
+builds already work inside one cache; the observed waste is across separate caches.
+Do not cache passed test outcomes or adopt reference zero-return fallbacks. The
+Display/Layer source, ownership and lifetime requirements below remain unchanged.
 
 Use the [display plan](superpowers/plans/2026-11-13-display-initialization.md) and
 [next object plan](superpowers/plans/2026-11-13-display-objects-next.md). The actual
