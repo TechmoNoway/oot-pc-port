@@ -21,6 +21,7 @@ XPACLRI=0xd50320ff
 
 def sdk_init_atomic_kind(word,application=False):
     if type(word) is not int or not 0<=word<=0xffffffff:return None
+    if application and word&0x3ffffc00==0x08dffc00:return 'ldar'
     if application and word&0xbfa07c00==0x08a07c00:return 'compare_exchange_narrow'
     if word&0xbfe0fc00==0xb8200000:return 'ldadd'
     if word&0xbfe0fc00==0xb8e00000:return 'ldaddal'
@@ -89,9 +90,9 @@ def decode_sdk_init_instruction(word,pc,application=False):
             return Instruction(pc,word,'sdk_atomic',width=32,access_size=1<<(word>>30),
                 rd=word>>16&31,rn=word>>5&31,rm=word&31,operation=(word>>15&1)|(word>>21&2))
         width=(8<<(word>>30)) if atomic=='stlr' else (64 if word>>30==3 else 32)
-        return Instruction(pc,word,'sdk_init_atomic',width=width,access_size=width//8,
+        return Instruction(pc,word,'sdk_init_atomic',width=width,access_size=(1<<(word>>30))if atomic=='ldar'else width//8,
             rd=word&31,rn=word>>5&31,rm=word>>16&31,
-            operation=('ldadd','ldaddal','stlr','ldset','ldclr','ldadda','ldaddl').index(atomic))
+            operation=('ldadd','ldaddal','stlr','ldset','ldclr','ldadda','ldaddl','ldar').index(atomic))
     if sdk_init_pointer_kind(word):return Instruction(pc,word,'sdk_pointer',width=64,rd=30)
     vector=sdk_init_vector_kind(word,application)
     if vector=='fp_integer':

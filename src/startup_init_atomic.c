@@ -16,6 +16,7 @@ int oot_startup_init_atomic_kind(uint32_t word)
 int oot_startup_application_atomic_kind(uint32_t word)
 {
     uint32_t add=word&UINT32_C(0xbfe0fc00);
+    if((word&UINT32_C(0x3ffffc00))==UINT32_C(0x08dffc00))return OOT_STARTUP_APP_LDAR;
     if((word&UINT32_C(0xbfa07c00))==UINT32_C(0x08a07c00))return OOT_STARTUP_APP_CAS_NARROW;
     return add==UINT32_C(0xb8a00000) ? OOT_STARTUP_APP_LDADDA:
         add==UINT32_C(0xb8600000) ? OOT_STARTUP_APP_LDADDL:0;
@@ -31,17 +32,24 @@ static int atomic_step(uint32_t word, OotArm64State *registers,
     if (!registers || !memory || memory->valid!=1 || registers->pc%4 ||
         registers->pc>=INIT_ATOMIC_ADDRESS_LIMIT-4 || registers->sp%16 ||
         (registers->nzcv & UINT32_C(0x0fffffff))) return 2;
-    size=(kind==OOT_STARTUP_INIT_STLR || kind==OOT_STARTUP_APP_CAS_NARROW) ?
+    size=(kind==OOT_STARTUP_INIT_STLR || kind==OOT_STARTUP_APP_CAS_NARROW || kind==OOT_STARTUP_APP_LDAR) ?
         1u<<(word>>30) : (word & UINT32_C(0x40000000)) ? 8u:4u;
     address=rn==31 ? registers->sp:registers->x[rn];
     if (address>=INIT_ATOMIC_ADDRESS_LIMIT || size>INIT_ATOMIC_ADDRESS_LIMIT-address) {
         memory->fault=(OotMemoryFault){address,address,size,
-            kind==OOT_STARTUP_INIT_STLR ? OOT_MEMORY_WRITE:OOT_MEMORY_READ | OOT_MEMORY_WRITE,
+            kind==OOT_STARTUP_INIT_STLR ? OOT_MEMORY_WRITE:kind==OOT_STARTUP_APP_LDAR ? OOT_MEMORY_READ:OOT_MEMORY_READ | OOT_MEMORY_WRITE,
             OOT_MEMORY_ADDRESS_WRAP};
         return 2;
     }
     output=*registers;output.pc+=4;
-    if(kind==OOT_STARTUP_APP_CAS_NARROW){
+    if(kind==OOT_STARTUP_APP_LDAR){
+        /* All Normal-memory accesses share the serialized backend lock. This
+         * deliberately stronger ordering implements acquire loads without
+         * claiming exhaustive Arm weak-memory outcomes. ZR still performs
+         * the real read and its alignment/permission checks. */
+        if(!oot_memory_load_rcpc(memory,address,size,rn==31,&old))return 2;
+        oot_arm64_write(&output,rt,size==8 ? 64:32,0,old);
+    } else if(kind==OOT_STARTUP_APP_CAS_NARROW){
         uint64_t expected=rs==31 ? 0:registers->x[rs];
         uint64_t desired=rt==31 ? 0:registers->x[rt];
         if(!oot_memory_compare_exchange_narrow(memory,address,size,rn==31,expected,desired,&old))return 2;

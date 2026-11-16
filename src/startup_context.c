@@ -347,6 +347,12 @@ int oot_startup_context_bind_objects(OotStartupContext *c,const OotObjectDeclara
 }
 int oot_startup_context_objects_report(const OotStartupContext *c,OotObjectsReport *out)
 { return oot_startup_context_objects_enabled(c) && oot_objects_snapshot(c->objects,out); }
+int oot_startup_context_bind_nvn(OotStartupContext *c,const OotNvnDeclaration *d)
+{ return oot_startup_context_objects_enabled(c) && c->references==1 && !c->native.calls && oot_objects_bind_nvn(c->objects,d); }
+int oot_startup_context_nvn_report(const OotStartupContext *c,OotNvnReport *out)
+{ return oot_startup_context_objects_enabled(c) && oot_objects_nvn_snapshot(c->objects,out); }
+int oot_startup_context_refresh_report(const OotStartupContext *c,OotRefreshReport *out)
+{ return oot_startup_context_objects_enabled(c) && oot_objects_refresh_snapshot(c->objects,out); }
 const OotApplicationServices *oot_startup_context_application_services(const OotStartupContext *c)
 { return oot_startup_context_application_enabled(c) ? &c->application:NULL; }
 uint64_t oot_startup_context_application_resource_queries(const OotStartupContext *c)

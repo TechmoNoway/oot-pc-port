@@ -93,7 +93,7 @@ def selection(linker, max_instructions=8192, extra_entries=(), sdk=False, native
     return audit, [nodes[p] for p in sorted(nodes)]
 
 
-def emit_startup(linker, nodes, package_manifest, config=None, relocation_probes=(), sdk_config=None, sdk_goal=None, native_functions=(), original_oe_entry=0, sdk_init=False, units=None, entry_override=None, host_linked=False, host_constructors=(), application=False,graphics=False,display=False,objects=False,object_declaration=None):
+def emit_startup(linker, nodes, package_manifest, config=None, relocation_probes=(), sdk_config=None, sdk_goal=None, native_functions=(), original_oe_entry=0, sdk_init=False, units=None, entry_override=None, host_linked=False, host_constructors=(), application=False,graphics=False,display=False,objects=False,object_declaration=None,nvn_declaration=None):
     require(type(objects)is bool and(not objects or display),'object emission requires the separate display profile')
     require(type(display) is bool and (not display or graphics),'display emission requires the separate graphics profile')
     require(type(graphics) is bool and (not graphics or application),'graphics emission requires the separate application profile')
@@ -246,6 +246,15 @@ def emit_startup(linker, nodes, package_manifest, config=None, relocation_probes
             lines+=['{'+','.join(constant(c[k]) for k in ('entry','body_entry','return_pc'))+','+str(c['size'])+', {'+','.join('0x'+c['body_sha256'][i:i+2] for i in range(0,64,2))+'}},']
         lines+=['};',f'const OotStartupConstructor *oot_startup_compiled_constructors(size_t *n){{*n={len(host_constructors)};return oot_host_constructors;}}']
     else:lines+=['const OotStartupConstructor *oot_startup_compiled_constructors(size_t *n){*n=0;return NULL;}']
+    if nvn_declaration is not None:
+        require(objects and object_declaration['flags']==7,'NVN emission requires audited object chain')
+        procs=nvn_declaration['procedures'];lines+=['static const OotNvnProc oot_nvn_procedures[]={']
+        for p in procs:lines+=['{'+json.dumps(p['name'])+','+constant(p['entry'])+'},']
+        digest='{'+','.join('0x'+nvn_declaration['table_sha256'][n:n+2]for n in range(0,64,2))+'}'
+        lines+=['};','static const OotNvnDeclaration oot_nvn_declaration={1,'+str(len(procs))+','+
+            constant(nvn_declaration['table'])+','+digest+',oot_nvn_procedures};',
+            'const OotNvnDeclaration *oot_startup_compiled_nvn(void){return &oot_nvn_declaration;}']
+    else:lines+=['const OotNvnDeclaration *oot_startup_compiled_nvn(void){return NULL;}']
     if sdk_init and units is not None:
         from startup_fast import emit_fast
         fast_lines,fast_count=emit_fast(linker,rows,units,sdk_goal,native_functions)
@@ -556,7 +565,9 @@ def extend_application_selection(linker,merged,application_entry,application_ent
     return merged,evidence
 
 
-def prepare_bundle(linker, output, max_instructions=8192, extra_entries=(), config=None, stack_size=STACK_SIZE, shared_package=None, sdk_metadata=None, native_sdk=False, sdk_init=False, host_linked=False,decode_cache=None,application=False,application_entries=(),graphics=False,display=False,objects=False,events=False):
+def prepare_bundle(linker, output, max_instructions=8192, extra_entries=(), config=None, stack_size=STACK_SIZE, shared_package=None, sdk_metadata=None, native_sdk=False, sdk_init=False, host_linked=False,decode_cache=None,application=False,application_entries=(),graphics=False,display=False,objects=False,events=False,refresh=False,nvn=False):
+    require(type(nvn)is bool and(not nvn or refresh),'NVN requires separate refresh mode')
+    require(type(refresh)is bool and(not refresh or events),'refresh requires separate event mode')
     require(type(events)is bool and(not events or objects),'events require separate object mode')
     require(type(objects)is bool and(not objects or display),'objects require separate display mode')
     require(type(display) is bool and (not display or graphics),'display requires separate graphics mode')
@@ -604,6 +615,12 @@ def prepare_bundle(linker, output, max_instructions=8192, extra_entries=(), conf
                             if events:
                                 from system_event_audit import extend_system_events_audit
                                 native_audit=extend_system_events_audit(verified,native_audit,pristine)
+                                if refresh:
+                                    from display_refresh_audit import extend_refresh_audit
+                                    native_audit=extend_refresh_audit(verified,native_audit,pristine)
+                                    if nvn:
+                                        from nvn_audit import extend_nvn_audit
+                                        native_audit=extend_nvn_audit(verified,native_audit,pristine)
             else:
                 from sdk_init_audit import audit_sdk_init
                 native_audit=audit_sdk_init(verified)
@@ -611,6 +628,10 @@ def prepare_bundle(linker, output, max_instructions=8192, extra_entries=(), conf
             from native_sdk_audit import audit_native_sdk
             native_audit=audit_native_sdk(verified)
         native_functions=native_audit['functions']
+        if nvn:
+            retained=set(native_audit['nvn']['retained_original'])
+            extra_entries=tuple(dict.fromkeys((*extra_entries,
+                *(p['entry']for p in native_audit['nvn']['procedures']if p['name']in retained))))
         if events:
             # Source-bound selection hints, not skipped calls or execution proof.
             extra_entries=tuple(dict.fromkeys((*extra_entries,
@@ -709,7 +730,8 @@ def prepare_bundle(linker, output, max_instructions=8192, extra_entries=(), conf
             main_thread_id=1,main_thread_priority=sdk_metadata['main_thread_priority'],main_thread_core=sdk_metadata['main_thread_core'])
     units={} if sdk_init else None
     object_declaration=native_audit['display_objects']['declaration']if objects else None
-    source,summary=emit_startup(emitter,nodes,manifest,config,probes,sdk_config,sdk_goal,native_functions,original_oe_entry,sdk_init,units,entry_override,host_linked,boot['module_order'] if boot else (),application,graphics,display,objects,object_declaration)
+    source,summary=emit_startup(emitter,nodes,manifest,config,probes,sdk_config,sdk_goal,native_functions,original_oe_entry,sdk_init,units,entry_override,host_linked,boot['module_order'] if boot else (),application,graphics,display,objects,object_declaration,
+        native_audit['nvn']if nvn else None)
     summary['sdk_init_providers']=sdk_init
     summary['relative_relocation_probes']=len(probes)
     summary['linked_plt_lookahead_targets']=len(lookahead)
@@ -744,6 +766,8 @@ def prepare_bundle(linker, output, max_instructions=8192, extra_entries=(), conf
         if display:report['display_runtime']=True;summary['display_runtime']=True
         if objects:report['objects_runtime']=True;summary['objects_runtime']=True
         if events:report['events_runtime']=True;summary['events_runtime']=True
+        if refresh:report['refresh_runtime']=True;summary['refresh_runtime']=True
+        if nvn:report['nvn_runtime']=True;summary['nvn_runtime']=True
         report['application_selection']=application_selection
         report['application_pointer_selection']=application_pointers
         report['application_simd_sites'],report['application_svc_sites']=application_sites(emitter.modules,nodes)

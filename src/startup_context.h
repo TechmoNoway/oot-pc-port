@@ -37,7 +37,10 @@ OOT_MEMORY_API int oot_startup_context_display_enabled(const OotStartupContext *
 OOT_MEMORY_API int oot_startup_context_display_report(const OotStartupContext *context,OotDisplayReport *report);
 OOT_MEMORY_API int oot_startup_context_objects_enabled(const OotStartupContext *context);
 OOT_MEMORY_API int oot_startup_context_bind_objects(OotStartupContext *context,const OotObjectDeclaration *declaration);
+OOT_MEMORY_API int oot_startup_context_bind_nvn(OotStartupContext *context,const OotNvnDeclaration *declaration);
+OOT_MEMORY_API int oot_startup_context_nvn_report(const OotStartupContext *context,OotNvnReport *report);
 OOT_MEMORY_API int oot_startup_context_objects_report(const OotStartupContext *context,OotObjectsReport *report);
+OOT_MEMORY_API int oot_startup_context_refresh_report(const OotStartupContext *context,OotRefreshReport *report);
 OOT_MEMORY_API int oot_startup_context_application_enabled(const OotStartupContext *context);
 OOT_MEMORY_API const OotApplicationServices *oot_startup_context_application_services(const OotStartupContext *context);
 OOT_MEMORY_API uint64_t oot_startup_context_application_resource_queries(const OotStartupContext *context);

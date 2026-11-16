@@ -727,6 +727,13 @@ int oot_startup_dispatch_run(OotStartupDispatcher *d, OotArm64State *s, uint64_t
                     return stop(d,out,sink,user,OOT_STARTUP_MEMORY_FAULT,i->word,0,source_pc,0);
                 oot_arm64_write(&expected,i->word&31,size*8,0,value);
             }
+            else if (init_atomic==OOT_STARTUP_APP_LDAR) {
+                unsigned rn=(i->word>>5)&31,size=1u<<(i->word>>30);
+                uint64_t address=oot_arm64_read(&working,rn,64,1);
+                if(!oot_memory_load(memory,address,size,&value))
+                    return stop(d,out,sink,user,OOT_STARTUP_MEMORY_FAULT,i->word,0,source_pc,0);
+                oot_arm64_write(&expected,rd,size==8 ? 64:32,0,value);
+            }
             else if (init_atomic==OOT_STARTUP_INIT_STLR) { /* No GPR result. */ }
             else if (i->word==UINT32_C(0xd50320ff)) {
                 uint64_t mask=UINT64_C(0x0000007fffffffff);

@@ -1,0 +1,57 @@
+{
+  "schema": 1,
+  "repository": "https://github.com/KhronosGroup/SPIRV-Headers",
+  "commit": "5c6004e758e0c80185ef2cee93ae5c10fa342a5b",
+  "files": [
+    {
+      "path": "include/spirv/unified1/AMD_gcn_shader.h",
+      "git_sha1": "2c42abf953586a54cd4a81dbd6ab833445d3d8c6",
+      "bytes": 832
+    },
+    {
+      "path": "include/spirv/unified1/AMD_shader_trinary_minmax.h",
+      "git_sha1": "f7acf71ca15ba13498c5d2cb49fc5511fedefd1d",
+      "bytes": 1185
+    },
+    {
+      "path": "include/spirv/unified1/AMD_shader_explicit_vertex_parameter.h",
+      "git_sha1": "2e3e5730bc9cf563c6620cd9e8bcc9735698a957",
+      "bytes": 943
+    },
+    {
+      "path": "include/spirv/unified1/GLSL.std.450.h",
+      "git_sha1": "fb8c01ec1210eff7d7d18d0f53ff7da56e1a8b2b",
+      "bytes": 3087
+    },
+    {
+      "path": "include/spirv/unified1/NonSemanticDebugPrintf.h",
+      "git_sha1": "7a62f052451d8b6c471be7ec266d6977d4f02b48",
+      "bytes": 820
+    },
+    {
+      "path": "LICENSE",
+      "git_sha1": "a63e9c620ee123267192113ab0be3814782ba909",
+      "bytes": 23503
+    },
+    {
+      "path": "LICENSES/CC-BY-4.0.txt",
+      "git_sha1": "4ea99c213c5c0c005ae4e80df8e52169d06896ec",
+      "bytes": 18656
+    },
+    {
+      "path": "LICENSES/MIT.txt",
+      "git_sha1": "fc2cf8e6b667b752cf62d1306521071db34c0a63",
+      "bytes": 1087
+    },
+    {
+      "path": "include/spirv/unified1/spirv.hpp",
+      "git_sha1": "f4c74c06a5894d691d9a50a7346b11dbf0c33c26",
+      "bytes": 319492
+    },
+    {
+      "path": "include/spirv/unified1/spirv.hpp11",
+      "git_sha1": "6132c36e7ac198ee87567033f66aef93ae48da9b",
+      "bytes": 310056
+    }
+  ]
+}

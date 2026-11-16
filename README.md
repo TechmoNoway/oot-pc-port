@@ -6,6 +6,16 @@ An independent project exploring a native Windows x86-64 port of Ocarina of Time
 
 Early development. The Windows host builds and passes its native self-tests. The separate [experimental startup bootstrap](docs/startup-bootstrap.md) and [SDK runtime foundation](docs/sdk-runtime.md) compile selected original instructions into a private Windows executable, execute them only with explicit opt-in, and record precise stop diagnostics. The completed host-linked initialization profile reaches the original `nnMain` transition. A separate [application profile](docs/application-startup.md) continues into its original body, supplies coherent main-thread updates and mounts verified read-only game content. The game is not playable yet.
 
+The [NVN bootstrap and renderer foundation](docs/nvn-bootstrap.md) passes all 69
+validation stages, 780 Python tests, eight CTest groups and 283,401 common
+native/reference comparisons per compiler. Both original replays reach the same
+texture-descriptor query after 325,815 post-entry instructions:
+original procedure lookup and owned device/mode state reach the texture-descriptor
+query. A separate [shader tool](docs/shader-tool.md) translates synthetic shaders;
+the independent Vulkan buffer owner passes physical transfer/readback probes on
+both native compilers. Descriptor/pool integration and actual game rendering remain
+required; this is not a rendered game frame.
+
 The separate [VSync SystemEvent profile](docs/system-events.md) passes all 60
 validation stages, 750 Python tests without skips, eight CTest groups and 283,401
 common native/reference comparisons per compiler. Both full original replays

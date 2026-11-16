@@ -2,6 +2,197 @@
 
 ## Active ordered implementation
 
+The user selected independently implemented NVN/Vulkan ownership plus an
+external shader compiler tool. Both boot-to-NVN and the first genuine game frame
+remain the requested milestones. Current uncommitted work adds application-only
+LDAR (all four widths), `--nvn` over the refresh chain, the original 735-entry
+NVN procedure table audit, original default builder execution, and owned
+GetProcAddress/DeviceInitialize/Finalize bindings. A diagnostic pilot at
+`build/research/display-objects-20261115/pilot-nvn-device-v1-cmake/` reached
+guarded DeviceGetInteger after 1472 lookups and one initialization. Its device
+identity borrows the live parent Vulkan owner; it is not a complete NVN device
+implementation. Source-proved integer ABI version queries 0/1 (231/40) are now
+being validated. Unknown properties remain unsupported. No game frame exists.
+LDAR reference/generated-dispatch suites passed MSVC/GCC (four tests each);
+the preceding NVN owner/audit/dispatcher suites passed ten tests per compiler.
+The later `pilot-nvn-capabilities-v2-cmake/` reaches unsupported property 15
+(texture descriptor size) at 325815 post-entry instructions: 1472 lookups, one
+initialization, four implemented property queries and both mode setters.
+Properties 42/90 explicitly report ASTC/debug false, not generic unknown success.
+The new source audit has 3789 bindings; refresh-only now adds a separate original
+NVN loader guard (3054 bindings), removed only by `--nvn` after its own proof.
+The full new runner retains every preceding lane and adds NVN source/typed-stop,
+original loader/caller full-prefix proofs and external shader/physical GPU probes.
+Config: `config/milestones/nvn-bootstrap.json`, with a local path-adjusted copy
+at `build/milestones/nvn-bootstrap-v1/local-config.json`.
+The first 67-stage full validation at
+`build/milestones/nvn-bootstrap-v1/validation/` is now explicitly FAILED,
+after 63 passed commands/stages and 62 verified stages. Its refresh CMake runtime
+correctly reached the original guarded NVN loader at 311523 post-entry retired
+instructions, but `application_evidence` raised KeyError `entry_word`: the new
+guard used a proved `_stage` record without normalizing its nested original
+entry instruction into the flat native-binding word field. No guest crash or
+passed new milestone is claimed. The controller and compiler/test children were
+confirmed exited before changing source. Preserve this attempt; no commit/push.
+Its frozen source was
+`63943803d9dd6a581cb3b8ef2175e25f5c954336bd8b2ecfee12b3956030e711`.
+That failed run passed 778 Python tests without skips, eight CTest groups,
+283401 native/reference comparisons per compiler, source audits, renderer probes
+and every retained lane through VSync. Its results remain historical evidence,
+not new-source validation. `tools/native_binding.py` now validates/copies the
+original entry word for both refresh-boundary and NVN source stages. Twenty
+focused regression cases pass. The diagnostic preflight ran through
+`build/preflight_nvn_boundary_fix_v1.py` at
+`build/research/nvn-boundary-fix-preflight-v1/`, with stdout in
+`build/preflight-nvn-boundary-v1.log`.
+The preflight completed successfully: both new boundaries, native full/compact
+hashes, restored original loader prefix and all 1479 typed original caller
+continuations pass. Refresh hash:
+`4260545ee7ad163265a8a5a26d3cb4a4d1547134d84dd918de06b08c937543c5`;
+NVN hash: `b4995c838c6de21ed687a40759d3ecd6b0d26308bb2dfc51716d409b1d4d5015`.
+The fresh full run completed successfully at
+`build/milestones/nvn-bootstrap-v1/validation-v2/`, using
+`local-config-v2.json` (also includes the extra pure NVN/shader GCC test groups)
+and `validation-v2.log`. Its frozen source is
+`39c931eabfa2826f650ad8c7dbd89486c71d314ed5df0fcbb992e3f23f3682e8`.
+All 69 stages passed, with 780 Python tests without skips, eight CTest groups
+and 283401 common native/reference comparisons per compiler. Both full NVN
+replays reach property 15 at 325815 post-entry instructions and prove all 1479
+original caller continuations. The final run finished at 2026-11-16 17:12:47 UTC
+(2026-11-17 00:12:47 Asia/Saigon). Its source fingerprint still matches.
+This run is sealed: preserve its outputs and use a fresh directory for new source.
+The user authorized proceeding with delivery and descriptor/resource integration.
+The next implementation must preserve this checkpoint and all older profiles;
+the first genuine game frame remains incomplete.
+
+The user additionally requested ongoing control of the checkout exceeding
+100 GB. `build/storage-inventory-20261116-v1.json` measured about 225.1 GiB by
+pathname versus 86.2 GiB of distinct file content (hardlinks explain the gap);
+almost all is build output, while source/Git/environment/toolchain are under
+150 MiB. Test-only intermediate pruning after the native stages ended removed
+5160 files/about 103 MB (`build/nvn-storage-prune-v2.log`). Lossless NTFS
+compression completed through `build/compress_closed_artifacts_v1.py`, with
+progress/receipt at
+`build/ntfs-closed-artifacts-compression-v1.log` / `.json`. It hashes every file
+before/after and preserves logical size/mtime; the active validation-v2 and
+original/prepared/transfer inputs excluded. All 8525 files preserve hashes,
+logical sizes and mtimes; compression reclaimed 35.884 GB in addition to
+15.431 GB from artifact sharing (about 51.3 GB combined). Observed drive free
+space was about 64.1 GB after compression, despite the ongoing new validation.
+The second allocated-space inventory completed through
+`build/inventory_storage_20261116_v2.py`, with receipt
+`build/storage-inventory-20261116-v2.json`: approximately 59.12 GB allocated
+distinct data (55.06 GiB), versus 244.14 GB logical pathname sizes. The live
+validation continued to grow during this snapshot. A later free-space check
+reported 58.63 GB free. Source remains frozen at the hash above.
+See docs/storage.md and the added AGENTS storage rule for future runs.
+
+Do not resume/promote the failed first attempt. Sealed-stage byte/hash sharing through
+`build/dedup_nvn_sealed_v2.py` completed: 7006 identical immutable artifacts share
+storage, reclaiming 15.43 GB. It excludes mutable caches and retains all failed
+evidence paths/outcomes; both known failed attempts contribute only passed and
+verified stage outputs. See `build/nvn-sealed-dedup-applied-v2.json` and its
+script for the exact rows (the report's short scope text names only the older
+failed refresh attempt, but its rows/script also include the failed NVN run).
+While validation-v2 is frozen, independent renderer prototypes were created
+only under ignored `build/research/renderer-next/`; these are NOT production
+changes or part of the frozen milestone source/evidence. Preserve their C
+sources for the subsequent integration. `texture_roundtrip.c` includes the
+frozen production owners and implements a real RGBA8 optimal image/view with
+checked dimensions/format support, device-local allocation, staging, layout
+transitions and fences. Eight odd-dimension 37x29 upload/readback iterations
+pass MSVC/GCC; the final explicit HOST-stage barrier change was tested on GCC.
+`shader_dispatch.c` creates an actual shader module/compute pipeline from the
+external tool's synthetic EXIT-only SPIR-V, dispatches and completes a fence on
+both compilers. This is driver acceptance of one trivial program, not general
+SPIR-V validation or a game frame. Scripts/logs are `build/probe_texture_draft_v2.py`,
+`build/probe_shader_dispatch_draft_v1.py`, `texture-draft-gcc-v1.log`,
+`shader-dispatch-draft-{cmake-v2,gcc-v1}.log` and per-compiler results in the
+prototype directory. They still require production ownership/error tests and
+NVN resource/command integration; do not report these prototypes as a shipped
+renderer or merge them while the full source gate remains active.
+
+Read-only original resource research is recorded in
+`build/research/graphics-supervisor/nvn-resources-research-v1.json` and
+`nvn-resource-next-plan-v1.json`. Original TexturePoolRegisterTexture shifts its
+signed W index by five and writes exactly eight words: direct exact-build
+evidence for a 32-byte descriptor stride, not a borrowed Switch 1 constant.
+This research grants no runtime authority. Implement its complete ABI/ownership
+audit before changing the currently unsupported property 15 or pool providers.
+`nvn-builder-cohort-v1.json` in that research directory surveys 180 original
+Builder procedures: 179 decode in the existing application profile, and 166
+are linear with one standard RET. This is a potential source-retention cohort,
+not a proof of every memory operand/ownership contract or execution authority.
+Audit those roles before selecting/unguarding any additional original builder.
+
+The external compiler dependency is pinned under ignored
+`toolchain/shader-compiler/`, with tracked `config/dependencies/` source locks.
+Only shader-recompiler/Sirit/compat sources and their notices are fetched from
+Hookshot commit 460b65424acf86be4c933858744e2932226f3f91; official SPIR-V
+headers are pinned independently. The C runtime does not link this dependency.
+The independent adapter is `tools/shader_compiler/`; its MSVC build succeeded
+under `build/shader-compiler-v1/` (`tool-identity.json`, wrapper-v3 log).
+Both dependency source locks, compatibility shim and binary are bound. Three
+synthetic shaders translate successfully; invalid captures fail. A separate
+`src/native_gpu.c` owns real Vulkan transfer buffers/pool/fence with barriers;
+both physical compiler probes pass 32 copies/16 uploads/16 readbacks. Aggregate
+report: `build/research/renderer-foundation-v1/report.json`. Synthetic GPU and
+owner/dispatcher suites pass both compilers; final newer cases run in the full
+milestone. Seven host CTest checks pass after the GPU change. No texture, game
+shader, draw or present integration is established.
+Captured shader inputs must be
+explicit; missing cbuf/texture answers fail instead of inventing defaults.
+The milestone source fingerprint now includes C++ adapter and dependency locks.
+Only exited synthetic-test intermediates were pruned in this turn: 3470 files,
+72.8 MB, with unchanged source gate (`build/nvn-test-prune-applied-v1.json`).
+Original/prepared inputs, archived transfer, evidence and mutable caches remain.
+
+The default Display 120 Hz capability milestone has an interrupted, failed
+full validation at
+`build/milestones/display-refresh-v1/validation/`, with its parent's
+`local-config.json`, native build, `validation.log` and `delivery.json`.
+Its frozen source is
+`86b4ea66b91990560433d7c57c9bc4f9dc12b99f51efd2e68e23d9c41719248c`.
+The user interrupted the preceding turn. The controller/children were confirmed
+exited and its output lock free. A supported `--resume` attempt using the same
+config/output rejected `resume command/environment differs` on 2026-11-16
+(Asia/Saigon). `resume.log` records it. The manifest is explicitly failed with
+59 stages passed/58 verified, not a completed milestone. No process remains
+active, no cleanup touched these outputs, and no commit/push was made for this
+milestone. Preserve this failed attempt; do not weaken its environment identity
+or promote its outcomes. A fresh full run is required before delivery. The
+current source has changed since that frozen hash. The separate
+`--refresh` profile requires events/objects and declaration flags 3; older event
+flags 1 and object flags 0 keep their guards. It implements only the public void
+boolean capability declaration with private owned state, no mode change or IPC
+session. Source audit checks 22 non-const named refresh consumers; the preceding
+complete VI audit additionally guards both const DefaultDisplay refresh
+consumers. It also closes two private backend
+callbacks, with 3053 bindings in the unchanged 4096 limit. See
+[display-refresh.md](display-refresh.md).
+The private `refresh-inherited-const-closure-v1.json` in the research directory
+below independently matches both inherited const guards to original complete
+bodies/metadata; there are 24 related named consumers in total.
+
+The full native phase has passed and verified: 759 Python tests without skips,
+eight CTest groups and 283401 common native/reference comparisons per compiler.
+The fresh source audits and physical display/VBlank peer probes passed. Raw,
+SDK and native SDK replays passed on both compilers. This is an intermediate
+checkpoint; remaining initialization/application/display/refresh replays and
+the final passed source gate are still required before delivery.
+
+Focused owner/dispatcher suites passed MSVC/GCC before the last additional owner
+fault cases; the complete final owner cases then passed MSVC and will run on
+both compilers in the full milestone. Eleven focused audit/progress/config cases
+also pass. A diagnostic pilot under
+`build/research/display-objects-20261115/pilot-refresh-v1-cmake/` passed handler
+457 with the original false boolean and retired its caller. It stopped at
+unsupported `LDAR X22, [X8]` after 313331 post-entry instructions, 1835028 retired
+instructions and 56 native calls. Its 40 original application selection roots
+are a bounded replay seed only. The full milestone must independently rebuild,
+audit and verify both compiler full traces against the retained event prefix.
+No NVN initialization, frame or usable input has been established.
+
 SystemEvent/VSync integration passed a fresh full run:
 `build/milestones/system-events-v1/validation-v2/`, with its parent's
 `local-config.json`, native build and `validation-v2.log`. All 60 stages passed

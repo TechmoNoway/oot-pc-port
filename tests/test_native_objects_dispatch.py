@@ -11,11 +11,11 @@ from lifter_validation_types import State
 from object_cache import SharedCompiler
 ROOT=boot.ROOT
 
-def objects_package(events=False):
+def objects_package(events=False,refresh=False,nvn=False):
     real_make=boot.make_boot;real_emit=boot.emit_startup;extra=[];declaration={};table_records=[]
     def make(raw,*args,**kwargs):
         sdk=raw.modules[2];main=raw.modules[1];base=sdk.base
-        declaration.update(version=1,flags=int(events),width=1920,height=1080,display=base+0x1500,display_size=64,
+        declaration.update(version=1,flags=int(events)|(2 if refresh else 0)|(4 if nvn else 0),width=1920,height=1080,display=base+0x1500,display_size=64,
             layer=base+0x1600,layer_size=128,native_window=base+0x1618,
             vptr_address=[base+x for x in(0x1500,0x1600,0x1610,0x1618,0x1620)],
             vptr_value=[base+0x1410+n*24 for n in range(5)],anchor=base+0xe40,anchor_size=4,
@@ -25,7 +25,11 @@ def objects_package(events=False):
             sdk.image[at:at+24]=data;table_records.append(dict(address=base+at,size=24,sha256=hashlib.sha256(data).hexdigest()))
         declaration['tables']=table_records
         for at,value in zip(declaration['vptr_address'],declaration['vptr_value']):struct.pack_into('<Q',sdk.image,at-base,value)
-        for at in(0xe40,0xe50,0xe60,0xe70,0xe80,0xe90):struct.pack_into('<I',sdk.image,at,0xd65f03c0)
+        for at in(0xe40,0xe50,0xe60,0xe70,0xe80,0xe90,0xea0):struct.pack_into('<I',sdk.image,at,0xd65f03c0)
+        if nvn:
+            for at in(0xeb0,0xec0,0xed0,0xee0,0xef0,0xf00,0xf10,0xf20):struct.pack_into('<I',sdk.image,at,0xd65f03c0)
+            struct.pack_into('<8Q',sdk.image,0x1840,*[base+at for at in(0xed0,0xf20,0xee0,0xeb0,0xf00,0xec0,0xf10,0xef0)])
+            sdk.image[0x1a00:0x1a14]=b'nvnDeviceInitialize\0'
         start=main.base+0x900;words=[];out=base+0x1900
         def append(values):words.extend(values)
         def call(offset):words.append(branch(start+len(words)*4,base+offset,True))
@@ -33,6 +37,23 @@ def objects_package(events=False):
         append(mov64(0,out));append(mov64(1,declaration['display']));call(0xe50)
         append(mov64(0,out));append(mov64(1,declaration['layer']));call(0xe60)
         append(mov64(16,out));words.append(0xf9400211) # Independent X17 <- [X16].
+        if refresh:
+            for receiver,value in ((declaration['display'],1),(declaration['display'],2),
+                (declaration['display']+8,1),(declaration['display'],0x123400000001)):
+                append(mov64(0,receiver));append(mov64(1,value));call(0xea0)
+        if nvn:
+            append(mov64(0,0));append(mov64(1,base+0x1a00));call(0xeb0)
+            words.append(0xaa0003f9) # X25: the original bound procedure, never a host pointer.
+            append(mov64(0,base+0x1a80));append(mov64(1,base+0x1ac0));words.append(0xd63f0320)
+            words.append(0xaa0003f8) # X24: actual initialize result.
+            for query in(0,1):
+                append(mov64(0,base+0x1a80));append(mov64(1,query));append(mov64(2,base+0x1b00));call(0xee0)
+                append(mov64(16,base+0x1b00));words.append(0xb940021a+query) # W26/W27: independent loaded ABI versions.
+            for at in(0xef0,0xf10):
+                append(mov64(0,base+0x1a80));append(mov64(1,1));call(at)
+            append(mov64(0,base+0x1a80));call(0xf00);words.append(0xaa0003fc) # X28: origin.
+            append(mov64(0,base+0x1a80));call(0xf20);words.append(0xaa0003f7) # X23: depth.
+            append(mov64(0,base+0x1a80));call(0xed0)
         if events:
             event_out=out+0x40
             append(mov64(0,event_out));append(mov64(1,declaration['display']));call(0xe90)
@@ -62,6 +83,17 @@ def objects_package(events=False):
                 body_sha256=hashlib.sha256(sdk.read(offset,4)).hexdigest()))
         if events:kwargs['native_functions'].append(dict(handler_id=456,entry=sdk.base+0xe90,size=4,
             body_sha256=hashlib.sha256(sdk.read(0xe90,4)).hexdigest()))
+        if refresh:kwargs['native_functions'].append(dict(handler_id=457,entry=sdk.base+0xea0,size=4,
+            body_sha256=hashlib.sha256(sdk.read(0xea0,4)).hexdigest()))
+        if nvn:
+            for offset,handler in((0xeb0,458),(0xec0,459),(0xed0,460),(0xee0,461),(0xef0,462),(0xf00,463),(0xf10,464),(0xf20,465)):
+                kwargs['native_functions'].append(dict(handler_id=handler,entry=sdk.base+offset,size=4,
+                    body_sha256=hashlib.sha256(sdk.read(offset,4)).hexdigest()))
+            kwargs['nvn_declaration']=dict(table=sdk.base+0x1840,table_sha256=hashlib.sha256(sdk.read(0x1840,64)).hexdigest(),
+                procedures=[dict(name=name,entry=sdk.base+offset)for name,offset in
+                    (('nvnDeviceFinalize',0xed0),('nvnDeviceGetDepthMode',0xf20),('nvnDeviceGetInteger',0xee0),
+                     ('nvnDeviceGetProcAddress',0xeb0),('nvnDeviceGetWindowOriginMode',0xf00),('nvnDeviceInitialize',0xec0),
+                     ('nvnDeviceSetDepthMode',0xf10),('nvnDeviceSetWindowOriginMode',0xef0))])
         kwargs.update(objects=True,object_declaration=declaration)
         return real_emit(raw,sorted([*nodes,*extra],key=lambda n:n['address']),manifest,*args,**kwargs)
     with patch.object(boot,'make_boot',make),patch.object(boot,'emit_startup',emit):
@@ -73,8 +105,12 @@ class NativeObjectsDispatchTests(unittest.TestCase):
         self.check_dispatch(False)
     def test_published_event_svc_wait_reset_clear_close_and_quanta(self):
         self.check_dispatch(True)
-    def check_dispatch(self,events):
-        blob,sources,_,declaration=objects_package(events)
+    def test_refresh_void_returns_full_vectors_and_quanta(self):
+        self.check_dispatch(True,True)
+    def test_nvn_lookup_indirect_call_owned_device_finalization_and_quanta(self):
+        self.check_dispatch(True,True,True)
+    def check_dispatch(self,events,refresh=False,nvn=False):
+        blob,sources,_,declaration=objects_package(events,refresh,nvn)
         observer=boot.SNAPSHOT_SOURCE.replace('oot_startup_dispatch_create_application','oot_startup_dispatch_create_objects')
         observer=observer.replace('if(!context || !keys)goto done;',
             'if(!context || !keys)goto done;\n'
@@ -83,23 +119,27 @@ class NativeObjectsDispatchTests(unittest.TestCase):
             '    thread_id=object_fixture_thread();oot_graphics_destroy(context->graphics);context->graphics=parent_graphics();\n'
             '    context->graphics->report.working_memory=0;context->graphics->report.working_size=0;\n'
             '    if(!oot_startup_context_bind_objects(context,oot_startup_compiled_objects()))goto done;\n'
+            '    if(oot_startup_compiled_nvn() && !oot_startup_context_bind_nvn(context,oot_startup_compiled_nvn()))goto done;\n'
             '    OotStartupProgram older=program;older.flags&=~OOT_STARTUP_OBJECTS;\n'
             '    if(oot_startup_dispatch_create_display(image,context,keys,&older,limit,&error))goto done;\n')
         observer=observer.replace('*count=used;*final=state;ok=1;',
             '*count=used;*final=state;oot_startup_context_objects_report(context,&last_objects);'
+            'oot_startup_context_refresh_report(context,&last_refresh);'
             'last_calls=oot_startup_dispatch_native_calls(dispatch);ok=1;')
         text=('#include <windows.h>\nstatic DWORD object_fixture_thread(void){return GetCurrentThreadId();}\n'
             '#define failure graphics_fixture_failure\n#define OOT_PEER_FIXTURE_ONLY\n#include "native_graphics_peer_test.c"\n#undef failure\n'
             '#include "startup_context.c"\n'
             +('#include "native_vblank.h"\nOotVblankSource *oot_test_object_vblank_create(HMONITOR);\n#define oot_vblank_create oot_test_object_vblank_create\n#include "native_objects.c"\n#undef oot_vblank_create\n'if events else'')+
-            'static OotObjectsReport last_objects;static uint64_t last_calls;\n'
+            'static OotObjectsReport last_objects;static OotRefreshReport last_refresh;static uint64_t last_calls;\n'
             +'\n'.join(sources.values())+observer+
             '\nOOT_LIFT_EXPORT void oot_test_object_counts(uint64_t *out){'
             'out[0]=last_calls;out[1]=last_objects.calls;out[2]=last_objects.opens;out[3]=last_objects.creates;'
             'out[4]=last_objects.window_getters;out[5]=last_objects.destroys;out[6]=last_objects.closes;'
             'out[7]=last_objects.references;out[8]=windows;out[9]=surfaces;out[10]=instances;out[11]=devices;'
             'out[12]=last_objects.vsync_events;out[13]=last_objects.waits;out[14]=last_objects.resets;'
-            'out[15]=last_objects.clears;out[16]=last_objects.handle_closes;out[17]=last_objects.event_open;}\n')
+            'out[15]=last_objects.clears;out[16]=last_objects.handle_closes;out[17]=last_objects.event_open;'
+            'out[18]=last_refresh.capability_bits;out[19]=last_refresh.update_mask;'
+            'out[20]=last_refresh.updates;out[21]=last_refresh.ignored;}\n')
         parent=ROOT/'build/object-dispatch-tests';parent.mkdir(parents=True,exist_ok=True)
         folder=Path(tempfile.mkdtemp(dir=parent));source=folder/'fixture.c';source.write_text(text)
         names=('guest_memory','runtime_image','host_win32','leaf_dispatch','frame_dispatch','stack_dispatch',
@@ -116,10 +156,15 @@ class NativeObjectsDispatchTests(unittest.TestCase):
         counts=lib.oot_test_object_counts;counts.argtypes=[POINTER(c_uint64)];counts.restype=None
         path=folder/'synthetic.ootmem';path.write_bytes(blob)
         for quantum in(1,2,1000):
-            history=(VectorState*1024)();count=c_uint();final=State();values=(c_uint64*18)()
+            history=(VectorState*1024)();count=c_uint();final=State();values=(c_uint64*22)()
             self.assertEqual(run(os.fsencode(path),quantum,1000,0,history,byref(count),byref(final)),1)
-            counts(values);self.assertEqual(tuple(values),(10 if events else 9,6 if events else 5,1,1,1,1,1,0,0,0,0,0,
-                *([1,1,2,1,1,0]if events else[0]*6)))
+            counts(values);self.assertEqual(tuple(values),((10 if events else 9)+(4 if refresh else 0)+(9 if nvn else 0),
+                (6 if events else 5)+(4 if refresh else 0)+(9 if nvn else 0),1,1,1,1,1,0,0,0,0,0,
+                *([1,1,2,1,1,0]if events else[0]*6),*([2,2,3,1]if refresh else[0]*4)))
+            if nvn:
+                self.assertEqual(final.x[24],1);self.assertEqual(final.x[25],declaration['display']-0x1500+0xec0)
+                self.assertEqual((final.x[26],final.x[27]),(231,40))
+                self.assertEqual((final.x[28],final.x[23]),(1,1))
             if events:self.assertEqual(final.x[20],0xfa01)
             self.assertEqual(final.x[17],declaration['native_window'])
             self.assertEqual(bytes(history[count.value-1].q[0]),bytes([0x5a]*16))

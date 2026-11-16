@@ -24,6 +24,23 @@ def evidence():
     return report,bundle,old
 
 class ApplicationMilestoneTests(unittest.TestCase):
+    def test_typed_nvn_property_boundary_requires_owned_device_and_original_table_record(self):
+        report,bundle,old=evidence();e=report['iterations'][-1]['execution']
+        e.update(service=461,nvn_runtime=True,nvn=dict(device_ready=True,device_identity=0x4000),
+            application_stop_arguments=[0x4000,15,0x5000,0,0,0,0,0])
+        bundle['native_audit']['functions']=[dict(nvn_procedures=['nvnDeviceGetInteger'],names=[],
+            entry=0x2000,entry_word=e['word'],handler_id=461)]
+        def check(r=report,b=bundle,query=15):return application_evidence(r,b,old,7,100,'nvnDeviceGetInteger',expected_native=461,expected_query=query)
+        check()
+        for key,value in(('service',31),('nvn_runtime',False),('application_stop_arguments',[0x4008,15,0x5000,0,0,0,0,0]),
+            ('application_stop_arguments',[0x4000,16,0x5000,0,0,0,0,0])):
+            bad=deepcopy(report);bad['iterations'][-1]['execution'][key]=value
+            with self.subTest(key=key),self.assertRaises(InputError):check(r=bad)
+        for query in(None,True,0,1,42,90,170):
+            with self.subTest(query=query),self.assertRaises(InputError):check(query=query)
+        bad=deepcopy(bundle);bad['native_audit']['functions'][0]['nvn_procedures']=['other']
+        with self.assertRaises(InputError):check(b=bad)
+
     def test_endpoint_alternatives_are_exclusive_and_svc_zero_is_valid(self):
         for values in (('export',None,None),(None,0xffffffff,None),(None,None,0)):
             application_endpoint(*values)

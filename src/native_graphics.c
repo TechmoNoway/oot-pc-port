@@ -12,6 +12,7 @@
 #include <wchar.h>
 #include <limits.h>
 #include "native_graphics.h"
+#include "native_graphics_internal.h"
 
 struct OotGraphics {
     uint32_t references;
@@ -79,6 +80,19 @@ static int procedure(const OotGraphics *g,const char *name,void *target,size_t s
     memcpy(target,&p,size);return 1;
 }
 #define PROC(g,api,target) procedure(g,#api,&(target),sizeof(target))
+int oot_graphics_acquire_vulkan(OotGraphics *g,OotGraphicsVulkan *out)
+{
+    OotGraphicsVulkan next={0};PFN_vkGetPhysicalDeviceProperties properties=NULL;
+    PFN_vkGetPhysicalDeviceMemoryProperties memory=NULL;
+    if(!g || !out || !disjoint(g,sizeof(*g),out,sizeof(*out)) || !live(g) ||
+       g->references==UINT32_MAX || (g->window && g->window_thread!=GetCurrentThreadId()) ||
+       !PROC(g,vkGetDeviceProcAddr,next.get_device) || !PROC(g,vkGetPhysicalDeviceProperties,properties) ||
+       !PROC(g,vkGetPhysicalDeviceMemoryProperties,memory))return 0;
+    properties(g->physical,&next.properties);memory(g->physical,&next.memory);
+    if(!next.memory.memoryTypeCount || next.memory.memoryTypeCount>VK_MAX_MEMORY_TYPES)return 0;
+    next.instance=g->instance;next.physical=g->physical;next.device=g->device;next.queue=g->queue;
+    next.family=g->report.queue_family;++g->references;*out=next;return 1;
+}
 static int bootstrap(OotGraphics *g)
 {
     PFN_vkCreateInstance create_instance=NULL;

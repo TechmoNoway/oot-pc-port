@@ -35,8 +35,9 @@ def read_json(path):
 def source_digest():
     digest = hashlib.sha256()
     paths = [ROOT / "CMakeLists.txt"]
-    for folder, suffixes in (("src", (".c", ".h")), ("tools", (".py", ".txt", ".c")),
+    for folder, suffixes in (("src", (".c", ".h")), ("tools", (".py", ".txt", ".c", ".cpp", ".h")),
                               ("tests", (".py", ".c")), ("config/milestones", (".json",)),
+                              ("config/dependencies", (".json",)),
                               ("third_party/vulkan/include",(".h",))):
         paths += [p for p in (ROOT/folder).rglob("*") if p.is_file() and p.suffix in suffixes]
     for path in sorted(paths):
@@ -133,7 +134,7 @@ def validate_resource_progress_config(config):
             'resource progress requires the declared logical process owner 1')
 
 
-def application_evidence(report,bundle,baseline,stages,minimum_post_entry,expected_symbol,romfs_input=None,expected_word=None,expected_svc=None):
+def application_evidence(report,bundle,baseline,stages,minimum_post_entry,expected_symbol,romfs_input=None,expected_word=None,expected_svc=None,expected_native=None,expected_query=None):
     """A verified post-entry diagnostic is progress, never a playable game."""
     require(report.get('format')=='oot-startup-experiment' and report.get('status')=='diagnostic-complete' and
         report.get('application_runtime') is True and report.get('host_linked') is True and
@@ -144,7 +145,16 @@ def application_evidence(report,bundle,baseline,stages,minimum_post_entry,expect
         baseline.get('host_linked') is True,'application baseline is not completed host initialization')
     require(e.get('status')==2,'application did not reach a diagnostic boundary')
     application_endpoint(expected_symbol,expected_word,expected_svc)
-    if expected_svc is not None:
+    if expected_native is not None:
+        require(expected_symbol=='nvnDeviceGetInteger'and type(expected_native)is int and expected_native==461 and
+            type(expected_query)is int and 0<=expected_query<=169 and expected_query not in(0,1,42,90)and
+            expected_word is None and expected_svc is None,'invalid typed NVN diagnostic endpoint')
+        args=e.get('application_stop_arguments');owner=e.get('nvn',{})
+        require(e.get('error')==9 and e.get('native_handler_stop')is True and e.get('service')==expected_native and
+            e.get('nvn_runtime')is True and owner.get('device_ready')is True and type(args)is list and len(args)==8 and
+            args[0]==owner.get('device_identity')and args[1]&0xffffffff==expected_query,
+            'NVN did not reach its declared unsupported property on the owned device')
+    elif expected_svc is not None:
         from application_frontier import validate_site
         require(e.get('error')==9 and e.get('native_handler_stop') is False and
             e.get('service')==expected_svc and e.get('word')==(0xd4000001 | expected_svc<<5),
@@ -179,8 +189,9 @@ def application_evidence(report,bundle,baseline,stages,minimum_post_entry,expect
     require(bundle.get('package',{}).get('image_phase')=='host-offline-linked' and
         bundle['host_boot'].get('original_rtld_execution_allowed') is False,'application lost its separate linked boot provenance')
     if expected_word is None and expected_svc is None:
-        rows=[f for f in bundle.get('native_audit',{}).get('functions',[]) if expected_symbol in f.get('names',[])]
-        require(len(rows)==1 and rows[0]['handler_id']==31 and int(e['pc'],16)==rows[0]['entry'] and
+        rows=[f for f in bundle.get('native_audit',{}).get('functions',[]) if expected_symbol in
+            f.get('nvn_procedures'if expected_native is not None else'names',[])]
+        require(len(rows)==1 and rows[0]['handler_id']==(expected_native or 31)and int(e['pc'],16)==rows[0]['entry'] and
             e['word']==rows[0]['entry_word'],'application stopped at a different original export')
     policy=e.get('application_services',{})
     require(policy.get('policy_calls',0)>=1 and policy.get('graphics_notifications')==1 and
@@ -351,6 +362,19 @@ def validate_events_config(config):
         'events require the measured original continuation')
     require(config.get('events_expected_guard')=='_ZN2nn2vi36SetDisplay120HzRefreshRateCapabilityEPNS0_7DisplayEb',
         'events require the observed unsupported refresh capability boundary')
+
+
+def validate_refresh_config(config):
+    require(type(config.get('refresh_experiment',False))is bool,'invalid refresh milestone flag')
+    if config.get('name')=='display-refresh':require(config.get('refresh_experiment')is True,'refresh milestone requires execution')
+    if not config.get('refresh_experiment'):return
+    require(config.get('events_experiment')is True and isinstance(config.get('refresh_baseline'),str)and
+        bool(config['refresh_baseline']),'refresh must retain the preceding event lane/full baseline')
+    require(type(config.get('refresh_min_post_entry'))is int and config['refresh_min_post_entry']>config['events_min_post_entry'],
+        'refresh requires the measured original continuation')
+    application_endpoint(config.get('refresh_expected_guard'),config.get('refresh_expected_word'),config.get('refresh_expected_svc'))
+    if 'refresh_seed_report'in config:require(isinstance(config['refresh_seed_report'],str)and config['refresh_seed_report'],
+        'refresh selection seed must be an explicit report path')
 
 
 class MilestoneRun:
@@ -635,17 +659,21 @@ def run_graphics_lanes(run,config,env):
     return dict(graphics_experiments=experiments,graphics_progress=proofs)
 
 
-def run_display_lanes(run,config,env,objects=False,events=False):
+def run_display_lanes(run,config,env,objects=False,events=False,refresh=False):
     """A separate VI profile over real graphics, retaining every preceding lane."""
     from build_startup import execute as execute_startup,validated_romfs_input
     from display_progress import verify_display_progress_trace
     from display_objects_progress import verify_objects_progress_trace
     from system_event_progress import verify_events_progress_trace
+    from display_refresh_progress import verify_refresh_progress_trace
     from startup_sources import cached_sources
     prepared=ROOT/config['prepared'];entropy=run.output/'process-entropy.bin'
-    objects=objects or events
-    label='events'if events else'objects'if objects else'display'
-    seed=read_json(run.output/('objects-cmake/run.json'if events else'display-cmake/run.json')if objects else build_destination(ROOT/config['display_seed_report']));prior=seed['iterations'][-1]
+    events=events or refresh;objects=objects or events
+    label='refresh'if refresh else'events'if events else'objects'if objects else'display'
+    seed_path=(build_destination(ROOT/config['refresh_seed_report'])if refresh and 'refresh_seed_report'in config else
+        run.output/('events-cmake/run.json'if refresh else'objects-cmake/run.json'if events else'display-cmake/run.json')if objects else
+        build_destination(ROOT/config['display_seed_report']))
+    seed=read_json(seed_path);prior=seed['iterations'][-1]
     provenance=read_json(build_destination(Path(prior['bundle'])/'manifest.json'))
     sdk_audit=read_json(run.output/'sdk-audit.json');audit=read_json(run.output/(label+'-audit.json'))
     require(seed.get('display_runtime') is True and seed.get('application_runtime') is True and
@@ -653,7 +681,7 @@ def run_display_lanes(run,config,env,objects=False,events=False):
             provenance['sdk_npdm']['source_sha256']==sdk_audit['npdm']['source_sha256'] and
             provenance['sdk_audit']['goal_entry']==sdk_audit['goal_entry'],'display seed input/profile differs')
     old_root=build_destination(ROOT/config[label+'_baseline']);old_run=read_json(old_root/'run.json')
-    old_label='objects'if events else'display'if objects else'graphics'
+    old_label='events'if refresh else'objects'if events else'display'if objects else'graphics'
     require(old_run.get('status')=='passed' and (objects or old_run.get('name')=='graphics-bootstrap')and
             {old_label+'-audit',old_label+'-experiment-cmake',old_label+'-experiment-gcc','summary'}<=set(old_run.get('stages',{})) and
             all(s.get('status')=='passed' for s in old_run['stages'].values()),
@@ -668,6 +696,7 @@ def run_display_lanes(run,config,env,objects=False,events=False):
         'relative_relocation_probes','relative_relocations_matching_offline_link')
     if objects:keys+=('objects_runtime','display_objects')
     if events:keys+=('events_runtime',)
+    if refresh:keys+=('refresh_runtime','display_refresh')
     experiments={};proofs={}
     for mode in ('cmake','gcc'):
         folder=run.output/(label+'-'+mode);cache=folder/'native-cache'
@@ -679,6 +708,7 @@ def run_display_lanes(run,config,env,objects=False,events=False):
         for pc in prior['application_entries']:args+=['--app-entry',str(pc)]
         if objects:args+=['--objects']
         if events:args+=['--events']
+        if refresh:args+=['--refresh']
         run.command(label+'-experiment-'+mode,args,env)
         result=read_json(folder/'run.json');last=result['iterations'][-1]
         bundle=read_json(Path(last['bundle'])/'manifest.json')
@@ -694,7 +724,8 @@ def run_display_lanes(run,config,env,objects=False,events=False):
             last['executable_sha256']==hashlib.sha256(Path(last['executable']).read_bytes()).hexdigest(),
             'display executable/generated source/RomFS seal differs')
         e=application_evidence(result,bundle,baseline,config['sdk_init_required_stages'],
-            config[label+'_min_post_entry'],config[label+'_expected_guard'],romfs_input)
+            config[label+'_min_post_entry'],config.get(label+'_expected_guard'),romfs_input,
+            expected_word=config.get(label+'_expected_word'),expected_svc=config.get(label+'_expected_svc'))
         display=e.get('application_display',{});graphics=e.get('application_graphics',{})
         require(e.get('display_runtime') is True and e.get('fast_function_calls',0)>0 and
             display.get('ready') is True and display.get('presentation_supported') is True and
@@ -711,7 +742,7 @@ def run_display_lanes(run,config,env,objects=False,events=False):
         require(old_trace.is_relative_to(old_folder.resolve()) and old_full['trace_sha256']==old['execution']['trace_sha256'],
                 'display baseline is not its verified full graphics trace')
         old_bundle=read_json(build_destination(Path(old['bundle'])/'manifest.json'))
-        verify=verify_events_progress_trace if events else verify_objects_progress_trace if objects else verify_display_progress_trace
+        verify=verify_refresh_progress_trace if refresh else verify_events_progress_trace if events else verify_objects_progress_trace if objects else verify_display_progress_trace
         proof=verify(old_trace,old_full,old_bundle,Path(full['trace_file']),full,bundle)
         (full_dir/(label+'-progress.json')).write_text(json.dumps(proof,indent=2)+'\n',encoding='utf-8')
         run.publish_proof(folder,'progress-full',full_dir)
@@ -744,6 +775,9 @@ def execute(config, output, native_only=False, resume=False):
     validate_display_config(config)
     validate_objects_config(config)
     validate_events_config(config)
+    validate_refresh_config(config)
+    from nvn_milestone import validate_nvn_config
+    validate_nvn_config(config)
     if config.get('application_experiment'):
         require(config.get('sdk_init_experiment') is True and config.get('sdk_init_host_linked') is True and
             config.get('sdk_init_fast_functions') is True,'application milestone requires the complete preceding host initialization lane')
@@ -832,6 +866,13 @@ def execute(config, output, native_only=False, resume=False):
     if not native_only and config.get('events_experiment'):
         stages.insert(stages.index('comparison'),'events-audit')
         for mode in ('cmake','gcc'):stages.insert(stages.index('summary'),'events-experiment-'+mode)
+    if not native_only and config.get('refresh_experiment'):
+        stages.insert(stages.index('comparison'),'refresh-audit')
+        for mode in ('cmake','gcc'):stages.insert(stages.index('summary'),'refresh-experiment-'+mode)
+    if not native_only and config.get('nvn_experiment'):
+        stages.insert(stages.index('comparison'),'nvn-audit')
+        stages.insert(stages.index('comparison'),'renderer-foundation')
+        for mode in ('cmake','gcc'):stages.insert(stages.index('summary'),'nvn-experiment-'+mode)
     from milestone_checkpoint import execution_binding
     binding=execution_binding(ROOT,config,native_only)
     run = MilestoneRun(output, config["name"], stages,binding=binding,resume=resume)
@@ -945,6 +986,34 @@ def execute(config, output, native_only=False, resume=False):
                     report=extend_system_events_audit(linker,read_json(run.output/'objects-audit.json'),pristine)
                     (run.output/'events-audit.json').write_text(json.dumps(report,indent=2)+'\n',encoding='utf-8')
                 run.action('events-audit',events_source_audit)
+            if config.get('refresh_experiment'):
+                def refresh_source_audit():
+                    from link_exefs import load_prepared
+                    from module_linker import Linker
+                    from display_refresh_audit import extend_refresh_audit
+                    modules=load_prepared(prepared);pristine=deepcopy(next(m for m in modules if m.name=='sdk'))
+                    linker=Linker(modules);require(linker.apply()['link_complete'],'refresh offline link incomplete')
+                    report=extend_refresh_audit(linker,read_json(run.output/'events-audit.json'),pristine)
+                    (run.output/'refresh-audit.json').write_text(json.dumps(report,indent=2)+'\n',encoding='utf-8')
+                run.action('refresh-audit',refresh_source_audit)
+            if config.get('nvn_experiment'):
+                def nvn_source_audit():
+                    from link_exefs import load_prepared
+                    from module_linker import Linker
+                    from nvn_audit import extend_nvn_audit
+                    modules=load_prepared(prepared);pristine=deepcopy(next(m for m in modules if m.name=='sdk'))
+                    linker=Linker(modules);require(linker.apply()['link_complete'],'NVN offline link incomplete')
+                    report=extend_nvn_audit(linker,read_json(run.output/'refresh-audit.json'),pristine)
+                    (run.output/'nvn-audit.json').write_text(json.dumps(report,indent=2)+'\n')
+                run.action('nvn-audit',nvn_source_audit)
+                run.command('renderer-foundation',py+['tools/probe_renderer_foundation.py','--tool',ROOT/config['renderer_shader_tool'],
+                    '--identity',ROOT/config['renderer_shader_identity'],'--output',run.output/'renderer-foundation'],env)
+                renderer=read_json(run.output/'renderer-foundation/report.json')
+                require(renderer.get('format')=='oot-renderer-foundation-probe'and renderer.get('game_frame_proven')is False and
+                    renderer.get('game_code_executed')is False and renderer.get('invalid_request_rejected')is True and
+                    set(renderer.get('shaders',{}))=={'0','1','2'}and set(renderer.get('compilers',{}))=={'cmake','gcc'},
+                    'renderer foundation probe scope/results differ')
+                run.mark_verified(['renderer-foundation']);summary['renderer_foundation']=renderer
             def compare():
                 comparisons = {scope: compare_profiles(read_json(ROOT/config["baseline_"+scope]), read_json(run.output/(scope+".json"))) for scope in ("default", "plt")}
                 audit = read_json(run.output/"callees.json"); compare_baseline(audit, read_json(run.output/"plt.json"))
@@ -1258,6 +1327,10 @@ def execute(config, output, native_only=False, resume=False):
             if config.get('display_experiment'):summary.update(run_display_lanes(run,config,env))
             if config.get('objects_experiment'):summary.update(run_display_lanes(run,config,env,True))
             if config.get('events_experiment'):summary.update(run_display_lanes(run,config,env,True,True))
+            if config.get('refresh_experiment'):summary.update(run_display_lanes(run,config,env,True,True,True))
+            if config.get('nvn_experiment'):
+                from nvn_milestone import run_nvn_lanes
+                summary.update(run_nvn_lanes(run,config,env))
         def publish_summary():
             (run.output/"summary.json").write_text(json.dumps(summary, indent=2)+"\n", encoding="utf-8")
             lines = ["# Milestone validation", "", f"Milestone: {config['name']}", "", f"Python tests: {summary['python_tests']}; CTest groups: {summary['ctest_groups']}; native comparisons per compiler: {summary['native_trials_per_compiler']}."]
@@ -1293,6 +1366,12 @@ def execute(config, output, native_only=False, resume=False):
                     'retains both original early in-process event creations and the complete preceding object prefix, '
                     f"and reaches the guarded refresh-capability API after {event['post_entry_retired']} post-entry instructions. "
                     'Original game waits, NVN rendering, frames and usable input are not established by publication.')
+            if 'refresh_experiments' in summary:
+                refresh=summary['refresh_experiments']['cmake']
+                startup_scope+=(' The separate refresh profile owns the audited public 120 Hz boolean capability declaration, '
+                    'preserves the complete preceding event prefix and retires the original caller. '
+                    f"It reaches its next boundary after {refresh['post_entry_retired']} post-entry instructions. "
+                    'It changes no physical display mode and establishes no NVN frame/input.')
             lines += ["", (("Native regression execution is synthetic. Separate opt-in startup experiments execute selected original instructions under an experimental process model. "+startup_scope)
                 if 'startup_experiments' in summary else "All executed code is synthetic.")+" Static game analysis grants no runtime capabilities. See run.json for final status and per-stage logs."]
             if 'memory_callee_profiles' in summary:

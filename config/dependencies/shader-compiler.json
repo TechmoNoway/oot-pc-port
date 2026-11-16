@@ -1,0 +1,1273 @@
+{
+  "schema": 1,
+  "repository": "https://github.com/t0masz407/Hookshot",
+  "commit": "460b65424acf86be4c933858744e2932226f3f91",
+  "scope": "Standalone shader compiler dependency only. No NVN, renderer or game code imported.",
+  "files": [
+    {
+      "path": "LICENSE",
+      "git_sha1": "f288702d2fa16d3cdf0035b15a9fcbc552cd88e7",
+      "bytes": 35149
+    },
+    {
+      "path": "gpu/PROVENANCE.md",
+      "git_sha1": "3d90532e57ad45cd7ecb25502f344c58c70c0245",
+      "bytes": 2441
+    },
+    {
+      "path": "gpu/compat/ankerl/unordered_dense.h",
+      "git_sha1": "3f476a0500769516f3531f87ee95af1d1105505a",
+      "bytes": 439
+    },
+    {
+      "path": "gpu/compat/boost/container/flat_set.hpp",
+      "git_sha1": "62aea3591001dbfd0549bcd2b08dc9e83fd0267f",
+      "bytes": 2227
+    },
+    {
+      "path": "gpu/compat/boost/container/small_vector.hpp",
+      "git_sha1": "a4b5d4de5d646aa17c8d22ee509078bde54817d2",
+      "bytes": 517
+    },
+    {
+      "path": "gpu/compat/boost/container/static_vector.hpp",
+      "git_sha1": "9776992ef8ba422ab96d800b20566ba910238448",
+      "bytes": 620
+    },
+    {
+      "path": "gpu/compat/boost/intrusive/list.hpp",
+      "git_sha1": "73b6d5c402de502d002f3f1eb1b98bbf110ff1df",
+      "bytes": 7071
+    },
+    {
+      "path": "gpu/compat/boost/intrusive/set.hpp",
+      "git_sha1": "32bced78a4957b070412170f08d51cb7a7ddeb30",
+      "bytes": 3760
+    },
+    {
+      "path": "gpu/compat/fmt/format.h",
+      "git_sha1": "78138e7bc16ba48c3eb958affb6b5c2f7beb6585",
+      "bytes": 3644
+    },
+    {
+      "path": "gpu/compat/fmt/ranges.h",
+      "git_sha1": "72d333603570803acd2e9b5d65d8c3064ed2ae0d",
+      "bytes": 37
+    },
+    {
+      "path": "gpu/third_party/suyu/GPL-2.0-or-later.txt",
+      "git_sha1": "17cb286430a4d8094e473d06bd7f50f40438ddba",
+      "bytes": 17337
+    },
+    {
+      "path": "gpu/third_party/suyu/GPL-3.0-or-later.txt",
+      "git_sha1": "d41c0bd98feb776ef7d81efbc1b5447e0284a187",
+      "bytes": 34670
+    },
+    {
+      "path": "gpu/vk/compat/common/alignment.h",
+      "git_sha1": "661d681cbe17a3ab9dc77e672521f60d873565b2",
+      "bytes": 3469
+    },
+    {
+      "path": "gpu/vk/compat/common/assert.h",
+      "git_sha1": "8fc48ba49795017eeabc1424f7e907a937aaa312",
+      "bytes": 2598
+    },
+    {
+      "path": "gpu/vk/compat/common/bit_field.h",
+      "git_sha1": "3518e64c524ea20fc114f065425b46a8741c0ef1",
+      "bytes": 6451
+    },
+    {
+      "path": "gpu/vk/compat/common/bit_util.h",
+      "git_sha1": "b1b0e108a590d0589f366252929c922610aeb83e",
+      "bytes": 1598
+    },
+    {
+      "path": "gpu/vk/compat/common/common_funcs.h",
+      "git_sha1": "28112d99d6b62614929eeac627872bc7737901d7",
+      "bytes": 6823
+    },
+    {
+      "path": "gpu/vk/compat/common/common_types.h",
+      "git_sha1": "aa928c223509e615ee39ca3f4a385ce9679fabee",
+      "bytes": 2129
+    },
+    {
+      "path": "gpu/vk/compat/common/container/unordered_map.h",
+      "git_sha1": "f5402b8a4895fa844fd5bcc53e09180336dfe399",
+      "bytes": 498
+    },
+    {
+      "path": "gpu/vk/compat/common/container/unordered_set.h",
+      "git_sha1": "cb5076830567560d9f4fbbca94475414df73f8ba",
+      "bytes": 437
+    },
+    {
+      "path": "gpu/vk/compat/common/container_hash.h",
+      "git_sha1": "f06f69ad8ba0631b91cf467ccc551d0167bbcd39",
+      "bytes": 4074
+    },
+    {
+      "path": "gpu/vk/compat/common/div_ceil.h",
+      "git_sha1": "c12477d42ee2dc5793142990642f5ef19d117afb",
+      "bytes": 797
+    },
+    {
+      "path": "gpu/vk/compat/common/logging.h",
+      "git_sha1": "2a28f97f3c3a8a4caed0fdb98fefb34f9adb3686",
+      "bytes": 768
+    },
+    {
+      "path": "gpu/vk/compat/common/math_util.h",
+      "git_sha1": "d92d4b884ae3a9058d542cfa4c70003c2e9b272a",
+      "bytes": 2965
+    },
+    {
+      "path": "gpu/vk/compat/common/scope_exit.h",
+      "git_sha1": "f3e88cde95d1a623fa7c4f65f01f61d7067de419",
+      "bytes": 1917
+    },
+    {
+      "path": "gpu/vk/compat/common/settings.h",
+      "git_sha1": "3880a66d24379e19797f00ab03304d78a5d1829c",
+      "bytes": 832
+    },
+    {
+      "path": "gpu/vk/compat/common/swap.h",
+      "git_sha1": "9412dcb5e957b63b62a68b18b20d50ec1d3fba50",
+      "bytes": 16879
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/backend/bindings.h",
+      "git_sha1": "b2598fd5268a3d6531d99f58aa8ffacb56a8b186",
+      "bytes": 411
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/backend/spirv/emit_spirv.cpp",
+      "git_sha1": "ee3651acace4e7c38b181339e1305a44068d7175",
+      "bytes": 31814
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/backend/spirv/emit_spirv.h",
+      "git_sha1": "cd57d03e55b372ef487963c764d678c042a713af",
+      "bytes": 2238
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/backend/spirv/emit_spirv_atomic.cpp",
+      "git_sha1": "54a4fddadcff04cfdaede86f1454621b90366425",
+      "bytes": 25852
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/backend/spirv/emit_spirv_barriers.cpp",
+      "git_sha1": "0b9a3664ffefb6404c29c56b451ba5fb3b10b438",
+      "bytes": 1466
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/backend/spirv/emit_spirv_bitwise_conversion.cpp",
+      "git_sha1": "c4ca28d11adeb8cf7801c7df93a1659445238ef4",
+      "bytes": 1719
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/backend/spirv/emit_spirv_composite.cpp",
+      "git_sha1": "e757e9aedccf7080dd4f8d288c505275b503a209",
+      "bytes": 5376
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/backend/spirv/emit_spirv_context_get_set.cpp",
+      "git_sha1": "9bbdfcd161c2d33163c4cee0d3ab015dd8d28f83",
+      "bytes": 26268
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/backend/spirv/emit_spirv_control_flow.cpp",
+      "git_sha1": "7ad0b08ac3f88ea1dd183c74e78a229c9ee51075",
+      "bytes": 949
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/backend/spirv/emit_spirv_convert.cpp",
+      "git_sha1": "9fa84cceb7b53bc72cd50a94a91b63c1625d0db0",
+      "bytes": 9481
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/backend/spirv/emit_spirv_floating_point.cpp",
+      "git_sha1": "9ce375cd8606b5abf5009b1c9220ff4a6f003319",
+      "bytes": 12140
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/backend/spirv/emit_spirv_image.cpp",
+      "git_sha1": "5d4983b9f7be52e607029239cb0f85ff1db066f0",
+      "bytes": 34448
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/backend/spirv/emit_spirv_image_atomic.cpp",
+      "git_sha1": "dde0f6e9ca218e76655fbe24b058b506ff42283f",
+      "bytes": 6298
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/backend/spirv/emit_spirv_instructions.h",
+      "git_sha1": "ac230de665759c294dc9ad818488521b82b767b3",
+      "bytes": 36211
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/backend/spirv/emit_spirv_integer.cpp",
+      "git_sha1": "7c9a233fb86a91b4c406ba172fb650d57536b14e",
+      "bytes": 9164
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/backend/spirv/emit_spirv_logical.cpp",
+      "git_sha1": "c38427c9335c7ad0c8257fe98535e0602addac62",
+      "bytes": 704
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/backend/spirv/emit_spirv_memory.cpp",
+      "git_sha1": "f1a21e169a2a8e1865a3c2f7261a2343cc4a14ed",
+      "bytes": 15603
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/backend/spirv/emit_spirv_mesh.cpp",
+      "git_sha1": "f40ca1fecb3dc0fc55a9e17636cdddc1bdb76adb",
+      "bytes": 15017
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/backend/spirv/emit_spirv_select.cpp",
+      "git_sha1": "68e5b1c8ee3b7911b823c7c72a3ce5e09976e72a",
+      "bytes": 1447
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/backend/spirv/emit_spirv_shared_memory.cpp",
+      "git_sha1": "dc398aa29635bbaa5171d14397f43a5eb7d4c8b4",
+      "bytes": 7736
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/backend/spirv/emit_spirv_special.cpp",
+      "git_sha1": "2b36c1fd8d9bf90c3c6a3d432f2d47c04287d644",
+      "bytes": 7066
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/backend/spirv/emit_spirv_undefined.cpp",
+      "git_sha1": "471c0f3795c844cdb019ac073d691ece8bd3e6cf",
+      "bytes": 1504
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/backend/spirv/emit_spirv_warp.cpp",
+      "git_sha1": "666d11f337c7af68f22df5d0cbe0a6fbab79042d",
+      "bytes": 25023
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/backend/spirv/mma_layout.h",
+      "git_sha1": "9601e0d7f90dc9bb1fd0432f20f56397b47efdb1",
+      "bytes": 975
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/backend/spirv/spirv_emit_context.cpp",
+      "git_sha1": "3f99f825f2529052a6c4f08504992f880ef0f573",
+      "bytes": 107304
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/backend/spirv/spirv_emit_context.h",
+      "git_sha1": "fa67a407b2b8837ff3266144047666b076c7cf38",
+      "bytes": 12883
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/environment.h",
+      "git_sha1": "1f0a96670c1f914b769fb5081af7bdb6a5332456",
+      "bytes": 4880
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/exception.h",
+      "git_sha1": "b97b68a3b604879c06cc1ff3c14f58f530bef26c",
+      "bytes": 1834
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/ampere/lower_to_maxwell.h",
+      "git_sha1": "42d626492bd03ee0c68a4bbbdbf9f0f9dd0b664d",
+      "bytes": 233718
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/ampere/program_address_map.h",
+      "git_sha1": "bee32a821ccf6dd7b0249aa2989c682ebc742654",
+      "bytes": 1299
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/ampere/program_capture.h",
+      "git_sha1": "7e308de4abde84b03970228c40f4ae982866a24e",
+      "bytes": 2637
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/ampere/program_override.h",
+      "git_sha1": "0943028b0c9994c47fb37bc7a4f409a73a0d6497",
+      "bytes": 4418
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/ir/abstract_syntax_list.h",
+      "git_sha1": "7edf21e8aba5fe197b191f13ff2b0103989eab4b",
+      "bytes": 1096
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/ir/attribute.h",
+      "git_sha1": "4adf9809492b05e5845b1e332718e9c033edd233",
+      "bytes": 11894
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/ir/basic_block.cpp",
+      "git_sha1": "68fab72b36baaa6a2c7d04f1f3c724d007c49d2f",
+      "bytes": 5675
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/ir/basic_block.h",
+      "git_sha1": "d3a66caac9b0955dd72526b23cf7caab8b12976f",
+      "bytes": 6330
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/ir/breadth_first_search.h",
+      "git_sha1": "ad199177810d15218684727bb50468bb2d9fbcba",
+      "bytes": 2677
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/ir/condition.cpp",
+      "git_sha1": "4db0c164f021214c6353cc213b4bd74577c72172",
+      "bytes": 632
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/ir/condition.h",
+      "git_sha1": "89ac42dbe09f82eb6eccdf1c1171155792c51ab0",
+      "bytes": 1635
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/ir/flow_test.h",
+      "git_sha1": "0bb9666538d4fc427609ac8dbf73604656d20b3f",
+      "bytes": 2192
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/ir/ir_emitter.cpp",
+      "git_sha1": "6bf593a424c47ec9d16d92fea2eb73438e0d7570",
+      "bytes": 73188
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/ir/ir_emitter.h",
+      "git_sha1": "e3d6e44f5bb2fc722410ce3affcb5956f30f70cb",
+      "bytes": 24337
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/ir/microinstruction.cpp",
+      "git_sha1": "a579ed10571134a68fede2e633ec4b10b475863c",
+      "bytes": 15103
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/ir/modifiers.h",
+      "git_sha1": "991c51b1d639b3cdb173965acc595b5ed63b679f",
+      "bytes": 1923
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/ir/opcodes.cpp",
+      "git_sha1": "03192d4dc9b8b50649f9f15d23e9cb5b8c136acc",
+      "bytes": 1180
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/ir/opcodes.h",
+      "git_sha1": "dc7dffa130eca8f59b5aa91fdc00ce5c8a76b7f3",
+      "bytes": 2924
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/ir/opcodes.inc",
+      "git_sha1": "7323d74b5bcc360710e356b751e9d1a7b84172ff",
+      "bytes": 86067
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/ir/patch.cpp",
+      "git_sha1": "b0707d85a97a3790b7b8509a8f72c101d537777a",
+      "bytes": 806
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/ir/patch.h",
+      "git_sha1": "5077e56c2c7f4e2c4a0d87ae9f65f6438c95db14",
+      "bytes": 2667
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/ir/post_order.cpp",
+      "git_sha1": "f526615fc44ccfdfefb72140a7f8162a9e665072",
+      "bytes": 1450
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/ir/post_order.h",
+      "git_sha1": "d93071b0753613ee4522287ba934bd691569bfb5",
+      "bytes": 348
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/ir/pred.h",
+      "git_sha1": "4c9e8b6bdfce61d05bdd0b9821e19b32bf4952aa",
+      "bytes": 929
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/ir/program.cpp",
+      "git_sha1": "39ff92ce7596e1fabdb0d9cf625282d4e1103792",
+      "bytes": 858
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/ir/program.h",
+      "git_sha1": "fee5cee721b47cbda7145acd32387077248b331f",
+      "bytes": 911
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/ir/reg.h",
+      "git_sha1": "b1acd8c1bed42687c6bf0eb0fc30ae3849ecd135",
+      "bytes": 4529
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/ir/type.cpp",
+      "git_sha1": "32657cb05b5fe3157f9c709583eb83b4247df4f7",
+      "bytes": 1080
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/ir/type.h",
+      "git_sha1": "91fabdcf3e95f194f146a908c7c3d194695420b1",
+      "bytes": 1303
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/ir/value.cpp",
+      "git_sha1": "3461693283d6f84fda019a36f0304739a44a3667",
+      "bytes": 2653
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/ir/value.h",
+      "git_sha1": "7ecc99c41dffedea34dda140e2304403ab0f6cb6",
+      "bytes": 11763
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/control_flow.cpp",
+      "git_sha1": "17450e925872bd5134fabba814bd125e1681a6c1",
+      "bytes": 24832
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/control_flow.h",
+      "git_sha1": "1ce45b3a50673fe8eaae95e81c3d172dc12ce4d1",
+      "bytes": 4592
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/decode.cpp",
+      "git_sha1": "251b370efa70326cf1133985ae37aa763caf83cc",
+      "bytes": 1423
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/decode.h",
+      "git_sha1": "fc2fc016a58d4a72e4269b6e4a9cc8c04cbaa4d3",
+      "bytes": 314
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/indirect_branch_table_track.cpp",
+      "git_sha1": "b444803b7dcc03ad75ff36cc3153e02868ad8efa",
+      "bytes": 8330
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/indirect_branch_table_track.h",
+      "git_sha1": "9a3afd19c63e7132f4fbbc43aba2c1bdd5d3f36e",
+      "bytes": 730
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/instruction.h",
+      "git_sha1": "d86c8cd349208b3bf0a335ffcb1b8d31f3a27048",
+      "bytes": 1576
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/location.h",
+      "git_sha1": "3093c7a8ee3162b240142af8d5b2d61e12b2112d",
+      "bytes": 2544
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/maxwell.inc",
+      "git_sha1": "44c87badc820e98e0f9ba202262f053ac1827370",
+      "bytes": 17090
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/opcodes.cpp",
+      "git_sha1": "82a4b0111415b182291734ab07f65a465a3370b8",
+      "bytes": 770
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/opcodes.h",
+      "git_sha1": "18ed4f6e1a10585cabea97f9b51af1d9c214355a",
+      "bytes": 687
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/structured_control_flow.cpp",
+      "git_sha1": "a40aad1ad81fabe4db827fb99147a8a43d5110fc",
+      "bytes": 41537
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/structured_control_flow.h",
+      "git_sha1": "15c1185edeed15aaf2836459ab572e83c64a9af9",
+      "bytes": 829
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/atomic_operations_global_memory.cpp",
+      "git_sha1": "75087777dd22de4c69c4b869e421af3b9b064d3e",
+      "bytes": 6786
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/atomic_operations_shared_memory.cpp",
+      "git_sha1": "5ce911247806b037e74bf5aded88fa8ca4505920",
+      "bytes": 3199
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/attribute_memory_to_physical.cpp",
+      "git_sha1": "f6ff160c9bf64dc61b66ef6d39480afb1846615e",
+      "bytes": 964
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/barrier_operations.cpp",
+      "git_sha1": "aa494e24cc7728e607180e3fe920e8183c39e53a",
+      "bytes": 2531
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/bitfield_extract.cpp",
+      "git_sha1": "8d8a90c9b928c872635a4412f92b86f096a3519f",
+      "bytes": 2575
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/bitfield_insert.cpp",
+      "git_sha1": "e03ccc1ad99109e3fa46e07bf91e9ab4975c9d1e",
+      "bytes": 2006
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/branch_indirect.cpp",
+      "git_sha1": "50aa16049183ff24232358c9116531934b91ad17",
+      "bytes": 840
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/common_encoding.h",
+      "git_sha1": "b43bb01b8b58b284626a6b6b4d6b9b7efb995fb7",
+      "bytes": 1380
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/common_funcs.cpp",
+      "git_sha1": "3fd2c616db506fab3f4a3d54d3361474efb81bc8",
+      "bytes": 6235
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/common_funcs.h",
+      "git_sha1": "25b7e12e6f4f863e74a1029965020dd5a96d3113",
+      "bytes": 1262
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/condition_code_set.cpp",
+      "git_sha1": "4bf151499eed3efbd7847df194be132b279879ec",
+      "bytes": 2382
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/double_add.cpp",
+      "git_sha1": "b24ac80e0182c589b7879da7219fb0e765c07e13",
+      "bytes": 1652
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/double_compare_and_set.cpp",
+      "git_sha1": "6f040c45c82b617f62bbe8ba1d4458ac75f4beae",
+      "bytes": 2349
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/double_fused_multiply_add.cpp",
+      "git_sha1": "b43a3a2e6548014385c3462ce75505845195303d",
+      "bytes": 1767
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/double_min_max.cpp",
+      "git_sha1": "59a138eef09696c5fa55b6ec4347b5713e2b1915",
+      "bytes": 1626
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/double_multiply.cpp",
+      "git_sha1": "a3dcdb6d7f8669217241d91c6a27bbdec18a9073",
+      "bytes": 1421
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/double_set_predicate.cpp",
+      "git_sha1": "24859f5b8254b53f353ae848052c7e777216e7f8",
+      "bytes": 1988
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/exit_program.cpp",
+      "git_sha1": "44459b7366e66e121e1ec0266bdd270b1b5401ee",
+      "bytes": 1410
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/find_leading_one.cpp",
+      "git_sha1": "a920bfcb2b8a01fb9ea90ac450b9eb9d2b963df0",
+      "bytes": 1347
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/floating_point_add.cpp",
+      "git_sha1": "7350b6a8204d133c51d0f72bf01c3efa246414a3",
+      "bytes": 2632
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/floating_point_compare.cpp",
+      "git_sha1": "b26a687669b934535e8a245e69ea6f5b4851c95f",
+      "bytes": 1809
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/floating_point_compare_and_set.cpp",
+      "git_sha1": "8f253ff6e20d86f827b46cb7771772af2f8f0d07",
+      "bytes": 2585
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/floating_point_conversion_floating_point.cpp",
+      "git_sha1": "7f3dccc526b623bfb4859a9493af9f19d6668b9e",
+      "bytes": 6518
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/floating_point_conversion_integer.cpp",
+      "git_sha1": "c8c9e26248f92d4f5d97d670f4974ffd63c453fa",
+      "bytes": 8976
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/floating_point_fused_multiply_add.cpp",
+      "git_sha1": "fb9f40b82d033c506352e7790fc83ea46e88341c",
+      "bytes": 3358
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/floating_point_min_max.cpp",
+      "git_sha1": "125ade76950dd6534b16c1b170cf5f1fad92577d",
+      "bytes": 1867
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/floating_point_multi_function.cpp",
+      "git_sha1": "64b213ebf5f672127335979f24c92cd01c572a41",
+      "bytes": 2111
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/floating_point_multiply.cpp",
+      "git_sha1": "fc8c7174bbbbeb3d417df5866b4099aacb36101c",
+      "bytes": 3767
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/floating_point_range_reduction.cpp",
+      "git_sha1": "96e3e68e07c63abb6ad2e8b2765cfb99dfb354d1",
+      "bytes": 993
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/floating_point_set_predicate.cpp",
+      "git_sha1": "cbdaafc7bec5eb13f28014cfc90b30b64b65c5af",
+      "bytes": 2225
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/floating_point_swizzled_add.cpp",
+      "git_sha1": "f00e20023d0df369924c6eb2550986e3211a87d4",
+      "bytes": 1383
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/half_floating_point_add.cpp",
+      "git_sha1": "ba017671674b9416826c15dd7d7e8be8fbae374b",
+      "bytes": 4246
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/half_floating_point_fused_multiply_add.cpp",
+      "git_sha1": "9af8712cd182e7801ce8d8f58e2ba2f9ecefa611",
+      "bytes": 6287
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/half_floating_point_helper.cpp",
+      "git_sha1": "014217ece1f9808246111b03f97ac7616e07b16b",
+      "bytes": 2109
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/half_floating_point_helper.h",
+      "git_sha1": "3283b85bdc4d26b6c40e9bacafabf2e7ce6908a6",
+      "bytes": 840
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/half_floating_point_multiply.cpp",
+      "git_sha1": "7938d89c097332d851a0290a337264aa4f684577",
+      "bytes": 5195
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/half_floating_point_set.cpp",
+      "git_sha1": "c3080da25826c66133bc855e82ec25ba610dccfc",
+      "bytes": 4372
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/half_floating_point_set_predicate.cpp",
+      "git_sha1": "a08979e8d62b00e6a0524ec44a404178f0ef0570",
+      "bytes": 4365
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/impl.cpp",
+      "git_sha1": "1137e81ff50e62422c59a107622e5d07238060b4",
+      "bytes": 8052
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/impl.h",
+      "git_sha1": "0b08949f155ccf1c75e0840f7f8afb291bea6160",
+      "bytes": 3114
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/integer_add.cpp",
+      "git_sha1": "49f70451a6d17fd92443b7f162a2bcdbc4129d08",
+      "bytes": 3069
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/integer_add_three_input.cpp",
+      "git_sha1": "3d9877359b106a7357eb137a5055f458b75615d7",
+      "bytes": 3801
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/integer_compare.cpp",
+      "git_sha1": "ac1b405c57a8f444bc32fbf723bbcd8e3af4e4ff",
+      "bytes": 1467
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/integer_compare_and_set.cpp",
+      "git_sha1": "a708f8b9142f99e1a51c7887de22b5496c418efc",
+      "bytes": 2610
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/integer_floating_point_conversion.cpp",
+      "git_sha1": "6c0953955c1184b82efdd21ab752081e04cc73b0",
+      "bytes": 5792
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/integer_funnel_shift.cpp",
+      "git_sha1": "c2a0ee6f1c3e391563eafc8809cdee39fc7b798f",
+      "bytes": 2740
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/integer_minimum_maximum.cpp",
+      "git_sha1": "c3f6b0b7d572c91b177122b2678c4cc7a9896669",
+      "bytes": 1688
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/integer_popcount.cpp",
+      "git_sha1": "2a535f38790556d9492021252d32c26cea20d073",
+      "bytes": 955
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/integer_scaled_add.cpp",
+      "git_sha1": "4a3f0772f2797948b90a373e3497ccab94f8f6cf",
+      "bytes": 2570
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/integer_set_predicate.cpp",
+      "git_sha1": "c5d5221a0a3531811333f493478d33c5ee96ff92",
+      "bytes": 2163
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/integer_shift_left.cpp",
+      "git_sha1": "5779cfbdd27caca49faeade741b01423acdf9102",
+      "bytes": 2708
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/integer_shift_right.cpp",
+      "git_sha1": "f33d1fb68f718917d29ba06e5ec65ba3f128f72b",
+      "bytes": 2068
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/integer_short_multiply_add.cpp",
+      "git_sha1": "a96f8707e0e50c1980d4cce655c62a8be81d9f3d",
+      "bytes": 4306
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/integer_to_integer_conversion.cpp",
+      "git_sha1": "7484621d08e671d69b761a8e33648212f8d3e22e",
+      "bytes": 4262
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/internal_stage_buffer_entry_read.cpp",
+      "git_sha1": "27de2a0171aa9b687acbe8e35b378e839498e8c1",
+      "bytes": 4941
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/load_constant.cpp",
+      "git_sha1": "7e12c089b4718807df5bfa101eb8277f9357ce6d",
+      "bytes": 2587
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/load_constant.h",
+      "git_sha1": "0df13b7c878ff6859ed717441493752bec7da99e",
+      "bytes": 690
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/load_effective_address.cpp",
+      "git_sha1": "8361c8ab1b2a870fbd8746c12e5d8f6d52e80aaf",
+      "bytes": 3365
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/load_store_attribute.cpp",
+      "git_sha1": "d4990af7a672dadae8d69f82b070d3e93bb200f0",
+      "bytes": 7220
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/load_store_local_shared.cpp",
+      "git_sha1": "a52b7d50b967e22b36675915c906996261c84e43",
+      "bytes": 6909
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/load_store_memory.cpp",
+      "git_sha1": "8f2cf897d4ac34176398370b8ae69d1e57e1ed1f",
+      "bytes": 5753
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/logic_operation.cpp",
+      "git_sha1": "4e0ff897c25674f4bf25367cfefca881438d20d0",
+      "bytes": 3448
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/logic_operation_three_input.cpp",
+      "git_sha1": "a4ec25844f3355a0cbcd658b608b0ebfe8a9401c",
+      "bytes": 24308
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/logic_operation_three_input_lut3.py",
+      "git_sha1": "e66d50d6178f64b6c936b4a547999f8c8540d0f9",
+      "bytes": 2801
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/matrix_multiply_nx2.cpp",
+      "git_sha1": "834c71024951c4dce4762ea39b6fd52383999d65",
+      "bytes": 1424
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/move_predicate_to_register.cpp",
+      "git_sha1": "37586a65d5f3f3767a1af8b6b3145dfec8f8ec3e",
+      "bytes": 1957
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/move_register.cpp",
+      "git_sha1": "1ddfeab06bc08e3a90916694133fa7ed96b0cfce",
+      "bytes": 1182
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/move_register_to_predicate.cpp",
+      "git_sha1": "2369e4cf6331ca33385cb10b787d1bf8436d2553",
+      "bytes": 2383
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/move_special_register.cpp",
+      "git_sha1": "b9b8671b07d523473521d5a5e16f4ac13d955da1",
+      "bytes": 5222
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/not_implemented.cpp",
+      "git_sha1": "369af8e03af4d1140f313b9c087f1747cc54a86e",
+      "bytes": 6111
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/output_geometry.cpp",
+      "git_sha1": "b4b7925c94ed38133f90cb9dda04488482545853",
+      "bytes": 1233
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/pixel_load.cpp",
+      "git_sha1": "f8607c3d772b46cc0291e912f6e11e57860eaebb",
+      "bytes": 1206
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/predicate_set_predicate.cpp",
+      "git_sha1": "3b7d5395362b902619d7cd658f9466501dfa35ae",
+      "bytes": 1521
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/predicate_set_register.cpp",
+      "git_sha1": "cd1179c7d105b689b5ed68d1c195659e4dcebfe8",
+      "bytes": 1779
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/register_map_nx2.cpp",
+      "git_sha1": "a0f78451b6b4557da2e1222492ffba931d545314",
+      "bytes": 1632
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/select_source_with_predicate.cpp",
+      "git_sha1": "992d6d1afd98f95fe0c670d51fe3e1146b5d5f54",
+      "bytes": 1136
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/surface_atomic_operations.cpp",
+      "git_sha1": "9f8dfb45ddc014ff47471b1b3e18976fd0de0ca9",
+      "bytes": 6667
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/surface_load_store.cpp",
+      "git_sha1": "965b75264c6139d7720b3db2308ec7b1a72a7258",
+      "bytes": 8638
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/texture_fetch.cpp",
+      "git_sha1": "7a9b7fff8b30f3558b14b2873d7d4cf12e90ac42",
+      "bytes": 7450
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/texture_fetch_swizzled.cpp",
+      "git_sha1": "50e618c2f1ab4600222de79b1ddddab08885e78c",
+      "bytes": 9061
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/texture_gather.cpp",
+      "git_sha1": "3263b3c7c9da60d1137d60230ed20d87f950c84f",
+      "bytes": 7021
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/texture_gather_swizzled.cpp",
+      "git_sha1": "e4c6581450cdcee30d8c75dc4bbc6ddc947fa9e9",
+      "bytes": 4348
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/texture_gradient.cpp",
+      "git_sha1": "4ce3dd0cd0a28be24af6034b5a7c9b50924d62c6",
+      "bytes": 5779
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/texture_load.cpp",
+      "git_sha1": "0a7821e18809e63f1109ea870a3fbe82e437d7b4",
+      "bytes": 5500
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/texture_load_swizzled.cpp",
+      "git_sha1": "0362f076afa96151059189b4cfff3f4e1b3b6a61",
+      "bytes": 7301
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/texture_mipmap_level.cpp",
+      "git_sha1": "435e5d0bb20989c9e90ae2bd2930c2796d25bf0b",
+      "bytes": 4033
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/texture_query.cpp",
+      "git_sha1": "39af62559692b4c4ebcb9523428dd898539886de",
+      "bytes": 2112
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/video_helper.cpp",
+      "git_sha1": "7d7444aff0d11b7cb94bf18a1a13df26aa27ffd0",
+      "bytes": 1042
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/video_helper.h",
+      "git_sha1": "cbf253b6f842b4038b20087ecd68c15a21ce1a44",
+      "bytes": 632
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/video_minimum_maximum.cpp",
+      "git_sha1": "5ac25beee8525af00738bfab5cc917fdc2900f5a",
+      "bytes": 3013
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/video_multiply_add.cpp",
+      "git_sha1": "9272a6d03703dd1db6623bc30bf6fd19b9ad6228",
+      "bytes": 2436
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/video_set_predicate.cpp",
+      "git_sha1": "73db353042608f5bd48ec9fbbd1d494418672ad6",
+      "bytes": 3508
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/vote.cpp",
+      "git_sha1": "70e490e80800a00d994de31039faef4be4a0b841",
+      "bytes": 1442
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/impl/warp_shuffle.cpp",
+      "git_sha1": "2a19237ab298eed0cd98e2e6cd870ffb389f4908",
+      "bytes": 3490
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/translate.cpp",
+      "git_sha1": "69d8cdd5705141b7fd6ed054dee1f8b16f34be6f",
+      "bytes": 1813
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate/translate.h",
+      "git_sha1": "2f98f0ec17a4d8f568aaeed66cfd4d97c121fb53",
+      "bytes": 374
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate_program.cpp",
+      "git_sha1": "e4d7ce56dedde0b38e240c33d166d48450574749",
+      "bytes": 29689
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/frontend/maxwell/translate_program.h",
+      "git_sha1": "497afe7cb97c4317156b62670f8beb9a6574d035",
+      "bytes": 1757
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/host_translate_info.h",
+      "git_sha1": "44df85ccb2a98c64c98dab41f54783bd5970b19c",
+      "bytes": 3185
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/ir_opt/collect_shader_info_pass.cpp",
+      "git_sha1": "b5a60cdd7e16db844889b49430cd6e13308266cc",
+      "bytes": 39945
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/ir_opt/conditional_barrier_pass.cpp",
+      "git_sha1": "c3ed27f4f22469a2dba013d89a8665fb5ec852f2",
+      "bytes": 1641
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/ir_opt/constant_propagation_pass.cpp",
+      "git_sha1": "7d246bec59634f830766d1760b01080fadeff113",
+      "bytes": 45170
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/ir_opt/dead_code_elimination_pass.cpp",
+      "git_sha1": "1bd8afd6f6b0d6a9c3a55b9dceba706636377e2b",
+      "bytes": 876
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/ir_opt/dual_vertex_pass.cpp",
+      "git_sha1": "900f6f9fdb99200d5689b5df5a31a29a42b2674a",
+      "bytes": 864
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/ir_opt/geometry_compaction_pass.cpp",
+      "git_sha1": "98cfa47401afcebbd122f4f8b9473a3142ddad62",
+      "bytes": 4429
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/ir_opt/global_memory_to_storage_buffer_pass.cpp",
+      "git_sha1": "738f488e7c2c0a6594eefc3e3e8b5859bbed9e66",
+      "bytes": 38860
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/ir_opt/identity_removal_pass.cpp",
+      "git_sha1": "cac0d20e784a5c50e489e40ae7c8eeec5532425b",
+      "bytes": 1493
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/ir_opt/layer_pass.cpp",
+      "git_sha1": "4574f7cf267c04fbd55eff83491cde3a6763b97b",
+      "bytes": 2185
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/ir_opt/lower_fp16_to_fp32.cpp",
+      "git_sha1": "191ffb57bd29e007bbe47917073cdcd14016a103",
+      "bytes": 6693
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/ir_opt/lower_fp64_to_fp32.cpp",
+      "git_sha1": "9a056098575bea25035683d8c7cfbc41e1a194b0",
+      "bytes": 7642
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/ir_opt/lower_int64_to_int32.cpp",
+      "git_sha1": "dbca9643d8025342be6ca5fc40b3f290a273def8",
+      "bytes": 15925
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/ir_opt/oot_visual_workaround.h",
+      "git_sha1": "85e8e43591764b933fbd2a3d6132fcd52e0fc8b7",
+      "bytes": 4867
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/ir_opt/passes.h",
+      "git_sha1": "e3422deb9d1a2927fd480981ac0212ad0e9ba9f7",
+      "bytes": 1791
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/ir_opt/position_pass.cpp",
+      "git_sha1": "4f096fb5981be08f515e0cf068f403c90ebfe595",
+      "bytes": 9627
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/ir_opt/predicate_mask.h",
+      "git_sha1": "cc1cd6a8fc7f9de9a7432b38701bdf1af7e70e4b",
+      "bytes": 3749
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/ir_opt/rescaling_pass.cpp",
+      "git_sha1": "cae8110a26d7d32015114bc523c653f74dd696a2",
+      "bytes": 13476
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/ir_opt/ssa_rewrite_pass.cpp",
+      "git_sha1": "b5cd2339924f0cbd725249140ff67cfb8f79a360",
+      "bytes": 15105
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/ir_opt/texture_pass.cpp",
+      "git_sha1": "d58040a09d5182dc81f487eaffa2044c99a161fe",
+      "bytes": 59319
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/ir_opt/vendor_workaround_pass.cpp",
+      "git_sha1": "5842f6135b8db659764c52e25cd5ec577358e28b",
+      "bytes": 4276
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/ir_opt/verification_pass.cpp",
+      "git_sha1": "f89f4ac28f03b78aa5d80411069ca5afb407af4a",
+      "bytes": 3300
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/object_pool.h",
+      "git_sha1": "c39d3527ea9376f82ac496f93f40a0ba5822375e",
+      "bytes": 3198
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/profile.h",
+      "git_sha1": "8e9c83f8885c18634bf02e68a167e6ce2ef33503",
+      "bytes": 5026
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/program_header.h",
+      "git_sha1": "1e8bae7cda6cbd89b7d2c1d07971ab1480d4d7e9",
+      "bytes": 7909
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/runtime_info.h",
+      "git_sha1": "da9ce0fb3ceb912111bebcb436c11da7849965f8",
+      "bytes": 3144
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/shader_info.h",
+      "git_sha1": "9890110dd553fc88ebe22ebb036bed909d94cc2d",
+      "bytes": 15764
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/stage.h",
+      "git_sha1": "34172cfee22cf28255d34b15bb2594849a5afee6",
+      "bytes": 679
+    },
+    {
+      "path": "gpu/vk/eden/shader_recompiler/varying_state.h",
+      "git_sha1": "18a9aaf50f10498f14c58a2567e790f2c2f2ecfb",
+      "bytes": 2456
+    },
+    {
+      "path": "gpu/vk/sirit/LICENSE",
+      "git_sha1": "be3f7b28e564e7dd05eaf59d64adba1a4065ac0e",
+      "bytes": 34523
+    },
+    {
+      "path": "gpu/vk/sirit/LICENSE.txt",
+      "git_sha1": "f288702d2fa16d3cdf0035b15a9fcbc552cd88e7",
+      "bytes": 35149
+    },
+    {
+      "path": "gpu/vk/sirit/include/sirit/sirit.h",
+      "git_sha1": "799a45d6095cbbf1dfba2b82e4ea4d021186589d",
+      "bytes": 69707
+    },
+    {
+      "path": "gpu/vk/sirit/src/.gitignore",
+      "git_sha1": "06d55cbb24439efa08c512c2a96812df4d412f16",
+      "bytes": 8
+    },
+    {
+      "path": "gpu/vk/sirit/src/CMakeLists.txt",
+      "git_sha1": "425bd0b8dd9e3f955b4327b8c678bd0492f4e8dd",
+      "bytes": 2289
+    },
+    {
+      "path": "gpu/vk/sirit/src/common_types.h",
+      "git_sha1": "42df6f6c3ba8f46aa6035dfaeac82627d0c3f301",
+      "bytes": 717
+    },
+    {
+      "path": "gpu/vk/sirit/src/instructions/annotation.cpp",
+      "git_sha1": "e3524bb83a1e5b5ecdfc077bf2d9bdb7adeae567",
+      "bytes": 865
+    },
+    {
+      "path": "gpu/vk/sirit/src/instructions/arithmetic.cpp",
+      "git_sha1": "3bcd01e10b4722873ea4705e1f7f4c99b6f1d9fb",
+      "bytes": 2436
+    },
+    {
+      "path": "gpu/vk/sirit/src/instructions/atomic.cpp",
+      "git_sha1": "635e8e29a4697738c66c9780cc458831f6b762a1",
+      "bytes": 4508
+    },
+    {
+      "path": "gpu/vk/sirit/src/instructions/barrier.cpp",
+      "git_sha1": "646b5cfb4d87cb5e9fb27267f7682c6334dac8a7",
+      "bytes": 607
+    },
+    {
+      "path": "gpu/vk/sirit/src/instructions/bit.cpp",
+      "git_sha1": "c860613fcf671009366f58c95b4edd8fb2cefcc2",
+      "bytes": 2570
+    },
+    {
+      "path": "gpu/vk/sirit/src/instructions/constant.cpp",
+      "git_sha1": "612049c4f8e54db3e95f43f49e8407158ab0b9ac",
+      "bytes": 1573
+    },
+    {
+      "path": "gpu/vk/sirit/src/instructions/conversion.cpp",
+      "git_sha1": "9163eda056536cf4f71100d39b7dde4f8bc5af70",
+      "bytes": 975
+    },
+    {
+      "path": "gpu/vk/sirit/src/instructions/debug.cpp",
+      "git_sha1": "2907e669ab97e44479f0a978393c5cacdb3291ae",
+      "bytes": 1016
+    },
+    {
+      "path": "gpu/vk/sirit/src/instructions/derivatives.cpp",
+      "git_sha1": "c944e2a52a7c41eb597a676944cae7c9084ae297",
+      "bytes": 1088
+    },
+    {
+      "path": "gpu/vk/sirit/src/instructions/extension.cpp",
+      "git_sha1": "ea26615197d06358b09cbb4c0406712cd25dded9",
+      "bytes": 6930
+    },
+    {
+      "path": "gpu/vk/sirit/src/instructions/flow.cpp",
+      "git_sha1": "5f6b693d547eea3beb9de1ea720e684fe82c23aa",
+      "bytes": 3121
+    },
+    {
+      "path": "gpu/vk/sirit/src/instructions/function.cpp",
+      "git_sha1": "f84cd7ff530a39d2f9bd2a9b10dc95adf6150445",
+      "bytes": 1003
+    },
+    {
+      "path": "gpu/vk/sirit/src/instructions/group.cpp",
+      "git_sha1": "100db1cdea11cc299a0dbac4103f03e563dc0572",
+      "bytes": 3402
+    },
+    {
+      "path": "gpu/vk/sirit/src/instructions/image.cpp",
+      "git_sha1": "ef30e46134adf643512a73ceec43927169369928",
+      "bytes": 9372
+    },
+    {
+      "path": "gpu/vk/sirit/src/instructions/logical.cpp",
+      "git_sha1": "4d7292bf021bce2d078c71141553c67bf10a4647",
+      "bytes": 2548
+    },
+    {
+      "path": "gpu/vk/sirit/src/instructions/memory.cpp",
+      "git_sha1": "70f3b24ea79cdb5a201e5c004d9fda1bbba8777b",
+      "bytes": 2992
+    },
+    {
+      "path": "gpu/vk/sirit/src/instructions/misc.cpp",
+      "git_sha1": "58ffe17e6cb81ecf6380eea510fb76b8ab2f258f",
+      "bytes": 1353
+    },
+    {
+      "path": "gpu/vk/sirit/src/instructions/type.cpp",
+      "git_sha1": "bfd27e4fa29108ebec9afa7bc31a323435388b6c",
+      "bytes": 4338
+    },
+    {
+      "path": "gpu/vk/sirit/src/sirit.cpp",
+      "git_sha1": "c355d94a47a7d21b5157f325b5aa0357f04b2073",
+      "bytes": 6972
+    },
+    {
+      "path": "gpu/vk/sirit/src/stream.cpp",
+      "git_sha1": "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
+      "bytes": 0
+    },
+    {
+      "path": "gpu/vk/sirit/src/stream.h",
+      "git_sha1": "0c03fdbc6fd86846ce73e9159e8d12c8038ce9bb",
+      "bytes": 7219
+    }
+  ]
+}

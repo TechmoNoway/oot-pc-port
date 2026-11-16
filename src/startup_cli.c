@@ -23,6 +23,7 @@ uint64_t oot_startup_compiled_original_oe_entry(void);
 const OotStartupFastFunction *oot_startup_compiled_fast_functions(size_t *count);
 const OotStartupConstructor *oot_startup_compiled_constructors(size_t *count);
 const OotObjectDeclaration *oot_startup_compiled_objects(void);
+const OotNvnDeclaration *oot_startup_compiled_nvn(void);
 
 typedef struct TraceFile {
     FILE *file;
@@ -164,6 +165,9 @@ int oot_startup_cli(int argc, char **argv)
         if(!oot_startup_context_bind_objects(context,oot_startup_compiled_objects())){
             fputs("Object source declaration or retained image rejected.\n",stderr);goto cleanup;
         }
+        if(oot_startup_compiled_nvn() && !oot_startup_context_bind_nvn(context,oot_startup_compiled_nvn())){
+            fputs("NVN source declaration or procedure table rejected.\n",stderr);goto cleanup;
+        }
     }
     pauth=oot_pauth_create(OOT_PAUTH_QARMA5_VA39,NULL);
     if (!pauth) { fputs("Startup PAC context failed.\n",stderr); goto cleanup; }
@@ -293,6 +297,18 @@ int oot_startup_cli(int argc, char **argv)
     if(program->flags&OOT_STARTUP_OBJECTS){
         OotObjectsReport objects={0};printf(",\"objects_runtime\":true");
         if(oot_startup_compiled_objects()->flags&OOT_OBJECT_VSYNC)printf(",\"events_runtime\":true");
+        if(oot_startup_compiled_objects()->flags&OOT_OBJECT_NVN){
+            OotNvnReport nr={0};printf(",\"nvn_runtime\":true,\"game_frame_proven\":false");
+            if(oot_startup_context_nvn_report(context,&nr))printf(",\"nvn\":{\"device_ready\":%s,\"device_identity\":%" PRIu64 ",\"lookups\":%" PRIu64 ",\"initializations\":%" PRIu64 ",\"finalizations\":%" PRIu64 ",\"integer_queries\":%" PRIu64
+                ",\"state_updates\":%" PRIu64 ",\"state_queries\":%" PRIu64 ",\"window_origin\":%u,\"depth_mode\":%u}",
+                nr.device?"true":"false",nr.device,nr.lookups,nr.initializations,nr.finalizations,nr.integer_queries,
+                nr.state_updates,nr.state_queries,nr.window_origin,nr.depth_mode);
+        }
+        if(oot_startup_compiled_objects()->flags&OOT_OBJECT_REFRESH){
+            OotRefreshReport refresh={0};printf(",\"refresh_runtime\":true");
+            if(oot_startup_context_refresh_report(context,&refresh))printf(",\"display_refresh\":{\"capability_bits\":%" PRIu64 ",\"update_mask\":%" PRIu64 ",\"updates\":%" PRIu64 ",\"ignored\":%" PRIu64 "}",
+                refresh.capability_bits,refresh.update_mask,refresh.updates,refresh.ignored);
+        }
         if(oot_startup_context_objects_report(context,&objects))printf(",\"display_objects\":{\"display_open\":%u,\"layer_open\":%u,\"event_open\":%u,\"references\":%" PRIu64 ",\"calls\":%" PRIu64 ",\"opens\":%" PRIu64 ",\"closes\":%" PRIu64 ",\"creates\":%" PRIu64 ",\"destroys\":%" PRIu64 ",\"window_getters\":%" PRIu64 ",\"vsync_events\":%" PRIu64 ",\"waits\":%" PRIu64 ",\"resets\":%" PRIu64 ",\"clears\":%" PRIu64 ",\"handle_closes\":%" PRIu64 "}",
             objects.display_open,objects.layer_open,objects.event_open,objects.references,objects.calls,objects.opens,
             objects.closes,objects.creates,objects.destroys,objects.window_getters,objects.vsync_events,objects.waits,

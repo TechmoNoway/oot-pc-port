@@ -34,7 +34,7 @@ def emit_object_declaration(declaration,image_sha256):
         require(isinstance(value,str)and len(value)==64 and all(c in'0123456789abcdef'for c in value),
             'invalid compiled object digest')
         return '{'+','.join('0x'+value[n:n+2]for n in range(0,64,2))+'}'
-    require(declaration['version']==1 and declaration['flags']in(0,1)and
+    require(declaration['version']==1 and declaration['flags']in(0,1,3,7)and
         len(declaration['tables'])==8 and len(declaration['vptr_address'])==len(declaration['vptr_value'])==5,
         'invalid compiled object declaration shape')
     lines=['static const OotObjectDeclaration oot_object_declaration={']

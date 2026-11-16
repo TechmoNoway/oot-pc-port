@@ -9,11 +9,12 @@ from test_module_linker import fixture,change_memory
 from object_cache import SharedCompiler
 from milestone_checkpoint import owned_run
 
-def synthetic_objects():
+def synthetic_objects(nvn=False):
     values={}
     for n in range(8):
         values.update({0x2000+n*24:0,0x2008+n*24:0x20f0,0x2010+n*24:0x40})
-    raw=change_memory(fixture(values=values),0x40,struct.pack('<II',0xd503201f,0xd65f03c0))
+    if nvn:values.update({0x2100+n*8:0x40+n*4 for n in range(3)})
+    raw=change_memory(fixture(values=values,relr=(0x2100,7)if nvn else()),0x40,struct.pack('<II',0xd503201f,0xd65f03c0))
     linker=Linker([Module('main',raw)]);assert linker.apply()['link_complete']
     blob,_=make_package(linker);base=linker.modules[0].base
     def number(value):return 'UINT64_C('+str(value)+')'
@@ -30,12 +31,27 @@ def synthetic_objects():
     for n in range(8):
         data=linker.modules[0].read(0x2000+n*24,24)
         lines.append('{'+number(base+0x2000+n*24)+',24,0,'+digest(hashlib.sha256(data).hexdigest())+'},')
-    lines+=['}};'];return blob,'\n'.join(lines)+'\n'
+    lines+=['}};']
+    if nvn:
+        names=('nvnDeviceFinalize','nvnDeviceGetProcAddress','nvnDeviceInitialize')
+        lines+=['#define OOT_NVN_OWNER_TEST 1','static const OotNvnProc object_test_procs[]={']
+        lines+=['{"'+name+'",'+number(base+0x40+n*4)+'},'for n,name in enumerate(names)]
+        data=linker.modules[0].read(0x2100,24)
+        lines+=['};','static const OotNvnDeclaration object_test_nvn={1,3,'+number(base+0x2100)+','+
+            digest(hashlib.sha256(data).hexdigest())+',object_test_procs};']
+    return blob,'\n'.join(lines)+'\n'
 
 class NativeObjectsTests(unittest.TestCase):
     def test_checked_objects_and_real_event_token_lifetimes(self):
+        self.check_objects(False)
+    def test_refresh_capability_bool_aliases_faults_and_old_profile_gate(self):
+        self.check_objects(True)
+    def test_nvn_private_device_identity_lookup_faults_and_finalization(self):
+        self.check_objects(True,True)
+    def check_objects(self,refresh,nvn=False):
         parent=ROOT/'build/object-tests';parent.mkdir(parents=True,exist_ok=True)
-        folder=Path(tempfile.mkdtemp(dir=parent));blob,declaration=synthetic_objects()
+        folder=Path(tempfile.mkdtemp(dir=parent));blob,declaration=synthetic_objects(nvn)
+        if refresh:declaration=declaration.replace('.flags=OOT_OBJECT_VSYNC,','.flags=OOT_OBJECT_VSYNC|OOT_OBJECT_REFRESH'+('|OOT_OBJECT_NVN'if nvn else'')+',')
         image=folder/'synthetic.ootmem';image.write_bytes(blob)
         header=folder/'declaration.h';header.write_text(declaration)
         compiler=SharedCompiler(os.environ.get('OOT_LIFTER_COMPILER','cmake'),log=folder/'build.log')

@@ -11,6 +11,10 @@ struct OotObjects {
     OotGraphics *graphics;
     OotObjectDeclaration declaration;
     OotObjectsReport report;
+    OotRefreshReport refresh;
+    OotNvnDeclaration nvn;
+    OotNvnProc *procedures;
+    OotNvnReport nvn_report;
     DWORD thread;
     OotGraphicsDisplayPeer *display;
     OotGraphicsLayerPeer *layer;
@@ -54,6 +58,8 @@ static int objects_output(OotObjects *objects,uint64_t at,unsigned size)
     const OotObjectDeclaration *d=&objects->declaration;
     if(!objects_span(at,size) || !objects_separate(at,size,d->display,d->display_size) ||
        !objects_separate(at,size,d->layer,d->layer_size))return 0;
+    if(objects->procedures && (!objects_separate(at,size,objects->nvn.table,(uint64_t)objects->nvn.count*8) ||
+       (objects->nvn_report.device && !objects_separate(at,size,objects->nvn_report.device,8))))return 0;
     for(unsigned n=0;n<OOT_OBJECT_TABLES;++n)
         if(!objects_separate(at,size,d->tables[n].address,d->tables[n].size))return 0;
     for(unsigned offset=0;offset<size;offset+=16){
@@ -67,7 +73,10 @@ OotObjects *oot_objects_create(OotRuntimeImage *image,OotGuestMemory *memory,Oot
 {
     OotObjects *objects;
     if(!image || !memory || !memory->valid || !graphics || !d || d->version!=OOT_OBJECT_DECLARATION_VERSION ||
-       d->flags&~OOT_OBJECT_VSYNC || d->reserved || !d->width || d->width>3840 || !d->height || d->height>2160 ||
+       d->flags&~(OOT_OBJECT_VSYNC|OOT_OBJECT_REFRESH|OOT_OBJECT_NVN) ||
+       ((d->flags&OOT_OBJECT_REFRESH) && !(d->flags&OOT_OBJECT_VSYNC)) ||
+       ((d->flags&OOT_OBJECT_NVN) && (d->flags&3)!=3) ||
+       d->reserved || !d->width || d->width>3840 || !d->height || d->height>2160 ||
        !objects_span(d->display,d->display_size) || !objects_span(d->layer,d->layer_size) ||
        (d->display|d->layer)&7 || !objects_separate(d->display,d->display_size,d->layer,d->layer_size) ||
        d->vptr_address[0]!=d->display || d->vptr_address[1]!=d->layer || d->native_window!=d->vptr_address[3] ||
@@ -91,6 +100,7 @@ OotObjects *oot_objects_create(OotRuntimeImage *image,OotGuestMemory *memory,Oot
     objects=calloc(1,sizeof(*objects));if(!objects)return NULL;
     objects->image=image;objects->memory=memory;objects->graphics=graphics;objects->declaration=*d;
     objects->thread=GetCurrentThreadId();objects->report.version=1;objects->next_token=0x40000000;
+    objects->refresh.version=1;
     if(!objects_tables(objects)){free(objects);return NULL;}
     return objects;
 }
@@ -101,17 +111,60 @@ void oot_objects_destroy(OotObjects *objects)
     if(objects->failure)CloseHandle(objects->failure);
     oot_vblank_destroy(objects->vblank);
     oot_graphics_layer_peer_close(objects->layer);oot_graphics_display_peer_close(objects->display);
-    memset(objects,0,sizeof(*objects));free(objects);
+    free(objects->procedures);memset(objects,0,sizeof(*objects));free(objects);
 }
 int oot_objects_handler_valid(const OotObjects *objects,uint32_t id)
 { return objects && ((id>=OOT_OBJECT_OPEN_DISPLAY && id<=OOT_OBJECT_NATIVE_WINDOW) ||
-    (id==OOT_OBJECT_VSYNC_EVENT && (objects->declaration.flags&OOT_OBJECT_VSYNC))); }
+    (id==OOT_OBJECT_VSYNC_EVENT && (objects->declaration.flags&OOT_OBJECT_VSYNC)) ||
+    (id==OOT_OBJECT_REFRESH_CAPABILITY && (objects->declaration.flags&OOT_OBJECT_REFRESH)) ||
+    (id>=OOT_NVN_GET_PROC && id<=OOT_NVN_DEVICE_GET_DEPTH && objects->procedures)); }
 int oot_objects_returns_value(uint32_t id)
-{ return id==OOT_OBJECT_OPEN_DISPLAY || id==OOT_OBJECT_CREATE_LAYER || id==OOT_OBJECT_NATIVE_WINDOW || id==OOT_OBJECT_VSYNC_EVENT; }
+{ return id==OOT_OBJECT_OPEN_DISPLAY || id==OOT_OBJECT_CREATE_LAYER || id==OOT_OBJECT_NATIVE_WINDOW || id==OOT_OBJECT_VSYNC_EVENT ||
+    id==OOT_NVN_GET_PROC || id==OOT_NVN_DEVICE_INITIALIZE || id==OOT_NVN_DEVICE_GET_ORIGIN || id==OOT_NVN_DEVICE_GET_DEPTH; }
 int oot_objects_snapshot(const OotObjects *objects,OotObjectsReport *out)
 {
     if(!objects || !out || !objects_disjoint(objects,sizeof(*objects),out,sizeof(*out)))return 0;
     *out=objects->report;return 1;
+}
+int oot_objects_refresh_snapshot(const OotObjects *objects,OotRefreshReport *out)
+{
+    if(!objects || !out || !(objects->declaration.flags&OOT_OBJECT_REFRESH) ||
+       !objects_disjoint(objects,sizeof(*objects),out,sizeof(*out)))return 0;
+    *out=objects->refresh;return 1;
+}
+static int objects_nvn_table(OotObjects *objects,const OotNvnDeclaration *d)
+{
+    uint8_t bytes[8192],digest[32];unsigned size=d->count*8;
+    for(unsigned at=0;at<size;){
+        unsigned n=size-at;if(n>OOT_MEMORY_NATIVE_INPUT_LIMIT)n=OOT_MEMORY_NATIVE_INPUT_LIMIT;
+        if(!oot_memory_load_native_input(objects->memory,d->table+at,bytes+at,n))return 0;
+        at+=n;
+    }
+    if(BCryptHash(BCRYPT_SHA256_ALG_HANDLE,NULL,0,bytes,size,digest,32)<0 || memcmp(digest,d->table_sha256,32))return 0;
+    for(unsigned n=0;n<d->count;++n)if(objects_get(bytes+n*8,8)!=d->procedures[n].entry)return 0;
+    return 1;
+}
+int oot_objects_bind_nvn(OotObjects *objects,const OotNvnDeclaration *d)
+{
+    OotNvnProc *copy;
+    if(!objects || !d || objects->thread!=GetCurrentThreadId() || !(objects->declaration.flags&OOT_OBJECT_NVN) ||
+       objects->procedures || objects->report.calls || d->version!=1 || !d->count || d->count>1024 ||
+       !d->procedures || d->table%8 || !objects_span(d->table,(uint64_t)d->count*8))return 0;
+    for(unsigned n=0;n<d->count;++n){
+        const OotNvnProc *p=d->procedures+n;
+        const char *end=memchr(p->name,0,sizeof(p->name));
+        if(!end || end-p->name<4 || strncmp(p->name,"nvn",3) || p->entry%4 || !objects_span(p->entry,4) ||
+           (n && strcmp(d->procedures[n-1].name,p->name)>=0))return 0;
+    }
+    if(!objects_nvn_table(objects,d))return 0;
+    copy=calloc(d->count,sizeof(*copy));if(!copy)return 0;
+    memcpy(copy,d->procedures,d->count*sizeof(*copy));objects->nvn=*d;objects->procedures=copy;
+    objects->nvn.procedures=copy;return 1;
+}
+int oot_objects_nvn_snapshot(const OotObjects *objects,OotNvnReport *out)
+{
+    if(!objects || !out || !objects->procedures || !objects_disjoint(objects,sizeof(*objects),out,sizeof(*out)))return 0;
+    *out=objects->nvn_report;return 1;
 }
 static int objects_write_pointer(OotObjects *objects,uint64_t at,uint64_t value)
 { uint8_t bytes[8];objects_put64(bytes,value);return oot_memory_store_record(objects->memory,at,bytes,8); }
@@ -127,7 +180,63 @@ int oot_objects_call(OotObjects *objects,uint32_t id,OotArm64State *state)
     if(!objects_tables(objects) || !objects_vptrs(objects))return 2;
     if(objects->report.calls==UINT64_MAX)return 2;
     d=&objects->declaration;next=*state;report=objects->report;
-    if(id==OOT_OBJECT_OPEN_DISPLAY){
+    if(id>=OOT_NVN_GET_PROC && id<=OOT_NVN_DEVICE_GET_DEPTH){
+        OotNvnReport nr=objects->nvn_report;OotGraphicsReport gr;
+        if(!objects_nvn_table(objects,&objects->nvn))return 2;
+        if(!oot_graphics_snapshot(objects->graphics,&gr) || !gr.ready)return 1;
+        if(id==OOT_NVN_GET_PROC){
+            char name[128];unsigned n;
+            if(state->x[0] && state->x[0]!=nr.device)return 1;
+            if(nr.lookups==UINT64_MAX)return 2;
+            for(n=0;n<sizeof(name);++n){
+                if(!oot_memory_load_record(objects->memory,state->x[1]+n,(uint8_t*)name+n,1))return 2;
+                if(!name[n])break;
+            }
+            if(n==sizeof(name))return 1;
+            unsigned lo=0,hi=objects->nvn.count;
+            while(lo<hi){unsigned mid=lo+(hi-lo)/2;int c=strcmp(name,objects->procedures[mid].name);if(c>0)lo=mid+1;else hi=mid;}
+            if(lo==objects->nvn.count || strcmp(name,objects->procedures[lo].name))return 1;
+            next.x[0]=objects->procedures[lo].entry;++nr.lookups;
+        } else if(id==OOT_NVN_DEVICE_INITIALIZE){
+            uint8_t builder[24];
+            if(nr.device || !state->x[0] || state->x[0]%8 || !objects_output(objects,state->x[0],8) ||
+               !objects_separate(state->x[0],8,state->x[1],24))return 1;
+            if(!oot_memory_load_record(objects->memory,state->x[1],builder,sizeof(builder)))return 2;
+            /* Only the source-proved zero/default builder is supported. No
+             * guest SDK layout/handle is fabricated: identity stays in this
+             * private owner and all other NVN consumers remain closed. */
+            for(unsigned n=0;n<sizeof(builder);++n)if(builder[n])return 1;
+            if(nr.initializations==UINT64_MAX)return 2;
+            nr.device=state->x[0];nr.window_origin=0;nr.depth_mode=0;++nr.initializations;next.x[0]=1;
+        } else if(id==OOT_NVN_DEVICE_GET_INTEGER){
+            /* Exact original SDK ABI version queries. Hardware capability and
+             * resource-limit queries require their own enabled Vulkan proof. */
+            uint32_t query=(uint32_t)state->x[1];uint8_t bytes[4];
+            if(!nr.device || nr.device!=state->x[0] || (query>1 && query!=42 && query!=90))return 1;
+            if(nr.integer_queries==UINT64_MAX || !objects_output(objects,state->x[2],4))return 2;
+            /* Explicit negative ASTC/debug capabilities: no ASTC feature,
+             * software decoder or NVN debug layer is enabled. */
+            objects_put32(bytes,query==0?231:query==1?40:0);
+            if(!oot_memory_store_record(objects->memory,state->x[2],bytes,4))return 2;
+            ++nr.integer_queries;
+        } else if(id>=OOT_NVN_DEVICE_SET_ORIGIN && id<=OOT_NVN_DEVICE_GET_DEPTH){
+            if(!nr.device || nr.device!=state->x[0])return 1;
+            if(id==OOT_NVN_DEVICE_SET_ORIGIN || id==OOT_NVN_DEVICE_SET_DEPTH){
+                uint32_t value=(uint32_t)state->x[1];if(value>1)return 1;
+                if(nr.state_updates==UINT64_MAX)return 2;
+                if(id==OOT_NVN_DEVICE_SET_ORIGIN)nr.window_origin=value;else nr.depth_mode=value;
+                ++nr.state_updates;
+            }else{
+                if(nr.state_queries==UINT64_MAX)return 2;
+                next.x[0]=id==OOT_NVN_DEVICE_GET_ORIGIN?nr.window_origin:nr.depth_mode;++nr.state_queries;
+            }
+        } else {
+            if(!nr.device || nr.device!=state->x[0])return 1;
+            if(nr.finalizations==UINT64_MAX)return 2;
+            nr.device=0;++nr.finalizations;
+        }
+        objects->nvn_report=nr;
+    } else if(id==OOT_OBJECT_OPEN_DISPLAY){
         if(report.opens==UINT64_MAX || report.references==UINT64_MAX)return 2;
         if(!objects_output(objects,state->x[0],8))return 2;
         if(objects->display){if(!oot_graphics_display_peer_live(objects->display))return 1;}
@@ -167,6 +276,19 @@ int oot_objects_call(OotObjects *objects,uint32_t id,OotArm64State *state)
         if(report.window_getters==UINT64_MAX)return 2;
         if(!objects_output(objects,state->x[0],8) || !objects_write_pointer(objects,state->x[0],d->native_window))return 2;
         next.x[0]=0;++report.window_getters;
+    } else if(id==OOT_OBJECT_REFRESH_CAPABILITY){
+        if(state->x[0]!=d->display){
+            if(objects->refresh.ignored==UINT64_MAX)return 2;
+            ++objects->refresh.ignored;
+        } else {
+            if(!report.references || !oot_graphics_display_peer_live(objects->display))return 1;
+            if(objects->refresh.updates==UINT64_MAX)return 2;
+            /* The audited public bool is W1 bit zero. The backend sends the
+             * pair (enabled ? 2 : 0, 2); this records the owned capability,
+             * without claiming a physical mode change or an IPC result. */
+            objects->refresh.capability_bits=(objects->refresh.capability_bits&~UINT64_C(2))|((state->x[1]&1)<<1);
+            objects->refresh.update_mask=2;++objects->refresh.updates;
+        }
     } else {
         uint8_t prefix[28]={0},tag=2,old_tag;OotServiceWrite writes[2];HANDLE event=NULL,failure_event=NULL;
         OotVblankSource *source;
