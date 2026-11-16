@@ -1,5 +1,9 @@
 # Default Display and Layer ownership
 
+This is the ordinary object profile without `--events`; its event guard remains
+unchanged. The separate [SystemEvent profile](system-events.md) adds the audited
+VSync opt-in and has its own full validation evidence.
+
 The separate object profile uses program flags 510 and context flag 4096 over
 the existing display/application chain. It adds five whole-public-function
 bindings: OpenDefaultDisplay, CloseDisplay, the reached default CreateLayer

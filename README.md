@@ -6,6 +6,14 @@ An independent project exploring a native Windows x86-64 port of Ocarina of Time
 
 Early development. The Windows host builds and passes its native self-tests. The separate [experimental startup bootstrap](docs/startup-bootstrap.md) and [SDK runtime foundation](docs/sdk-runtime.md) compile selected original instructions into a private Windows executable, execute them only with explicit opt-in, and record precise stop diagnostics. The completed host-linked initialization profile reaches the original `nnMain` transition. A separate [application profile](docs/application-startup.md) continues into its original body, supplies coherent main-thread updates and mounts verified read-only game content. The game is not playable yet.
 
+The separate [VSync SystemEvent profile](docs/system-events.md) passes all 60
+validation stages, 750 Python tests without skips, eight CTest groups and 283,401
+common native/reference comparisons per compiler. Both full original replays
+publish one managed readable event backed by real DXGI VBlank and reach guarded
+`SetDisplay120HzRefreshRateCapability` at 311,509 post-entry instructions, with
+matching native hashes. Earlier object profiles retain their event guard.
+Original game waits, NVN rendering and usable input remain further work.
+
 The [default Display/Layer implementation](docs/display-objects.md) passes all
 56 validation stages, 742 Python tests without skips, eight CTest groups and
 283,401 common native/reference comparisons per compiler. Both full original

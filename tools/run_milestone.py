@@ -341,6 +341,17 @@ def validate_objects_config(config):
     require(config.get('objects_expected_guard')=='_ZN2nn2vi20GetDisplayVsyncEventEPNS_2os15SystemEventTypeEPNS0_7DisplayE',
         'objects require the observed unsupported event boundary')
 
+def validate_events_config(config):
+    require(type(config.get('events_experiment',False))is bool,'invalid events milestone flag')
+    if config.get('name')=='system-events':require(config.get('events_experiment')is True,'event milestone requires execution')
+    if not config.get('events_experiment'):return
+    require(config.get('objects_experiment')is True and isinstance(config.get('events_baseline'),str)and
+        bool(config['events_baseline']),'events must retain the preceding object lane/full baseline')
+    require(type(config.get('events_min_post_entry'))is int and config['events_min_post_entry']>config['objects_min_post_entry'],
+        'events require the measured original continuation')
+    require(config.get('events_expected_guard')=='_ZN2nn2vi36SetDisplay120HzRefreshRateCapabilityEPNS0_7DisplayEb',
+        'events require the observed unsupported refresh capability boundary')
+
 
 class MilestoneRun:
     def __init__(self, output, name, stages, binding=None, resume=False):
@@ -624,15 +635,17 @@ def run_graphics_lanes(run,config,env):
     return dict(graphics_experiments=experiments,graphics_progress=proofs)
 
 
-def run_display_lanes(run,config,env,objects=False):
+def run_display_lanes(run,config,env,objects=False,events=False):
     """A separate VI profile over real graphics, retaining every preceding lane."""
     from build_startup import execute as execute_startup,validated_romfs_input
     from display_progress import verify_display_progress_trace
     from display_objects_progress import verify_objects_progress_trace
+    from system_event_progress import verify_events_progress_trace
     from startup_sources import cached_sources
     prepared=ROOT/config['prepared'];entropy=run.output/'process-entropy.bin'
-    label='objects'if objects else'display'
-    seed=read_json(run.output/'display-cmake/run.json'if objects else build_destination(ROOT/config['display_seed_report']));prior=seed['iterations'][-1]
+    objects=objects or events
+    label='events'if events else'objects'if objects else'display'
+    seed=read_json(run.output/('objects-cmake/run.json'if events else'display-cmake/run.json')if objects else build_destination(ROOT/config['display_seed_report']));prior=seed['iterations'][-1]
     provenance=read_json(build_destination(Path(prior['bundle'])/'manifest.json'))
     sdk_audit=read_json(run.output/'sdk-audit.json');audit=read_json(run.output/(label+'-audit.json'))
     require(seed.get('display_runtime') is True and seed.get('application_runtime') is True and
@@ -640,7 +653,7 @@ def run_display_lanes(run,config,env,objects=False):
             provenance['sdk_npdm']['source_sha256']==sdk_audit['npdm']['source_sha256'] and
             provenance['sdk_audit']['goal_entry']==sdk_audit['goal_entry'],'display seed input/profile differs')
     old_root=build_destination(ROOT/config[label+'_baseline']);old_run=read_json(old_root/'run.json')
-    old_label='display'if objects else'graphics'
+    old_label='objects'if events else'display'if objects else'graphics'
     require(old_run.get('status')=='passed' and (objects or old_run.get('name')=='graphics-bootstrap')and
             {old_label+'-audit',old_label+'-experiment-cmake',old_label+'-experiment-gcc','summary'}<=set(old_run.get('stages',{})) and
             all(s.get('status')=='passed' for s in old_run['stages'].values()),
@@ -654,6 +667,7 @@ def run_display_lanes(run,config,env,objects=False):
         'application_display','graphics_runtime','display_runtime','romfs','native_handler_stop',
         'relative_relocation_probes','relative_relocations_matching_offline_link')
     if objects:keys+=('objects_runtime','display_objects')
+    if events:keys+=('events_runtime',)
     experiments={};proofs={}
     for mode in ('cmake','gcc'):
         folder=run.output/(label+'-'+mode);cache=folder/'native-cache'
@@ -664,6 +678,7 @@ def run_display_lanes(run,config,env,objects=False):
         for pc in prior['additional_entries']:args+=['--extra-entry',str(pc)]
         for pc in prior['application_entries']:args+=['--app-entry',str(pc)]
         if objects:args+=['--objects']
+        if events:args+=['--events']
         run.command(label+'-experiment-'+mode,args,env)
         result=read_json(folder/'run.json');last=result['iterations'][-1]
         bundle=read_json(Path(last['bundle'])/'manifest.json')
@@ -696,7 +711,7 @@ def run_display_lanes(run,config,env,objects=False):
         require(old_trace.is_relative_to(old_folder.resolve()) and old_full['trace_sha256']==old['execution']['trace_sha256'],
                 'display baseline is not its verified full graphics trace')
         old_bundle=read_json(build_destination(Path(old['bundle'])/'manifest.json'))
-        verify=verify_objects_progress_trace if objects else verify_display_progress_trace
+        verify=verify_events_progress_trace if events else verify_objects_progress_trace if objects else verify_display_progress_trace
         proof=verify(old_trace,old_full,old_bundle,Path(full['trace_file']),full,bundle)
         (full_dir/(label+'-progress.json')).write_text(json.dumps(proof,indent=2)+'\n',encoding='utf-8')
         run.publish_proof(folder,'progress-full',full_dir)
@@ -728,6 +743,7 @@ def execute(config, output, native_only=False, resume=False):
     validate_graphics_config(config)
     validate_display_config(config)
     validate_objects_config(config)
+    validate_events_config(config)
     if config.get('application_experiment'):
         require(config.get('sdk_init_experiment') is True and config.get('sdk_init_host_linked') is True and
             config.get('sdk_init_fast_functions') is True,'application milestone requires the complete preceding host initialization lane')
@@ -813,6 +829,9 @@ def execute(config, output, native_only=False, resume=False):
         stages.insert(stages.index('comparison'),'objects-audit')
         stages.insert(stages.index('comparison'),'objects-host-peers')
         for mode in ('cmake','gcc'):stages.insert(stages.index('summary'),'objects-experiment-'+mode)
+    if not native_only and config.get('events_experiment'):
+        stages.insert(stages.index('comparison'),'events-audit')
+        for mode in ('cmake','gcc'):stages.insert(stages.index('summary'),'events-experiment-'+mode)
     from milestone_checkpoint import execution_binding
     binding=execution_binding(ROOT,config,native_only)
     run = MilestoneRun(output, config["name"], stages,binding=binding,resume=resume)
@@ -916,6 +935,16 @@ def execute(config, output, native_only=False, resume=False):
                         p.get('observation',{}).get('successful_waits_and_resets')==16 and
                         p['observation'].get('guest_code_executed')is False,'physical peer executable/observation differs')
                 run.mark_verified(['objects-host-peers'])
+            if config.get('events_experiment'):
+                def events_source_audit():
+                    from link_exefs import load_prepared
+                    from module_linker import Linker
+                    from system_event_audit import extend_system_events_audit
+                    modules=load_prepared(prepared);pristine=deepcopy(next(m for m in modules if m.name=='sdk'))
+                    linker=Linker(modules);require(linker.apply()['link_complete'],'events offline link incomplete')
+                    report=extend_system_events_audit(linker,read_json(run.output/'objects-audit.json'),pristine)
+                    (run.output/'events-audit.json').write_text(json.dumps(report,indent=2)+'\n',encoding='utf-8')
+                run.action('events-audit',events_source_audit)
             def compare():
                 comparisons = {scope: compare_profiles(read_json(ROOT/config["baseline_"+scope]), read_json(run.output/(scope+".json"))) for scope in ("default", "plt")}
                 audit = read_json(run.output/"callees.json"); compare_baseline(audit, read_json(run.output/"plt.json"))
@@ -1228,6 +1257,7 @@ def execute(config, output, native_only=False, resume=False):
             if config.get('graphics_experiment'):summary.update(run_graphics_lanes(run,config,env))
             if config.get('display_experiment'):summary.update(run_display_lanes(run,config,env))
             if config.get('objects_experiment'):summary.update(run_display_lanes(run,config,env,True))
+            if config.get('events_experiment'):summary.update(run_display_lanes(run,config,env,True,True))
         def publish_summary():
             (run.output/"summary.json").write_text(json.dumps(summary, indent=2)+"\n", encoding="utf-8")
             lines = ["# Milestone validation", "", f"Milestone: {config['name']}", "", f"Python tests: {summary['python_tests']}; CTest groups: {summary['ctest_groups']}; native comparisons per compiler: {summary['native_trials_per_compiler']}."]
@@ -1257,6 +1287,12 @@ def execute(config, output, native_only=False, resume=False):
                     'owns a real visible borderless window and presentation-supported surface, and resumes both original callers. '
                     f"It reaches the guarded SystemEvent API after {objects['post_entry_retired']} post-entry instructions. "
                     'No guest event, NVN rendering, game frame or usable input is established.')
+            if 'events_experiments' in summary:
+                event=summary['events_experiments']['cmake']
+                startup_scope+=(' The separate event profile publishes one managed readable auto-clear SystemEvent backed by real DXGI VBlank, '
+                    'retains both original early in-process event creations and the complete preceding object prefix, '
+                    f"and reaches the guarded refresh-capability API after {event['post_entry_retired']} post-entry instructions. "
+                    'Original game waits, NVN rendering, frames and usable input are not established by publication.')
             lines += ["", (("Native regression execution is synthetic. Separate opt-in startup experiments execute selected original instructions under an experimental process model. "+startup_scope)
                 if 'startup_experiments' in summary else "All executed code is synthetic.")+" Static game analysis grants no runtime capabilities. See run.json for final status and per-stage logs."]
             if 'memory_callee_profiles' in summary:

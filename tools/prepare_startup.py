@@ -556,7 +556,8 @@ def extend_application_selection(linker,merged,application_entry,application_ent
     return merged,evidence
 
 
-def prepare_bundle(linker, output, max_instructions=8192, extra_entries=(), config=None, stack_size=STACK_SIZE, shared_package=None, sdk_metadata=None, native_sdk=False, sdk_init=False, host_linked=False,decode_cache=None,application=False,application_entries=(),graphics=False,display=False,objects=False):
+def prepare_bundle(linker, output, max_instructions=8192, extra_entries=(), config=None, stack_size=STACK_SIZE, shared_package=None, sdk_metadata=None, native_sdk=False, sdk_init=False, host_linked=False,decode_cache=None,application=False,application_entries=(),graphics=False,display=False,objects=False,events=False):
+    require(type(events)is bool and(not events or objects),'events require separate object mode')
     require(type(objects)is bool and(not objects or display),'objects require separate display mode')
     require(type(display) is bool and (not display or graphics),'display requires separate graphics mode')
     require(type(graphics) is bool and (not graphics or application),'graphics requires separate application mode')
@@ -600,6 +601,9 @@ def prepare_bundle(linker, output, max_instructions=8192, extra_entries=(), conf
                             from display_objects_audit import extend_objects_audit
                             pristine=next(m for m in linker.modules if m.name=='sdk')
                             native_audit=extend_objects_audit(verified,native_audit,pristine)
+                            if events:
+                                from system_event_audit import extend_system_events_audit
+                                native_audit=extend_system_events_audit(verified,native_audit,pristine)
             else:
                 from sdk_init_audit import audit_sdk_init
                 native_audit=audit_sdk_init(verified)
@@ -607,6 +611,10 @@ def prepare_bundle(linker, output, max_instructions=8192, extra_entries=(), conf
             from native_sdk_audit import audit_native_sdk
             native_audit=audit_native_sdk(verified)
         native_functions=native_audit['functions']
+        if events:
+            # Source-bound selection hints, not skipped calls or execution proof.
+            extra_entries=tuple(dict.fromkeys((*extra_entries,
+                *(r['entry']for r in native_audit['system_events']['consumers']))))
         if not sdk_init:
             require(native_audit.get('original_oe_initialize') is not None,'native SDK requires the original OE observation metadata')
             original_oe_entry=native_audit['original_oe_initialize']['entry']
@@ -735,6 +743,7 @@ def prepare_bundle(linker, output, max_instructions=8192, extra_entries=(), conf
         if graphics:report['graphics_runtime']=True;summary['graphics_runtime']=True
         if display:report['display_runtime']=True;summary['display_runtime']=True
         if objects:report['objects_runtime']=True;summary['objects_runtime']=True
+        if events:report['events_runtime']=True;summary['events_runtime']=True
         report['application_selection']=application_selection
         report['application_pointer_selection']=application_pointers
         report['application_simd_sites'],report['application_svc_sites']=application_sites(emitter.modules,nodes)

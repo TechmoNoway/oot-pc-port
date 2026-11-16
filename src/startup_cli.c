@@ -292,6 +292,7 @@ int oot_startup_cli(int argc, char **argv)
         oot_startup_dispatch_application_entry_retired(dispatcher) ? "true":"false",oot_startup_dispatch_post_entry_retired(dispatcher));
     if(program->flags&OOT_STARTUP_OBJECTS){
         OotObjectsReport objects={0};printf(",\"objects_runtime\":true");
+        if(oot_startup_compiled_objects()->flags&OOT_OBJECT_VSYNC)printf(",\"events_runtime\":true");
         if(oot_startup_context_objects_report(context,&objects))printf(",\"display_objects\":{\"display_open\":%u,\"layer_open\":%u,\"event_open\":%u,\"references\":%" PRIu64 ",\"calls\":%" PRIu64 ",\"opens\":%" PRIu64 ",\"closes\":%" PRIu64 ",\"creates\":%" PRIu64 ",\"destroys\":%" PRIu64 ",\"window_getters\":%" PRIu64 ",\"vsync_events\":%" PRIu64 ",\"waits\":%" PRIu64 ",\"resets\":%" PRIu64 ",\"clears\":%" PRIu64 ",\"handle_closes\":%" PRIu64 "}",
             objects.display_open,objects.layer_open,objects.event_open,objects.references,objects.calls,objects.opens,
             objects.closes,objects.creates,objects.destroys,objects.window_getters,objects.vsync_events,objects.waits,

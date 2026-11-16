@@ -2,6 +2,56 @@
 
 ## Active ordered implementation
 
+SystemEvent/VSync integration passed a fresh full run:
+`build/milestones/system-events-v1/validation-v2/`, with its parent's
+`local-config.json`, native build and `validation-v2.log`. All 60 stages passed
+and verified, with 750 Python tests without skips, eight CTest groups and 283401
+common native/reference comparisons per compiler. It finished 2026-11-16
+11:06:53 (Asia/Saigon); no validation/controller process remains active. Its
+matching frozen source is
+`91b670bfa34f65cd2ac83ee14be6ccd50725dd33bda6272caeb3d9379e7326ef`.
+Further fingerprinted source changes require a new full run. This separate
+60-stage run preserves every earlier lane, including the object run below.
+See [system-events.md](system-events.md). The `--events` opt-in sets the compiled
+declaration bit only after the new complete source audit; `--objects` alone keeps
+its old guard. There are 256 original matching aliases/254 entries, 17 retained
+original consumers and 3051 bindings, with no registry/budget increase. Delivery
+commit, verified remote and subsequent CI state are recorded in the parent's
+ignored `delivery.json`.
+
+The first `validation/` attempt was interrupted during native suites when the
+tool runtime changed. The exact controller/children were confirmed exited and
+its output lock free with the unchanged source gate. Supported `--resume` then
+rejected a command/environment identity mismatch. That manifest is preserved as
+failed; do not resume/promote it. The v2 attempt starts every stage fresh and
+does not reuse test outcomes from that attempt. `tool-interruption.json` and
+`resume.log` in the parent record the attempted recovery.
+
+Synthetic owner/dispatcher tests pass on MSVC/GCC, including actual SVC
+wait/reset/miss/clear/close and yields. The new sparse publisher rejects a nonzero
+destination tag before allocating resources. Both fresh full original compiler
+replays publish one real VBlank-backed event and reach guarded
+SetDisplay120HzRefreshRateCapability at 311509 post-entry instructions/55 native
+calls, 1833206 retired instructions and 1833262 trace rows. Their matching full/
+compact digest is `fecc545d3e7d6a089edfa396b2705603e53322c5ddae1ba61a106404178c853c`.
+The new source audit rederives the default callback constructor/slots, readable
+attachment, original consumer routes and four syscall sequences. Both early
+CreateSystemEvent in-process calls remain original execution; a separately
+proved private generic kernel creator stays guarded. No original game event wait,
+NVN rendering, frame or usable input is established by publication alone.
+
+Cleanup is explicitly user-authorized. Two passes shared 11713 byte-identical
+immutable packages/traces/C artifacts, recovering about 27.2 GB. After all tests
+ended, 17905 regenerable test intermediates (about 333 MB) were removed, for total
+recovery about 27.5 GB and final observed free space 62.6 GB. Reports:
+`build/events-sealed-dedup-applied-v1.json`, its v2 counterpart and
+`build/events-test-prune-applied-v2.json` record exact scope and hashes. All
+original inputs, prepared data, mutable caches and evidence paths remain. Do not
+clean active compiler intermediates: an initial overlap removed a GCC object
+before linking, then the affected three-test GCC suite was rerun successfully
+after cleanup (`build/events-gcc-owner-dispatch-v2.log`). Future intermediate
+cleanup must run only after the affected full/focused tests have all ended.
+
 The default Display/Layer object implementation passed a fresh full run at
 `build/milestones/display-objects-v1/validation-v2/`, using the parent's
 `local-config.json` and native build. All 56 stages passed and verified, with

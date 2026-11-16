@@ -38,8 +38,8 @@ typedef struct OotObjectsReport {
 } OotObjectsReport;
 /* Borrows image/memory/graphics until destruction. All calls and destruction
  * run serially on the creator thread; destroy this owner before those borrows.
- * Production source generation currently leaves OOT_OBJECT_VSYNC disabled:
- * its producer and OS consumer proof is a separate required capability gate. */
+ * OOT_OBJECT_VSYNC requires the separate source-audited event opt-in. Ordinary
+ * object profiles keep that flag zero and do not publish guest events. */
 OotObjects *oot_objects_create(OotRuntimeImage *image,OotGuestMemory *memory,OotGraphics *graphics,
     const OotObjectDeclaration *declaration);
 void oot_objects_destroy(OotObjects *objects);

@@ -168,13 +168,15 @@ int oot_objects_call(OotObjects *objects,uint32_t id,OotArm64State *state)
         if(!objects_output(objects,state->x[0],8) || !objects_write_pointer(objects,state->x[0],d->native_window))return 2;
         next.x[0]=0;++report.window_getters;
     } else {
-        uint8_t prefix[28]={0},tag=2;OotServiceWrite writes[2];HANDLE event=NULL,failure_event=NULL;
+        uint8_t prefix[28]={0},tag=2,old_tag;OotServiceWrite writes[2];HANDLE event=NULL,failure_event=NULL;
         OotVblankSource *source;
         if(state->x[1]!=d->display || !report.references || !oot_graphics_display_peer_live(objects->display))return 1;
         if(objects->event_published)next.x[0]=0xa72;
         else {
             if(report.vsync_events==UINT64_MAX || objects->next_token>=0x7fffffff)return 2;
             if(state->x[0]%8 || !objects_output(objects,state->x[0],28) || !objects_output(objects,state->x[0]+40,1))return 2;
+            if(!oot_memory_load_record(objects->memory,state->x[0]+40,&old_tag,1))return 2;
+            if(old_tag)return 1;
             source=oot_vblank_create(oot_graphics_display_peer_monitor(objects->display));if(!source)return 1;
             if(!oot_vblank_duplicate_wait_handles(source,&event,&failure_event)){oot_vblank_destroy(source);return 1;}
             objects_put64(prefix,state->x[0]);objects_put64(prefix+8,state->x[0]);
