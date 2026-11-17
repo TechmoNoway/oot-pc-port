@@ -128,6 +128,13 @@ OOT_MEMORY_API int oot_memory_load_native_input(OotGuestMemory *memory, uint64_t
     uint8_t *bytes, unsigned size);
 #define OOT_MEMORY_SERVICE_WRITE_LIMIT (8u*1024u*1024u)
 #define OOT_MEMORY_SERVICE_PATH_LIMIT 4096u
+/* Renderer-service snapshots and preflight only, never instruction grants.
+ * Capture a complete <=8 MiB operand under the common backend lock. Native
+ * output must not alias guest backing or backend metadata. RW capture also
+ * verifies write permission before reading; rejection preserves all output. */
+OOT_MEMORY_API int oot_memory_probe_service(OotGuestMemory *memory,uint64_t address,unsigned size,unsigned access);
+OOT_MEMORY_API int oot_memory_capture_service(OotGuestMemory *memory,uint64_t address,
+    uint8_t *bytes,unsigned size,unsigned access);
 typedef struct OotServiceWrite {
     uint64_t address;
     const uint8_t *bytes;

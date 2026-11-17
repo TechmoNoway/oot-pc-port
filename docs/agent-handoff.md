@@ -2,6 +2,48 @@
 
 ## Active ordered implementation
 
+The NVN resource/sampler checkpoint passes all 76 full-validation stages at
+`build/milestones/nvn-resources-v1/validation-v2/`, with 798 Python tests without
+skips, eight CTest groups and 283401 common native/reference comparisons per
+compiler. Source fingerprint:
+`f725d7b08b4f70dc12a5317affb3d47d9aa19044f05a4fca7f24bb9a128e5cf5`.
+The controller and all children have exited. Both physical probes pass 16 real
+transfers and sampler/container lifecycle checks with synthetic storage.
+
+The separate `--nvn-resources` profile (object flags 31) binds 29 public operations,
+retains seven original buffer builders and 38 ordinary sampler methods, and guards
+four private backends (3741 bindings). It owns checked pool/buffer shadows, logical
+guest-storage VAs, object-byte seals, descriptor containers and real Vulkan sampler
+registration on an owned child device with queried/enabled anisotropy and extended
+image gather. Earlier flags 7/15 and every preceding lane remain verified.
+
+Both full original replays reach guarded `nvnQueueBuilderSetDefaults` at 326486
+post-entry instructions, with one 1191936-byte pool, two descriptor containers,
+37164 slots, four real Vulkan samplers and one game sampler registration. Their
+matching full trace SHA is
+`44eb41e676f1f569cb3f918f8a9b2b18a45dd23c8ccd301f90bafd722204fd71`.
+The proof restores the entire old pool-init guard prefix and checks all four typed
+caller continuations plus complete original sampler defaults/filter/device/init
+bodies, RETs and original caller steps. Supplemental descriptor/registration
+counter assertions are at `build/nvn-resources-closeout-v1.json`.
+
+The first full run at `validation-v1/` remains failed: two old graphics/display
+fixtures omitted the new resource modules from their private source lists. Those
+lists and the standalone GCC SDK context list were corrected before the fresh v2.
+Preserve failed pilots v1/v4 and the successful v5/single-step preflight; see
+`docs/nvn-resources.md`. No passed result was reused for changed source.
+
+Next: source-bound queue/command ownership, then actual shader/texture binding,
+draw submission and presentation on the original visible Layer. Read-only queue
+research is at `build/research/nvn-queue-originals-v1.json` and
+`build/research/nvn-queue-next-v1.md`; queue memory sizing/private driver behavior
+must be derived, never replaced with an invented zero. No original game frame or
+usable input has been established. Review the scoped runtime commit, push dev and
+verify its exact GitHub Windows Checks run before delivery. Preserve the separate
+uncommitted Graphify/document navigation work.
+
+## Previous texture checkpoint
+
 The previous NVN bootstrap is now committed/pushed on dev as
 `f3637bab5613087a46fb689f9ca3c81883ee9fd0`. Its 69-stage local run passed on
 both compilers. GitHub run 43945308783 failed one synthetic dependency test:

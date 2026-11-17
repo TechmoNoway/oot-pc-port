@@ -11,11 +11,11 @@ from lifter_validation_types import State
 from object_cache import SharedCompiler
 ROOT=boot.ROOT
 
-def objects_package(events=False,refresh=False,nvn=False,layout=False):
+def objects_package(events=False,refresh=False,nvn=False,layout=False,resources=False):
     real_make=boot.make_boot;real_emit=boot.emit_startup;extra=[];declaration={};table_records=[]
     def make(raw,*args,**kwargs):
         sdk=raw.modules[2];main=raw.modules[1];base=sdk.base
-        declaration.update(version=1,flags=int(events)|(2 if refresh else 0)|(4 if nvn else 0)|(8 if layout else 0),width=1920,height=1080,display=base+0x1500,display_size=64,
+        declaration.update(version=1,flags=int(events)|(2 if refresh else 0)|(4 if nvn else 0)|(8 if layout else 0)|(16 if resources else 0),width=1920,height=1080,display=base+0x1500,display_size=64,
             layer=base+0x1600,layer_size=128,native_window=base+0x1618,
             vptr_address=[base+x for x in(0x1500,0x1600,0x1610,0x1618,0x1620)],
             vptr_value=[base+0x1410+n*24 for n in range(5)],anchor=base+0xe40,anchor_size=4,
@@ -27,7 +27,7 @@ def objects_package(events=False,refresh=False,nvn=False,layout=False):
         for at,value in zip(declaration['vptr_address'],declaration['vptr_value']):struct.pack_into('<Q',sdk.image,at-base,value)
         for at in(0xe40,0xe50,0xe60,0xe70,0xe80,0xe90,0xea0):struct.pack_into('<I',sdk.image,at,0xd65f03c0)
         if nvn:
-            for at in(0xeb0,0xec0,0xed0,0xee0,0xef0,0xf00,0xf10,0xf20):struct.pack_into('<I',sdk.image,at,0xd65f03c0)
+            for at in(0xeb0,0xec0,0xed0,0xee0,0xef0,0xf00,0xf10,0xf20,0xf30):struct.pack_into('<I',sdk.image,at,0xd65f03c0)
             struct.pack_into('<8Q',sdk.image,0x1840,*[base+at for at in(0xed0,0xf20,0xee0,0xeb0,0xf00,0xec0,0xf10,0xef0)])
             sdk.image[0x1a00:0x1a14]=b'nvnDeviceInitialize\0'
         start=main.base+0x900;words=[];out=base+0x1900
@@ -57,6 +57,8 @@ def objects_package(events=False,refresh=False,nvn=False,layout=False):
                 append(mov64(0,base+0x1a80));append(mov64(1,1));call(at)
             append(mov64(0,base+0x1a80));call(0xf00);words.append(0xaa0003fc) # X28: origin.
             append(mov64(0,base+0x1a80));call(0xf20);words.append(0xaa0003f7) # X23: depth.
+            if resources:
+                append(mov64(0,base+0x1b80));append(mov64(1,0));call(0xf30)
             append(mov64(0,base+0x1a80));call(0xed0)
         if events:
             event_out=out+0x40
@@ -93,6 +95,7 @@ def objects_package(events=False,refresh=False,nvn=False,layout=False):
             for offset,handler in((0xeb0,458),(0xec0,459),(0xed0,460),(0xee0,461),(0xef0,462),(0xf00,463),(0xf10,464),(0xf20,465)):
                 kwargs['native_functions'].append(dict(handler_id=handler,entry=sdk.base+offset,size=4,
                     body_sha256=hashlib.sha256(sdk.read(offset,4)).hexdigest()))
+            if resources:kwargs['native_functions'].append(dict(handler_id=466,entry=sdk.base+0xf30,size=4,body_sha256=hashlib.sha256(sdk.read(0xf30,4)).hexdigest()))
             kwargs['nvn_declaration']=dict(table=sdk.base+0x1840,table_sha256=hashlib.sha256(sdk.read(0x1840,64)).hexdigest(),
                 procedures=[dict(name=name,entry=sdk.base+offset)for name,offset in
                     (('nvnDeviceFinalize',0xed0),('nvnDeviceGetDepthMode',0xf20),('nvnDeviceGetInteger',0xee0),
@@ -115,8 +118,10 @@ class NativeObjectsDispatchTests(unittest.TestCase):
         self.check_dispatch(True,True,True)
     def test_nvn_fixed_descriptor_layout_full_dispatch_and_quanta(self):
         self.check_dispatch(True,True,True,True)
-    def check_dispatch(self,events,refresh=False,nvn=False,layout=False):
-        blob,sources,_,declaration=objects_package(events,refresh,nvn,layout)
+    def test_resource_optin_factory_fault_preserves_vectors_gprs_and_quanta(self):
+        self.check_dispatch(True,True,True,True,True)
+    def check_dispatch(self,events,refresh=False,nvn=False,layout=False,resources=False):
+        blob,sources,_,declaration=objects_package(events,refresh,nvn,layout,resources)
         observer=boot.SNAPSHOT_SOURCE.replace('oot_startup_dispatch_create_application','oot_startup_dispatch_create_objects')
         observer=observer.replace('if(!context || !keys)goto done;',
             'if(!context || !keys)goto done;\n'
@@ -150,7 +155,7 @@ class NativeObjectsDispatchTests(unittest.TestCase):
         folder=Path(tempfile.mkdtemp(dir=parent));source=folder/'fixture.c';source.write_text(text)
         names=('guest_memory','runtime_image','host_win32','leaf_dispatch','frame_dispatch','stack_dispatch',
             'pauth','checked_read','plt_bridge','startup_dispatch','sdk_native','native_platform','native_services',
-            'native_math','startup_vector','startup_float','startup_init_atomic','application_services','native_romfs','native_objects','native_vblank')
+            'native_math','startup_vector','startup_float','startup_init_atomic','application_services','native_romfs','native_objects','native_gpu','native_nvn_resources','native_vblank')
         names=tuple(n for n in names if not events or n not in('native_objects','native_vblank'))
         compiler=SharedCompiler(os.environ.get('OOT_LIFTER_COMPILER','cmake'),log=folder/'build.log')
         flags=(compiler.defines({'OOT_MEMORY_SHARED_EXPORTS':None,'_CRT_SECURE_NO_WARNINGS':None,'_WIN32_WINNT':'0x0A00'})+
@@ -164,7 +169,17 @@ class NativeObjectsDispatchTests(unittest.TestCase):
         for quantum in(1,2,1000):
             history=(VectorState*1024)();count=c_uint();final=State();values=(c_uint64*22)()
             self.assertEqual(run(os.fsencode(path),quantum,1000,0,history,byref(count),byref(final)),1)
-            counts(values);self.assertEqual(tuple(values),((10 if events else 9)+(4 if refresh else 0)+(9 if nvn else 0)+(2 if layout else 0),
+            counts(values)
+            if resources:
+                self.assertEqual(final.pc,declaration['display']-0x1500+0xf30)
+                self.assertEqual((final.x[0],final.x[1]),(declaration['display']-0x1500+0x1b80,0))
+                self.assertEqual((values[0],values[1]),(21,17))
+                self.assertEqual(bytes(history[count.value-1].q[0]),bytes([0x5a]*16))
+                self.assertEqual(bytes(history[count.value-1].q[31]),bytes([0xa5]*16))
+                if quantum==1:resource_state=final.values()
+                else:self.assertEqual(final.values(),resource_state)
+                continue
+            self.assertEqual(tuple(values),((10 if events else 9)+(4 if refresh else 0)+(9 if nvn else 0)+(2 if layout else 0),
                 (6 if events else 5)+(4 if refresh else 0)+(9 if nvn else 0)+(2 if layout else 0),1,1,1,1,1,0,0,0,0,0,
                 *([1,1,2,1,1,0]if events else[0]*6),*([2,2,3,1]if refresh else[0]*4)))
             if nvn:

@@ -349,6 +349,8 @@ int oot_startup_context_objects_report(const OotStartupContext *c,OotObjectsRepo
 { return oot_startup_context_objects_enabled(c) && oot_objects_snapshot(c->objects,out); }
 int oot_startup_context_bind_nvn(OotStartupContext *c,const OotNvnDeclaration *d)
 { return oot_startup_context_objects_enabled(c) && c->references==1 && !c->native.calls && oot_objects_bind_nvn(c->objects,d); }
+int oot_startup_context_resources_report(const OotStartupContext *c,OotNvnResourcesReport *out)
+{ return oot_startup_context_objects_enabled(c) && oot_objects_resources_snapshot(c->objects,out); }
 int oot_startup_context_nvn_report(const OotStartupContext *c,OotNvnReport *out)
 { return oot_startup_context_objects_enabled(c) && oot_objects_nvn_snapshot(c->objects,out); }
 int oot_startup_context_refresh_report(const OotStartupContext *c,OotRefreshReport *out)

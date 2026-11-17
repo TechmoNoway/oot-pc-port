@@ -7,6 +7,15 @@ typedef struct OotGpu OotGpu;
 typedef struct OotGpuBuffer OotGpuBuffer;
 typedef struct OotGpuTexture OotGpuTexture;
 typedef struct OotGpuTexturePool OotGpuTexturePool;
+typedef struct OotGpuSampler OotGpuSampler;
+/* Independent normalized host state, not the NVN builder layout. Filter/mipmap
+ * are 0 nearest/1 linear; address modes 0 repeat,1 mirror,2 edge,3 border;
+ * comparison 0..7 is never..always; border 0 transparent,1 black,2 white. */
+typedef struct OotGpuSamplerInfo {
+    uint32_t min_filter,mag_filter,mipmap_mode,address_u,address_v,address_w;
+    uint32_t compare_enable,compare_op,border_color,reserved;
+    float min_lod,max_lod,lod_bias,max_anisotropy;
+} OotGpuSamplerInfo;
 #define OOT_GPU_RGBA8 1u
 #define OOT_GPU_BGRA8 2u
 #define OOT_GPU_TEXTURE_DESCRIPTOR_SIZE OOT_NVN_TEXTURE_DESCRIPTOR_SIZE
@@ -19,11 +28,16 @@ typedef struct OotGpuReport {
     uint32_t faulted,reserved;
     uint64_t textures,texture_bytes,texture_uploads,texture_downloads;
     uint64_t descriptor_pools,descriptor_slots,descriptor_updates;
+    uint64_t samplers;
+    uint32_t sampler_anisotropy,shader_image_gather_extended;
 } OotGpuReport;
 /* Independent host renderer foundation, not NVN guest object publication.
  * Retains the real graphics owner. All calls, queue access and destruction run
  * serially on the creator thread. Buffers die with the GPU owner. */
 OotGpu *oot_gpu_create(OotGraphics *graphics);
+/* Separate owned logical device; queries and enables both required features.
+ * Retains the parent instance/physical device; never mixes parent resources. */
+OotGpu *oot_gpu_create_renderer(OotGraphics *graphics);
 void oot_gpu_destroy(OotGpu *gpu);
 int oot_gpu_snapshot(const OotGpu *gpu,OotGpuReport *out);
 OotGpuBuffer *oot_gpu_buffer_create(OotGpu *gpu,uint64_t size);
@@ -49,4 +63,10 @@ OotGpuTexturePool *oot_gpu_texture_pool_create(OotGpu *gpu,uint32_t count);
 int oot_gpu_texture_pool_destroy(OotGpu *gpu,OotGpuTexturePool *pool);
 int oot_gpu_texture_pool_set(OotGpu *gpu,OotGpuTexturePool *pool,uint32_t index,OotGpuTexture *texture);
 int oot_gpu_texture_pool_get(const OotGpu *gpu,const OotGpuTexturePool *pool,uint32_t index,OotGpuTexture **out);
+OotGpuSampler *oot_gpu_sampler_create(OotGpu*,const OotGpuSamplerInfo*);
+int oot_gpu_sampler_destroy(OotGpu*,OotGpuSampler*);
+int oot_gpu_sampler_references(const OotGpu*,const OotGpuSampler*,uint64_t*);
+int oot_gpu_sampler_retain(OotGpu*,OotGpuSampler*);
+int oot_gpu_sampler_release(OotGpu*,OotGpuSampler*);
+int oot_gpu_sampler_info(const OotGpu*,const OotGpuSampler*,OotGpuSamplerInfo*);
 #endif

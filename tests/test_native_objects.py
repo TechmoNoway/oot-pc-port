@@ -61,7 +61,7 @@ class NativeObjectsTests(unittest.TestCase):
             'OOT_OBJECT_TEST_DECLARATION':'"'+header.as_posix()+'"'})+compiler.includes([ROOT/'src',ROOT/'tests',ROOT/'third_party/vulkan/include'])
         exe=folder/'objects-test.exe'
         compiler.build([ROOT/'tests/native_objects_test.c',ROOT/'tests/objects_vblank_fixture.c',
-            ROOT/'src/guest_memory.c',ROOT/'src/runtime_image.c',ROOT/'src/host_win32.c'],exe,flags,
+            ROOT/'src/native_gpu.c',ROOT/'src/native_nvn_resources.c',ROOT/'src/guest_memory.c',ROOT/'src/runtime_image.c',ROOT/'src/host_win32.c'],exe,flags,
             libraries=['bcrypt','user32'])
         result=owned_run([str(exe),str(image)],ROOT,os.environ.copy(),30)
         self.assertEqual(result.returncode,0,result.stdout+result.stderr)

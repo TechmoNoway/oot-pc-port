@@ -55,3 +55,9 @@ answers supplied. A separate prototype explicitly queried/enabled the required
 feature and created their graphics pipeline on both compilers. No draw commands
 were submitted. These results are not original draw-state capture, a production
 pipeline, shader conformance or a game frame.
+
+The opt-in resource profile now creates a separate owned renderer device after
+querying/enabling `shaderImageGatherExtended` and `samplerAnisotropy`. That child
+has the required declaration for the pinned tool's gather capability; the parent
+baseline still has none. Actual program capture, remaining module capabilities,
+descriptor/graphics state and shader execution still need separate verification.

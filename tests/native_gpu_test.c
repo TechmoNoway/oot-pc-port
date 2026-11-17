@@ -4,7 +4,9 @@
 #include <assert.h>
 #include <stdio.h>
 static unsigned fault,refs,pools,fences,buffers,allocations,maps,idle,next_id=4,barriers;
-static unsigned images,views,texture_test,copy_download;
+static unsigned images,views,texture_test,copy_download,samplers,child_devices,next_sampler=300;
+static VkSamplerCreateInfo last_sampler;
+static unsigned sampler_calls,sampler_fail_after;
 static unsigned widths[256],bindings[256];static void *backing[256];
 static VkImage pending_image;static VkBuffer pending_image_buffer;static VkBufferImageCopy image_copy;
 static VkImageLayout layouts[256];
@@ -132,10 +134,33 @@ static void VKAPI_CALL image_upload(VkCommandBuffer c,VkBuffer b,VkImage i,VkIma
 {UNUSED(c);image_command(i,l,b,n,r,0);}
 static void VKAPI_CALL image_download(VkCommandBuffer c,VkImage i,VkImageLayout l,VkBuffer b,uint32_t n,const VkBufferImageCopy *r)
 {UNUSED(c);image_command(i,l,b,n,r,1);}
+static void VKAPI_CALL renderer_features(VkPhysicalDevice p,VkPhysicalDeviceFeatures *f)
+{UNUSED(p);memset(f,0,sizeof(*f));f->samplerAnisotropy=fault!=23;f->shaderImageGatherExtended=fault!=24;}
+static VkResult VKAPI_CALL renderer_create(VkPhysicalDevice p,const VkDeviceCreateInfo *i,const VkAllocationCallbacks *a,VkDevice *o)
+{
+    UNUSED(p);UNUSED(a);assert(i->pEnabledFeatures && i->pEnabledFeatures->samplerAnisotropy && i->pEnabledFeatures->shaderImageGatherExtended);
+    assert(i->enabledExtensionCount==1 && !strcmp(i->ppEnabledExtensionNames[0],VK_KHR_SWAPCHAIN_EXTENSION_NAME));
+    assert(i->queueCreateInfoCount==1 && i->pQueueCreateInfos->queueFamilyIndex==2);
+    *o=(VkDevice)(uintptr_t)7;if(fault==22)return VK_ERROR_INITIALIZATION_FAILED;
+    ++child_devices;return VK_SUCCESS;
+}
+static void VKAPI_CALL renderer_destroy(VkDevice d,const VkAllocationCallbacks *a)
+{UNUSED(a);assert(d==(VkDevice)(uintptr_t)7 && child_devices);--child_devices;}
+static void VKAPI_CALL renderer_queue(VkDevice d,uint32_t family,uint32_t index,VkQueue *o)
+{assert(d==(VkDevice)(uintptr_t)7 && family==2 && index==0);*o=fault==25?VK_NULL_HANDLE:(VkQueue)(uintptr_t)2;}
+static VkResult VKAPI_CALL sampler_create(VkDevice d,const VkSamplerCreateInfo *i,const VkAllocationCallbacks *a,VkSampler *o)
+{
+    UNUSED(d);UNUSED(a);assert(i->sType==VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO && !i->pNext && !i->flags && !i->unnormalizedCoordinates);
+    *o=(VkSampler)(uintptr_t)next_sampler++;++sampler_calls;if(fault==26 || (sampler_fail_after && sampler_calls==sampler_fail_after))return VK_ERROR_INITIALIZATION_FAILED;
+    last_sampler=*i;++samplers;return VK_SUCCESS;
+}
+static void VKAPI_CALL sampler_destroy(VkDevice d,VkSampler sampler,const VkAllocationCallbacks *a)
+{UNUSED(d);UNUSED(sampler);UNUSED(a);assert(samplers);--samplers;}
 static PFN_vkVoidFunction VKAPI_CALL get_device(VkDevice d,const char *name)
 {
     UNUSED(d);PFN_vkVoidFunction p=NULL;if(fault==8 && !strcmp(name,"vkCmdCopyBuffer"))return NULL;
 #define MATCH(api,impl) if(!strcmp(name,"vk"#api)){PFN_vk##api typed=impl;memcpy(&p,&typed,sizeof(p));return p;}
+    MATCH(GetDeviceQueue,renderer_queue) MATCH(CreateSampler,sampler_create) MATCH(DestroySampler,sampler_destroy)
     MATCH(CreateCommandPool,pool_create) MATCH(DestroyCommandPool,pool_destroy) MATCH(AllocateCommandBuffers,command_allocate)
     MATCH(ResetCommandPool,pool_reset) MATCH(CreateFence,fence_create) MATCH(DestroyFence,fence_destroy)
     MATCH(ResetFences,fence_reset) MATCH(WaitForFences,fence_wait) MATCH(DeviceWaitIdle,device_idle)
@@ -152,6 +177,8 @@ static PFN_vkVoidFunction VKAPI_CALL get_device(VkDevice d,const char *name)
 int oot_graphics_acquire_vulkan(OotGraphics *g,OotGraphicsVulkan *out)
 {
     assert(g);memset(out,0,sizeof(*out));out->device=(VkDevice)(uintptr_t)1;out->queue=(VkQueue)(uintptr_t)2;
+    out->features=renderer_features;out->create_device=renderer_create;out->destroy_device=renderer_destroy;
+    out->properties.limits.maxSamplerAllocationCount=256;out->properties.limits.maxSamplerAnisotropy=16;out->properties.limits.maxSamplerLodBias=4;
     out->family=2;out->get_device=get_device;out->memory.memoryTypeCount=1;
     out->image_format=image_format;out->properties.limits.maxImageDimension2D=4096;
     out->memory.memoryTypes[0].propertyFlags=VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|VK_MEMORY_PROPERTY_HOST_COHERENT_BIT|VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
@@ -159,6 +186,28 @@ int oot_graphics_acquire_vulkan(OotGraphics *g,OotGraphicsVulkan *out)
 }
 void oot_graphics_destroy(OotGraphics *g){assert(g && refs);--refs;}
 static OotGpu *owner(void){return oot_gpu_create((OotGraphics*)(uintptr_t)1);}
+static void sampler_cases(void)
+{
+    for(unsigned f=22;f<=25;++f){fault=f;assert(!oot_gpu_create_renderer((OotGraphics*)(uintptr_t)1));assert(!refs && !child_devices && !pools && !fences);}fault=0;
+    OotGpuSamplerInfo info={0};info.min_filter=1;info.mag_filter=0;info.address_u=info.address_v=info.address_w=2;
+    info.min_lod=0;info.max_lod=0.25f;info.max_anisotropy=1;
+    OotGpu *base=owner();assert(base);info.max_anisotropy=2;assert(!oot_gpu_sampler_create(base,&info));oot_gpu_destroy(base);
+    OotGpu *g=oot_gpu_create_renderer((OotGraphics*)(uintptr_t)1),*other=owner();assert(g && other && child_devices==1);
+    assert(g->report.sampler_anisotropy && g->report.shader_image_gather_extended);
+    OotGpuSampler *s=oot_gpu_sampler_create(g,&info);assert(s && samplers==1 && last_sampler.anisotropyEnable && last_sampler.maxAnisotropy==2);
+    assert(last_sampler.maxLod==0.25f && last_sampler.magFilter==VK_FILTER_NEAREST && last_sampler.minFilter==VK_FILTER_LINEAR);
+    OotGpuSamplerInfo copy;assert(oot_gpu_sampler_info(g,s,&copy) && !memcmp(&copy,&info,sizeof(info)));
+    assert(!oot_gpu_sampler_info(g,s,(OotGpuSamplerInfo*)s) && !oot_gpu_sampler_destroy(other,s));
+    assert(oot_gpu_sampler_retain(g,s) && !oot_gpu_sampler_destroy(g,s) && oot_gpu_sampler_release(g,s) && !oot_gpu_sampler_release(g,s));
+    OotGpuReport before=g->report;fault=26;assert(!oot_gpu_sampler_create(g,&info) && !memcmp(&before,&g->report,sizeof(before)));fault=0;
+    info.max_anisotropy=17;assert(!oot_gpu_sampler_create(g,&info));info.max_anisotropy=2;
+    info.lod_bias=5;assert(!oot_gpu_sampler_create(g,&info));info.lod_bias=0;
+    info.address_u=4;assert(!oot_gpu_sampler_create(g,&info));info.address_u=2;
+    info.min_lod=1;assert(!oot_gpu_sampler_create(g,&info));info.min_lod=0;
+    assert(oot_gpu_sampler_destroy(g,s) && !oot_gpu_sampler_destroy(g,s));
+    oot_gpu_destroy(other);oot_gpu_destroy(g);assert(!samplers && !child_devices && !refs && !pools && !fences);
+    puts("GPU child features and sampler ownership checks passed.");
+}
 static void texture_cases(void)
 {
     const unsigned create_faults[]={5,16,17,18,19,20,21};
@@ -241,5 +290,5 @@ int main(void)
         assert(!oot_gpu_upload(g,a,0,input,1));oot_gpu_destroy(g);
         assert(!refs && !pools && !fences && !buffers && !allocations && !maps);
     }
-    assert(idle==1);texture_cases();puts("Synthetic GPU buffer transfers, barriers, fences and failure ownership passed.");return 0;
+    assert(idle==1);texture_cases();sampler_cases();puts("Synthetic GPU buffer transfers, barriers, fences and failure ownership passed.");return 0;
 }

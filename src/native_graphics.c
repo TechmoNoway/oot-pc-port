@@ -91,6 +91,9 @@ int oot_graphics_acquire_vulkan(OotGraphics *g,OotGraphicsVulkan *out)
        !PROC(g,vkGetPhysicalDeviceImageFormatProperties,next.image_format) ||
        !PROC(g,vkGetPhysicalDeviceMemoryProperties,memory))return 0;
     properties(g->physical,&next.properties);memory(g->physical,&next.memory);
+    /* Optional child-renderer entry points. Legacy borrows keep their baseline. */
+    (void)PROC(g,vkGetPhysicalDeviceFeatures,next.features);
+    (void)PROC(g,vkCreateDevice,next.create_device);next.destroy_device=g->destroy_device;
     if(!next.memory.memoryTypeCount || next.memory.memoryTypeCount>VK_MAX_MEMORY_TYPES)return 0;
     next.instance=g->instance;next.physical=g->physical;next.device=g->device;next.queue=g->queue;
     next.family=g->report.queue_family;++g->references;*out=next;return 1;

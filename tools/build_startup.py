@@ -78,7 +78,7 @@ def build_native(bundle, mode, native_cache=None, sdk_init=False,romfs_sha=None,
     names=('main','startup_cli','startup_context','startup_dispatch','guest_memory',
            'runtime_image','host_win32','pauth','checked_read','sdk_native','native_platform','native_services',
            'native_math','startup_vector','startup_float','startup_init_atomic','application_services',
-           'native_romfs','native_graphics','native_objects','native_vblank')
+           'native_romfs','native_graphics','native_objects','native_gpu','native_nvn_resources','native_vblank')
     paths=[ROOT/'src'/(name+'.c') for name in names]+sources
     common=compiler.defines({'OOT_HAS_STARTUP_PROGRAM':None,'_CRT_SECURE_NO_WARNINGS':None,
                             '_WIN32_WINNT':'0x0A00'})+compiler.includes([ROOT/'src',ROOT/'third_party/vulkan/include'])
@@ -131,7 +131,8 @@ def execute(exe,bundle,limit,quantum,trace_mode='compact',entropy_file=None,fast
     return report
 
 
-def run(prepared,output,compiler='cmake',execute_code=False,expand_targets=0,limit=1000000,quantum=1000,initial_entries=(),trace_mode='compact',sdk=False,entropy_file=None,native_sdk=False,sdk_init=False,host_linked=False,fast_functions=False,native_cache=None,application=False,application_entries=(),romfs_index=None,graphics=False,display=False,objects=False,events=False,refresh=False,nvn=False,nvn_layout=False):
+def run(prepared,output,compiler='cmake',execute_code=False,expand_targets=0,limit=1000000,quantum=1000,initial_entries=(),trace_mode='compact',sdk=False,entropy_file=None,native_sdk=False,sdk_init=False,host_linked=False,fast_functions=False,native_cache=None,application=False,application_entries=(),romfs_index=None,graphics=False,display=False,objects=False,events=False,refresh=False,nvn=False,nvn_layout=False,nvn_resources=False):
+    require(type(nvn_resources)is bool and(not nvn_resources or nvn_layout),'NVN resources require separate layout opt-in')
     require(type(nvn_layout)is bool and(not nvn_layout or nvn),'NVN layout requires separate NVN opt-in')
     require(type(nvn)is bool and(not nvn or refresh),'NVN requires separate refresh opt-in')
     require(type(refresh)is bool and(not refresh or events),'refresh requires separate event opt-in')
@@ -181,7 +182,7 @@ def run(prepared,output,compiler='cmake',execute_code=False,expand_targets=0,lim
             sdk_metadata=inspect_sdk_npdm(npdm)
         manifest=prepare_bundle(raw,bundle,extra_entries=extras,
             max_instructions=524288 if sdk_init else 32768 if sdk else 8192,sdk_metadata=sdk_metadata,native_sdk=native_sdk,sdk_init=sdk_init,host_linked=host_linked,
-            shared_package=output/'iteration-00/startup.ootmem' if index else None,decode_cache=decode_cache,application=application,application_entries=app_extras,graphics=graphics,display=display,objects=objects,events=events,refresh=refresh,nvn=nvn,nvn_layout=nvn_layout,
+            shared_package=output/'iteration-00/startup.ootmem' if index else None,decode_cache=decode_cache,application=application,application_entries=app_extras,graphics=graphics,display=display,objects=objects,events=events,refresh=refresh,nvn=nvn,nvn_layout=nvn_layout,nvn_resources=nvn_resources,
             **({'stack_size':metadata['main_thread_stack_size']} if metadata else {}))
         if romfs_input:manifest['romfs_input']=dict(romfs_input,index_path=str(romfs_index))
         manifest['npdm']=metadata
@@ -233,6 +234,7 @@ def run(prepared,output,compiler='cmake',execute_code=False,expand_targets=0,lim
     if events:final['events_runtime']=True
     if refresh:final['refresh_runtime']=True
     if nvn:final['nvn_runtime']=True
+    if nvn_resources:final['nvn_resources_runtime']=True
     if nvn_layout:final['nvn_layout_runtime']=True
     (output/'run.json').write_text(json.dumps(final,indent=2)+'\n',encoding='utf-8')
     return final
@@ -260,13 +262,14 @@ def main():
     p.add_argument('--events',action='store_true',help='separate audited auto-clear VSync SystemEvent profile')
     p.add_argument('--refresh',action='store_true',help='separate audited default Display 120 Hz capability declaration; requires --events')
     p.add_argument('--nvn',action='store_true',help='separate source-bound NVN procedure closure; requires --refresh')
+    p.add_argument('--nvn-resources',action='store_true',help='separate source-bound pool/buffer ownership; requires --nvn-layout')
     p.add_argument('--nvn-layout',action='store_true',help='source-proved fixed serialized NVN layout queries; requires --nvn')
     p.add_argument('--entropy-file',type=Path,help='private 32-byte process entropy under ignored build/')
     p.add_argument('--romfs-index',type=Path,help='private verified read-only RomFS index')
     p.add_argument('--native-cache',type=Path,help='owned incremental compiler cache under ignored build/')
     a=p.parse_args()
     try:
-        r=run(a.prepared,a.output,a.compiler,a.execute,a.expand_targets,a.limit,a.quantum,a.extra_entry,a.trace_mode,a.sdk,a.entropy_file,a.native_sdk,a.sdk_init,a.host_linked,a.fast_functions,native_cache=a.native_cache,application=a.application,application_entries=a.app_entry,romfs_index=a.romfs_index,graphics=a.graphics,display=a.display,objects=a.objects,events=a.events,refresh=a.refresh,nvn=a.nvn,nvn_layout=a.nvn_layout)
+        r=run(a.prepared,a.output,a.compiler,a.execute,a.expand_targets,a.limit,a.quantum,a.extra_entry,a.trace_mode,a.sdk,a.entropy_file,a.native_sdk,a.sdk_init,a.host_linked,a.fast_functions,native_cache=a.native_cache,application=a.application,application_entries=a.app_entry,romfs_index=a.romfs_index,graphics=a.graphics,display=a.display,objects=a.objects,events=a.events,refresh=a.refresh,nvn=a.nvn,nvn_layout=a.nvn_layout,nvn_resources=a.nvn_resources)
         last=r['iterations'][-1]
         print(json.dumps(dict(output=str(a.output),status=r['status'],iterations=len(r['iterations']),
             game_code_executed=r['game_code_executed'],startup_completed=False,

@@ -297,6 +297,10 @@ int oot_startup_cli(int argc, char **argv)
     if(program->flags&OOT_STARTUP_OBJECTS){
         OotObjectsReport objects={0};printf(",\"objects_runtime\":true");
         if(oot_startup_compiled_objects()->flags&OOT_OBJECT_VSYNC)printf(",\"events_runtime\":true");
+        if(oot_startup_compiled_objects()->flags&OOT_OBJECT_NVN_RESOURCES){
+            OotNvnResourcesReport rr={0};printf(",\"nvn_resources_runtime\":true");
+            if(oot_startup_context_resources_report(context,&rr))printf(",\"nvn_resources\":{\"pools\":%" PRIu64 ",\"buffers\":%" PRIu64 ",\"bytes\":%" PRIu64 ",\"initializations\":%" PRIu64 ",\"finalizations\":%" PRIu64 ",\"maps\":%" PRIu64 ",\"queries\":%" PRIu64 ",\"flushes\":%" PRIu64 ",\"invalidations\":%" PRIu64 ",\"descriptor_pools\":%" PRIu64 ",\"descriptor_slots\":%" PRIu64 ",\"descriptor_initializations\":%" PRIu64 ",\"descriptor_finalizations\":%" PRIu64 ",\"descriptor_queries\":%" PRIu64 ",\"samplers\":%" PRIu64 ",\"sampler_registrations\":%" PRIu64 "}",rr.pools,rr.buffers,rr.bytes,rr.initializations,rr.finalizations,rr.maps,rr.queries,rr.flushes,rr.invalidations,rr.descriptor_pools,rr.descriptor_slots,rr.descriptor_initializations,rr.descriptor_finalizations,rr.descriptor_queries,rr.samplers,rr.sampler_registrations);
+        }
         if(oot_startup_compiled_objects()->flags&OOT_OBJECT_NVN_LAYOUT)printf(",\"nvn_layout_runtime\":true");
         if(oot_startup_compiled_objects()->flags&OOT_OBJECT_NVN){
             OotNvnReport nr={0};printf(",\"nvn_runtime\":true,\"game_frame_proven\":false");

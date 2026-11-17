@@ -383,6 +383,44 @@ static int service_range(OotGuestMemory *memory,uint64_t address,unsigned size,u
     }return 1;
 }
 
+int oot_memory_probe_service(OotGuestMemory *memory,uint64_t address,unsigned size,unsigned access)
+{
+    int ok;
+    AcquireSRWLockExclusive(&transfer_lock);
+    if(memory)memory->fault=(OotMemoryFault){0};
+    ok=size && size<=OOT_MEMORY_SERVICE_WRITE_LIMIT && access && !(access&~3u) ?
+        service_range(memory,address,size,access):fail(memory,address,size,access,OOT_MEMORY_CONFIGURATION,address);
+    ReleaseSRWLockExclusive(&transfer_lock);return ok;
+}
+static int service_disjoint(const void *a,size_t an,const void *b,size_t bn)
+{ uintptr_t x=(uintptr_t)a,y=(uintptr_t)b;return x<=y?an<=y-x:bn<=x-y; }
+int oot_memory_capture_service(OotGuestMemory *memory,uint64_t address,uint8_t *bytes,unsigned size,unsigned access)
+{
+    int ok=0;
+    AcquireSRWLockExclusive(&transfer_lock);
+    if(memory)memory->fault=(OotMemoryFault){0};
+    if(!bytes || !size || size>OOT_MEMORY_SERVICE_WRITE_LIMIT || !(access&OOT_MEMORY_READ) || (access&~3u)){
+        fail(memory,address,size,access,OOT_MEMORY_CONFIGURATION,address);goto done;
+    }
+    if(!service_range(memory,address,size,access))goto done;
+    if(!service_disjoint(bytes,size,memory,sizeof(*memory)) ||
+       !service_disjoint(bytes,size,memory->regions,memory->count*sizeof(*memory->regions))){
+        fail(memory,address,size,access,OOT_MEMORY_CONFIGURATION,address);goto done;
+    }
+    for(size_t n=0;n<memory->count;++n)if(!service_disjoint(bytes,size,memory->regions[n].data,(size_t)memory->regions[n].size)){
+        fail(memory,address,size,access,OOT_MEMORY_CONFIGURATION,address);goto done;
+    }
+    unsigned copied=0;
+    while(copied<size){
+        const OotGuestRegion *r=find_region(memory,address+copied);
+        size_t at=(size_t)(address+copied-r->base),step=(size_t)r->size-at;
+        if(step>size-copied)step=size-copied;
+        memcpy(bytes+copied,r->data+at,step);copied+=(unsigned)step;
+    }
+    ok=1;
+done:ReleaseSRWLockExclusive(&transfer_lock);return ok;
+}
+
 int oot_memory_store_service(OotGuestMemory *memory,const OotServiceWrite *writes,unsigned count)
 {
     OotServiceWrite captured[2];unsigned total=0;int ok=0;

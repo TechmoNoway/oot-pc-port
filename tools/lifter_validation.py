@@ -201,7 +201,7 @@ def compile_library(programs, mode="cmake", extra_source="", startup=False, *, s
     if startup:
         names += ['startup_context','startup_dispatch','sdk_native','native_platform','native_services',
                   'native_math','startup_vector','startup_float','startup_init_atomic',
-                  'application_services','native_romfs','native_graphics','native_objects','native_vblank']
+                  'application_services','native_romfs','native_graphics','native_objects','native_gpu','native_nvn_resources','native_vblank']
     inputs = [*sources, *[ROOT/'src'/(name+'.c') for name in names]]
     flags = compiler.defines({'OOT_MEMORY_SHARED_EXPORTS':None,'_CRT_SECURE_NO_WARNINGS':None,
                               '_WIN32_WINNT':'0x0A00'}) + compiler.includes([ROOT/'src',ROOT/'third_party/vulkan/include'])

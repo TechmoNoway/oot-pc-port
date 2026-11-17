@@ -2,11 +2,13 @@
 #define OOT_NATIVE_OBJECTS_H
 #include "native_graphics.h"
 #include "runtime_image.h"
+#include "native_nvn_resources.h"
 #define OOT_OBJECT_DECLARATION_VERSION 1u
 #define OOT_OBJECT_VSYNC 1u
 #define OOT_OBJECT_REFRESH 2u
 #define OOT_OBJECT_NVN 4u
 #define OOT_OBJECT_NVN_LAYOUT 8u
+#define OOT_OBJECT_NVN_RESOURCES 16u
 #define OOT_OBJECT_OPEN_DISPLAY 451u
 #define OOT_OBJECT_CLOSE_DISPLAY 452u
 #define OOT_OBJECT_CREATE_LAYER 453u
@@ -77,6 +79,7 @@ int oot_objects_returns_value(uint32_t id);
 int oot_objects_snapshot(const OotObjects *objects,OotObjectsReport *out);
 int oot_objects_refresh_snapshot(const OotObjects *objects,OotRefreshReport *out);
 int oot_objects_bind_nvn(OotObjects *objects,const OotNvnDeclaration *declaration);
+int oot_objects_resources_snapshot(const OotObjects*,OotNvnResourcesReport*);
 int oot_objects_nvn_snapshot(const OotObjects *objects,OotNvnReport *out);
 /* Whole public API replacements. 0 implemented, 1 unsupported, 2 fault.
  * Only W0 Result (where declared) and PC=LR change. Failure preserves all

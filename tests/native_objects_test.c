@@ -40,9 +40,11 @@ int main(int argc,char **argv)
     bad=*d;bad.vptr_address[2]=bad.vptr_address[1];assert(!oot_objects_create(image,memory,g,&bad));
     bad=*d;bad.tables[7].sha256[0]^=1;assert(!oot_objects_create(image,memory,g,&bad));
     bad=*d;bad.flags=OOT_OBJECT_REFRESH;assert(!oot_objects_create(image,memory,g,&bad));
+    bad=*d;bad.flags=OOT_OBJECT_NVN_RESOURCES;assert(!oot_objects_create(image,memory,g,&bad));
     bad=*d;bad.flags=0;
     OotObjects *no_event=oot_objects_create(image,memory,g,&bad);assert(no_event);
     assert(!oot_objects_handler_valid(no_event,OOT_OBJECT_VSYNC_EVENT));
+    assert(!oot_objects_handler_valid(no_event,OOT_NVN_POOL_INITIALIZE));
     object_call(no_event,OOT_OBJECT_VSYNC_EVENT,d->layer+0x400,d->display,1);
     oot_objects_destroy(no_event);
     OotObjects *objects=oot_objects_create(image,memory,g,d);assert(objects);

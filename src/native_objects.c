@@ -16,6 +16,7 @@ struct OotObjects {
     OotNvnDeclaration nvn;
     OotNvnProc *procedures;
     OotNvnReport nvn_report;
+    OotNvnResources *resources;
     DWORD thread;
     OotGraphicsDisplayPeer *display;
     OotGraphicsLayerPeer *layer;
@@ -57,6 +58,7 @@ static int objects_vptrs(OotObjects *objects)
 static int objects_output(OotObjects *objects,uint64_t at,unsigned size)
 {
     const OotObjectDeclaration *d=&objects->declaration;
+    if(objects->resources && !oot_nvn_resources_output(objects->resources,at,size))return 0;
     if(!objects_span(at,size) || !objects_separate(at,size,d->display,d->display_size) ||
        !objects_separate(at,size,d->layer,d->layer_size))return 0;
     if(objects->procedures && (!objects_separate(at,size,objects->nvn.table,(uint64_t)objects->nvn.count*8) ||
@@ -74,10 +76,11 @@ OotObjects *oot_objects_create(OotRuntimeImage *image,OotGuestMemory *memory,Oot
 {
     OotObjects *objects;
     if(!image || !memory || !memory->valid || !graphics || !d || d->version!=OOT_OBJECT_DECLARATION_VERSION ||
-       d->flags&~(OOT_OBJECT_VSYNC|OOT_OBJECT_REFRESH|OOT_OBJECT_NVN|OOT_OBJECT_NVN_LAYOUT) ||
+       d->flags&~(OOT_OBJECT_VSYNC|OOT_OBJECT_REFRESH|OOT_OBJECT_NVN|OOT_OBJECT_NVN_LAYOUT|OOT_OBJECT_NVN_RESOURCES) ||
        ((d->flags&OOT_OBJECT_REFRESH) && !(d->flags&OOT_OBJECT_VSYNC)) ||
        ((d->flags&OOT_OBJECT_NVN) && (d->flags&3)!=3) ||
        ((d->flags&OOT_OBJECT_NVN_LAYOUT) && !(d->flags&OOT_OBJECT_NVN)) ||
+       ((d->flags&OOT_OBJECT_NVN_RESOURCES) && !(d->flags&OOT_OBJECT_NVN_LAYOUT)) ||
        d->reserved || !d->width || d->width>3840 || !d->height || d->height>2160 ||
        !objects_span(d->display,d->display_size) || !objects_span(d->layer,d->layer_size) ||
        (d->display|d->layer)&7 || !objects_separate(d->display,d->display_size,d->layer,d->layer_size) ||
@@ -109,6 +112,7 @@ OotObjects *oot_objects_create(OotRuntimeImage *image,OotGuestMemory *memory,Oot
 void oot_objects_destroy(OotObjects *objects)
 {
     if(!objects)return;
+    oot_nvn_resources_destroy(objects->resources);
     if(objects->event)CloseHandle(objects->event);
     if(objects->failure)CloseHandle(objects->failure);
     oot_vblank_destroy(objects->vblank);
@@ -119,10 +123,14 @@ int oot_objects_handler_valid(const OotObjects *objects,uint32_t id)
 { return objects && ((id>=OOT_OBJECT_OPEN_DISPLAY && id<=OOT_OBJECT_NATIVE_WINDOW) ||
     (id==OOT_OBJECT_VSYNC_EVENT && (objects->declaration.flags&OOT_OBJECT_VSYNC)) ||
     (id==OOT_OBJECT_REFRESH_CAPABILITY && (objects->declaration.flags&OOT_OBJECT_REFRESH)) ||
-    (id>=OOT_NVN_GET_PROC && id<=OOT_NVN_DEVICE_GET_DEPTH && objects->procedures)); }
+    (id>=OOT_NVN_GET_PROC && id<=OOT_NVN_DEVICE_GET_DEPTH && objects->procedures) ||
+    (id>=OOT_NVN_POOL_INITIALIZE && id<=OOT_NVN_RESOURCE_LAST && objects->procedures && (objects->declaration.flags&OOT_OBJECT_NVN_RESOURCES))); }
 int oot_objects_returns_value(uint32_t id)
 { return id==OOT_OBJECT_OPEN_DISPLAY || id==OOT_OBJECT_CREATE_LAYER || id==OOT_OBJECT_NATIVE_WINDOW || id==OOT_OBJECT_VSYNC_EVENT ||
-    id==OOT_NVN_GET_PROC || id==OOT_NVN_DEVICE_INITIALIZE || id==OOT_NVN_DEVICE_GET_ORIGIN || id==OOT_NVN_DEVICE_GET_DEPTH; }
+    id==OOT_NVN_GET_PROC || id==OOT_NVN_DEVICE_INITIALIZE || id==OOT_NVN_DEVICE_GET_ORIGIN || id==OOT_NVN_DEVICE_GET_DEPTH || id==OOT_NVN_POOL_INITIALIZE || id==OOT_NVN_BUFFER_INITIALIZE || id==OOT_NVN_SAMPLER_POOL_INITIALIZE || id==OOT_NVN_TEXTURE_POOL_INITIALIZE ||
+    (id>=OOT_NVN_SAMPLER_POOL_GET_POOL && id<=OOT_NVN_SAMPLER_POOL_GET_SIZE) || (id>=OOT_NVN_TEXTURE_POOL_GET_POOL && id<=OOT_NVN_TEXTURE_POOL_GET_SIZE) ||
+    id==OOT_NVN_POOL_MAP || id==OOT_NVN_POOL_GET_SIZE || id==OOT_NVN_POOL_GET_FLAGS || id==OOT_NVN_POOL_GET_ADDRESS ||
+    (id>=OOT_NVN_BUFFER_MAP && id<=OOT_NVN_BUFFER_GET_SIZE); }
 int oot_objects_snapshot(const OotObjects *objects,OotObjectsReport *out)
 {
     if(!objects || !out || !objects_disjoint(objects,sizeof(*objects),out,sizeof(*out)))return 0;
@@ -168,6 +176,8 @@ int oot_objects_nvn_snapshot(const OotObjects *objects,OotNvnReport *out)
     if(!objects || !out || !objects->procedures || !objects_disjoint(objects,sizeof(*objects),out,sizeof(*out)))return 0;
     *out=objects->nvn_report;return 1;
 }
+int oot_objects_resources_snapshot(const OotObjects *o,OotNvnResourcesReport *out)
+{ return o && out && objects_disjoint(o,sizeof(*o),out,sizeof(*out)) && oot_nvn_resources_snapshot(o->resources,out); }
 static int objects_write_pointer(OotObjects *objects,uint64_t at,uint64_t value)
 { uint8_t bytes[8];objects_put64(bytes,value);return oot_memory_store_record(objects->memory,at,bytes,8); }
 int oot_objects_call(OotObjects *objects,uint32_t id,OotArm64State *state)
@@ -182,7 +192,21 @@ int oot_objects_call(OotObjects *objects,uint32_t id,OotArm64State *state)
     if(!objects_tables(objects) || !objects_vptrs(objects))return 2;
     if(objects->report.calls==UINT64_MAX)return 2;
     d=&objects->declaration;next=*state;report=objects->report;
-    if(id>=OOT_NVN_GET_PROC && id<=OOT_NVN_DEVICE_GET_DEPTH){
+    if(id>=OOT_NVN_POOL_INITIALIZE && id<=OOT_NVN_RESOURCE_LAST){
+        OotGraphicsReport gr;OotNvnResources *owner=objects->resources;uint64_t result;
+        if(!objects_nvn_table(objects,&objects->nvn))return 2;
+        if(!objects->nvn_report.device || !oot_graphics_snapshot(objects->graphics,&gr) || !gr.ready)return 1;
+        if(!owner){
+            if(id!=OOT_NVN_POOL_INITIALIZE)return 1;
+            OotNvnRange forbidden[11]={{d->display,d->display_size},{d->layer,d->layer_size},{objects->nvn.table,(uint64_t)objects->nvn.count*8}};
+            for(unsigned n=0;n<OOT_OBJECT_TABLES;++n)forbidden[3+n]=(OotNvnRange){d->tables[n].address,d->tables[n].size};
+            owner=oot_nvn_resources_create(objects->graphics,objects->memory,objects->nvn_report.device,forbidden,11);
+            if(!owner)return 2;
+        }
+        int status=oot_nvn_resources_call4(owner,id,state->x[0],state->x[1],state->x[2],state->x[3],&result);
+        if(status){if(!objects->resources)oot_nvn_resources_destroy(owner);return status;}
+        objects->resources=owner;if(oot_objects_returns_value(id))next.x[0]=result;
+    }else if(id>=OOT_NVN_GET_PROC && id<=OOT_NVN_DEVICE_GET_DEPTH){
         OotNvnReport nr=objects->nvn_report;OotGraphicsReport gr;
         if(!objects_nvn_table(objects,&objects->nvn))return 2;
         if(!oot_graphics_snapshot(objects->graphics,&gr) || !gr.ready)return 1;
@@ -239,6 +263,12 @@ int oot_objects_call(OotObjects *objects,uint32_t id,OotArm64State *state)
         } else {
             if(!nr.device || nr.device!=state->x[0])return 1;
             if(nr.finalizations==UINT64_MAX)return 2;
+            if(objects->resources){
+                OotNvnResourcesReport resources;
+                if(!oot_nvn_resources_snapshot(objects->resources,&resources))return 2;
+                if(resources.pools || resources.buffers || resources.descriptor_pools)return 1;
+                oot_nvn_resources_destroy(objects->resources);objects->resources=NULL;
+            }
             nr.device=0;++nr.finalizations;
         }
         objects->nvn_report=nr;

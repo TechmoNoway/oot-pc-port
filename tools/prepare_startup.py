@@ -247,7 +247,7 @@ def emit_startup(linker, nodes, package_manifest, config=None, relocation_probes
         lines+=['};',f'const OotStartupConstructor *oot_startup_compiled_constructors(size_t *n){{*n={len(host_constructors)};return oot_host_constructors;}}']
     else:lines+=['const OotStartupConstructor *oot_startup_compiled_constructors(size_t *n){*n=0;return NULL;}']
     if nvn_declaration is not None:
-        require(objects and object_declaration['flags']in(7,15),'NVN emission requires audited object chain')
+        require(objects and object_declaration['flags']in(7,15,31),'NVN emission requires audited object chain')
         procs=nvn_declaration['procedures'];lines+=['static const OotNvnProc oot_nvn_procedures[]={']
         for p in procs:lines+=['{'+json.dumps(p['name'])+','+constant(p['entry'])+'},']
         digest='{'+','.join('0x'+nvn_declaration['table_sha256'][n:n+2]for n in range(0,64,2))+'}'
@@ -565,7 +565,8 @@ def extend_application_selection(linker,merged,application_entry,application_ent
     return merged,evidence
 
 
-def prepare_bundle(linker, output, max_instructions=8192, extra_entries=(), config=None, stack_size=STACK_SIZE, shared_package=None, sdk_metadata=None, native_sdk=False, sdk_init=False, host_linked=False,decode_cache=None,application=False,application_entries=(),graphics=False,display=False,objects=False,events=False,refresh=False,nvn=False,nvn_layout=False):
+def prepare_bundle(linker, output, max_instructions=8192, extra_entries=(), config=None, stack_size=STACK_SIZE, shared_package=None, sdk_metadata=None, native_sdk=False, sdk_init=False, host_linked=False,decode_cache=None,application=False,application_entries=(),graphics=False,display=False,objects=False,events=False,refresh=False,nvn=False,nvn_layout=False,nvn_resources=False):
+    require(type(nvn_resources)is bool and(not nvn_resources or nvn_layout),'NVN resources require separate layout opt-in')
     require(type(nvn_layout)is bool and(not nvn_layout or nvn),'NVN layout requires separate NVN mode')
     require(type(nvn)is bool and(not nvn or refresh),'NVN requires separate refresh mode')
     require(type(refresh)is bool and(not refresh or events),'refresh requires separate event mode')
@@ -625,6 +626,9 @@ def prepare_bundle(linker, output, max_instructions=8192, extra_entries=(), conf
                                         if nvn_layout:
                                             from nvn_layout_audit import extend_nvn_layout_audit
                                             native_audit=extend_nvn_layout_audit(verified,native_audit)
+                                            if nvn_resources:
+                                                from nvn_resources_audit import extend_nvn_resources_audit
+                                                native_audit=extend_nvn_resources_audit(verified,native_audit)
             else:
                 from sdk_init_audit import audit_sdk_init
                 native_audit=audit_sdk_init(verified)
@@ -772,6 +776,7 @@ def prepare_bundle(linker, output, max_instructions=8192, extra_entries=(), conf
         if events:report['events_runtime']=True;summary['events_runtime']=True
         if refresh:report['refresh_runtime']=True;summary['refresh_runtime']=True
         if nvn:report['nvn_runtime']=True;summary['nvn_runtime']=True
+        if nvn_resources:report['nvn_resources_runtime']=True;summary['nvn_resources_runtime']=True
         if nvn_layout:report['nvn_layout_runtime']=True;summary['nvn_layout_runtime']=True
         report['application_selection']=application_selection
         report['application_pointer_selection']=application_pointers

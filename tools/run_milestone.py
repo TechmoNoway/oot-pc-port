@@ -878,6 +878,10 @@ def execute(config, output, native_only=False, resume=False):
     if not native_only and config.get('nvn_layout_experiment'):
         stages.insert(stages.index('comparison'),'nvn-layout-audit')
         for mode in ('cmake','gcc'):stages.insert(stages.index('summary'),'nvn-layout-experiment-'+mode)
+    if not native_only and config.get('nvn_resources_experiment'):
+        stages.insert(stages.index('comparison'),'nvn-resources-audit')
+        stages.insert(stages.index('comparison'),'nvn-resource-foundation')
+        for mode in ('cmake','gcc'):stages.insert(stages.index('summary'),'nvn-resources-experiment-'+mode)
     from milestone_checkpoint import execution_binding
     binding=execution_binding(ROOT,config,native_only)
     run = MilestoneRun(output, config["name"], stages,binding=binding,resume=resume)
@@ -901,7 +905,7 @@ def execute(config, output, native_only=False, resume=False):
                 exe=run.output/'sdk-context-test.exe'
                 run.command('gcc-sdk-context-build',[gcc,'-std=c17','-O2','-Wall','-Wextra','-Wpedantic','-Werror',
                     '-D_CRT_SECURE_NO_WARNINGS','-D_WIN32_WINNT=0x0A00','-I',ROOT/'src',ROOT/'tests/startup_context_test.c',
-                    *[ROOT/'src'/(name+'.c') for name in ('startup_context','runtime_image','guest_memory','host_win32','sdk_native','native_platform','native_services','native_math','startup_vector','startup_float','startup_init_atomic','application_services','native_romfs','native_graphics','native_objects','native_vblank')],
+                    *[ROOT/'src'/(name+'.c') for name in ('startup_context','runtime_image','guest_memory','host_win32','sdk_native','native_platform','native_services','native_math','startup_vector','startup_float','startup_init_atomic','application_services','native_romfs','native_graphics','native_objects','native_gpu','native_nvn_resources','native_vblank')],
                     '-I',ROOT/'third_party/vulkan/include','-lbcrypt','-o',exe],e)
                 run.command('gcc-sdk-context-test',[exe,run.output/'sdk-context-test.ootmem'],e)
         with ThreadPoolExecutor(max_workers=2) as pool:
@@ -1020,6 +1024,27 @@ def execute(config, output, native_only=False, resume=False):
                         report=extend_nvn_layout_audit(linker,read_json(run.output/'nvn-audit.json'))
                         (run.output/'nvn-layout-audit.json').write_text(json.dumps(report,indent=2)+'\n')
                     run.action('nvn-layout-audit',nvn_layout_source_audit)
+                    if config.get('nvn_resources_experiment'):
+                        def nvn_resources_source_audit():
+                            from link_exefs import load_prepared
+                            from module_linker import Linker
+                            from nvn_resources_audit import extend_nvn_resources_audit
+                            linker=Linker(load_prepared(prepared));require(linker.apply()['link_complete'],'NVN resource offline link incomplete')
+                            report=extend_nvn_resources_audit(linker,read_json(run.output/'nvn-layout-audit.json'))
+                            (run.output/'nvn-resources-audit.json').write_text(json.dumps(report,indent=2)+'\n')
+                        run.action('nvn-resources-audit',nvn_resources_source_audit)
+                        run.command('nvn-resource-foundation',py+['tools/probe_nvn_resources.py','--output',run.output/'nvn-resource-foundation'],env)
+                        resource_probe=read_json(run.output/'nvn-resource-foundation/report.json')
+                        require(resource_probe.get('format')=='oot-nvn-resource-probe'and resource_probe.get('game_code_executed')is False and
+                            resource_probe.get('game_frame_proven')is False and set(resource_probe.get('compilers',{}))=={'cmake','gcc'},
+                            'NVN resource physical probe scope differs')
+                        for observation in resource_probe['compilers'].values():
+                            r=observation.get('observation',{})
+                            require(r.get('status')=='passed'and r.get('copies')==r.get('recaptures')==r.get('readbacks')==16 and
+                                r.get('initializations')==r.get('finalizations')==2 and r.get('peak_descriptor_slots')==37164 and r.get('peak_samplers')==4 and r.get('sampler_registrations')==2 and r.get('sampler_anisotropy')==r.get('shader_image_gather_extended')==1 and
+                                r.get('descriptor_initializations')==r.get('descriptor_finalizations')==2 and r.get('synthetic_data_only')is True and
+                                r.get('game_frame_proven')is False,'NVN resource physical probe did not complete')
+                        run.mark_verified(['nvn-resource-foundation']);summary['nvn_resource_foundation']=resource_probe
                 run.command('renderer-foundation',py+['tools/probe_renderer_foundation.py','--tool',ROOT/config['renderer_shader_tool'],
                     '--identity',ROOT/config['renderer_shader_identity'],'--output',run.output/'renderer-foundation'],env)
                 renderer=read_json(run.output/'renderer-foundation/report.json')
@@ -1346,6 +1371,7 @@ def execute(config, output, native_only=False, resume=False):
                 from nvn_milestone import run_nvn_lanes
                 summary.update(run_nvn_lanes(run,config,env))
                 if config.get('nvn_layout_experiment'):summary.update(run_nvn_lanes(run,config,env,layout=True))
+                if config.get('nvn_resources_experiment'):summary.update(run_nvn_lanes(run,config,env,layout=True,resources=True))
         def publish_summary():
             (run.output/"summary.json").write_text(json.dumps(summary, indent=2)+"\n", encoding="utf-8")
             lines = ["# Milestone validation", "", f"Milestone: {config['name']}", "", f"Python tests: {summary['python_tests']}; CTest groups: {summary['ctest_groups']}; native comparisons per compiler: {summary['native_trials_per_compiler']}."]

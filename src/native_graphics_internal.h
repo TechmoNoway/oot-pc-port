@@ -14,6 +14,9 @@ typedef struct OotGraphicsVulkan {
     uint32_t family;
     PFN_vkGetDeviceProcAddr get_device;
     PFN_vkGetPhysicalDeviceImageFormatProperties image_format;
+    PFN_vkGetPhysicalDeviceFeatures features;
+    PFN_vkCreateDevice create_device;
+    PFN_vkDestroyDevice destroy_device;
     VkPhysicalDeviceProperties properties;
     VkPhysicalDeviceMemoryProperties memory;
 } OotGraphicsVulkan;

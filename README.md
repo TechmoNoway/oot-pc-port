@@ -6,16 +6,16 @@ An independent project exploring a native Windows x86-64 port of Ocarina of Time
 
 Early development. The Windows host builds and passes its native self-tests. The separate [experimental startup bootstrap](docs/startup-bootstrap.md) and [SDK runtime foundation](docs/sdk-runtime.md) compile selected original instructions into a private Windows executable, execute them only with explicit opt-in, and record precise stop diagnostics. The completed host-linked initialization profile reaches the original `nnMain` transition. A separate [application profile](docs/application-startup.md) continues into its original body, supplies coherent main-thread updates and mounts verified read-only game content. The game is not playable yet.
 
-The latest [texture ownership and fixed NVN layout](docs/nvn-textures.md)
-checkpoint passes all 72 validation stages, 789 Python tests, eight CTest groups
-and 283,401 common native/reference comparisons per compiler. Both original
-replays preserve the preceding [NVN bootstrap](docs/nvn-bootstrap.md), execute
-the original memory-pool builder setters and reach guarded
-`nvnMemoryPoolInitialize` after 326,218 post-entry instructions. The independent
-Vulkan owner passes physical buffer and RGBA8/BGRA8 texture roundtrips on both
-native compilers. A separate [shader tool](docs/shader-tool.md) is available;
-guest resource ownership, game shader/state integration, draw submission and
-presentation remain required. No game frame has been produced yet.
+The latest [NVN pool, descriptor and sampler ownership](docs/nvn-resources.md)
+checkpoint passes all 76 validation stages, 798 Python tests, eight CTest groups
+and 283,401 common native/reference comparisons per compiler. Both full original
+replays preserve every preceding profile and reach guarded
+`nvnQueueBuilderSetDefaults` after 326,486 post-entry instructions. The runtime
+owns one 1,191,936-byte pool, 37,164 descriptor slots, four real Vulkan samplers
+and one game sampler registration. Physical probes on both compilers complete
+16 real transfers and validate resource teardown using synthetic storage.
+Queue commands, game shader/texture binding, draws and presentation remain
+required. No game frame has been produced yet.
 
 The separate [VSync SystemEvent profile](docs/system-events.md) passes all 60
 validation stages, 750 Python tests without skips, eight CTest groups and 283,401

@@ -4,6 +4,7 @@
 #include <string.h>
 #include "native_gpu.h"
 #include "native_graphics_internal.h"
+#include <math.h>
 #define GPU_MAX_BUFFER (UINT64_C(64)*1024*1024)
 #define GPU_COMMANDS(X) \
  X(CreateCommandPool) X(DestroyCommandPool) X(AllocateCommandBuffers) X(ResetCommandPool) \
@@ -12,7 +13,7 @@
  X(FreeMemory) X(BindBufferMemory) X(MapMemory) X(UnmapMemory) X(BeginCommandBuffer) \
  X(EndCommandBuffer) X(CmdPipelineBarrier) X(CmdCopyBuffer) X(QueueSubmit) \
  X(CreateImage) X(DestroyImage) X(GetImageMemoryRequirements) X(BindImageMemory) \
- X(CreateImageView) X(DestroyImageView) X(CmdCopyBufferToImage) X(CmdCopyImageToBuffer)
+ X(CreateImageView) X(DestroyImageView) X(CmdCopyBufferToImage) X(CmdCopyImageToBuffer) X(CreateSampler) X(DestroySampler)
 struct OotGpuBuffer {
     struct OotGpuBuffer *next;
     VkBuffer buffer;VkDeviceMemory memory;void *mapped;uint64_t size;
@@ -30,12 +31,16 @@ struct OotGpuTexturePool {
     GpuTextureDescriptor *slots;
     uint32_t count;
 };
+struct OotGpuSampler {
+    struct OotGpuSampler *next;VkSampler sampler;OotGpuSamplerInfo info;uint64_t references;
+};
 struct OotGpu {
     OotGraphics *graphics;OotGraphicsVulkan vk;DWORD thread;
     VkCommandPool pool;VkCommandBuffer command;VkFence fence;uint32_t pending;
     OotGpuBuffer *buffers;OotGpuReport report;
     OotGpuTexture *textures;OotGpuTexturePool *texture_pools;
     uint32_t texture_identities,pool_identities;
+    OotGpuSampler *samplers;uint32_t sampler_identities,child_device;
 #define DECLARE(n) PFN_vk##n n;
     GPU_COMMANDS(DECLARE)
 #undef DECLARE
@@ -69,16 +74,40 @@ void oot_gpu_destroy(OotGpu *g)
     if(g->pending && g->DeviceWaitIdle)g->DeviceWaitIdle(g->vk.device);
     while(g->texture_pools){OotGpuTexturePool *p=g->texture_pools;g->texture_pools=p->next;free(p->slots);free(p);}
     while(g->textures){OotGpuTexture *t=g->textures;g->textures=t->next;gpu_release_texture(g,t);free(t);}
+    while(g->samplers){OotGpuSampler *s=g->samplers;g->samplers=s->next;if(s->sampler)g->DestroySampler(g->vk.device,s->sampler,NULL);free(s);}
     while(g->buffers){OotGpuBuffer *b=g->buffers;g->buffers=b->next;gpu_release_buffer(g,b);}
     if(g->fence && g->DestroyFence)g->DestroyFence(g->vk.device,g->fence,NULL);
     if(g->pool && g->DestroyCommandPool)g->DestroyCommandPool(g->vk.device,g->pool,NULL);
+    if(g->child_device)g->vk.destroy_device(g->vk.device,NULL);
     if(g->graphics)oot_graphics_destroy(g->graphics);
     memset(g,0,sizeof(*g));free(g);
 }
-OotGpu *oot_gpu_create(OotGraphics *graphics)
+static OotGpu *gpu_create(OotGraphics *graphics,int renderer)
 {
     OotGpu *g=calloc(1,sizeof(*g));if(!g)return NULL;g->thread=GetCurrentThreadId();
     if(!oot_graphics_acquire_vulkan(graphics,&g->vk)){free(g);return NULL;}g->graphics=graphics;
+    if(renderer){
+        VkPhysicalDeviceFeatures available={0},enabled={0};
+        if(!g->vk.features || !g->vk.create_device || !g->vk.destroy_device)goto fail;
+        g->vk.features(g->vk.physical,&available);
+        if(!available.samplerAnisotropy || !available.shaderImageGatherExtended)goto fail;
+        enabled.samplerAnisotropy=enabled.shaderImageGatherExtended=VK_TRUE;
+        float priority=1;VkDeviceQueueCreateInfo queue={0};queue.sType=VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+        queue.queueFamilyIndex=g->vk.family;queue.queueCount=1;queue.pQueuePriorities=&priority;
+        VkDeviceCreateInfo device={0};device.sType=VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+        device.queueCreateInfoCount=1;device.pQueueCreateInfos=&queue;device.pEnabledFeatures=&enabled;
+        const char *extension=VK_KHR_SWAPCHAIN_EXTENSION_NAME;
+        device.enabledExtensionCount=1;device.ppEnabledExtensionNames=&extension;
+        VkDevice created=VK_NULL_HANDLE;
+        if(g->vk.create_device(g->vk.physical,&device,NULL,&created)!=VK_SUCCESS)goto fail;
+        if(!created)goto fail;
+        g->vk.device=created;g->child_device=1;g->vk.queue=VK_NULL_HANDLE;
+        PFN_vkGetDeviceQueue get_queue=NULL;PFN_vkVoidFunction proc=g->vk.get_device(created,"vkGetDeviceQueue");
+        if(!proc)goto fail;
+        memcpy(&get_queue,&proc,sizeof(proc));get_queue(created,g->vk.family,0,&g->vk.queue);
+        if(!g->vk.queue)goto fail;
+        g->report.sampler_anisotropy=g->report.shader_image_gather_extended=1;
+    }
 #define LOAD(n) {PFN_vkVoidFunction p=g->vk.get_device(g->vk.device,"vk"#n);if(!p)goto fail;memcpy(&g->n,&p,sizeof(p));}
     GPU_COMMANDS(LOAD)
 #undef LOAD
@@ -99,6 +128,8 @@ OotGpu *oot_gpu_create(OotGraphics *graphics)
     return g;
 fail:oot_gpu_destroy(g);return NULL;
 }
+OotGpu *oot_gpu_create(OotGraphics *graphics){return gpu_create(graphics,0);}
+OotGpu *oot_gpu_create_renderer(OotGraphics *graphics){return gpu_create(graphics,1);}
 int oot_gpu_snapshot(const OotGpu *g,OotGpuReport *out)
 {
     if(!g || !out || !gpu_disjoint(g,sizeof(*g),out,sizeof(*out)))return 0;
@@ -190,6 +221,7 @@ static int gpu_texture_output(const OotGpu *g,const void *out,size_t size)
 {
     if(!out || !gpu_disjoint(out,size,g,sizeof(*g)))return 0;
     for(const OotGpuTexture *t=g->textures;t;t=t->next)if(!gpu_disjoint(out,size,t,sizeof(*t)))return 0;
+    for(const OotGpuSampler *s=g->samplers;s;s=s->next)if(!gpu_disjoint(out,size,s,sizeof(*s)))return 0;
     for(const OotGpuTexturePool *p=g->texture_pools;p;p=p->next)
         if(!gpu_disjoint(out,size,p,sizeof(*p)) || (p->slots &&
            !gpu_disjoint(out,size,p->slots,(size_t)p->count*sizeof(*p->slots))))return 0;
@@ -343,3 +375,43 @@ int oot_gpu_texture_pool_get(const OotGpu *g,const OotGpuTexturePool *p,uint32_t
     OotGpuTexture *t;if(!gpu_descriptor_texture(g,p->slots+index,&t))return 0;
     *out=t;return 1;
 }
+
+_Static_assert(sizeof(OotGpuSamplerInfo)==56,"normalized sampler state has no padding");
+static OotGpuSampler *gpu_sampler(const OotGpu *g,const OotGpuSampler *candidate)
+{OotGpuSampler *s=g->samplers;while(s && s!=candidate)s=s->next;return s && s->sampler?s:NULL;}
+OotGpuSampler *oot_gpu_sampler_create(OotGpu *g,const OotGpuSamplerInfo *input)
+{
+    if(!gpu_live(g) || !input || g->sampler_identities>=1024 || g->report.samplers>=256 ||
+       g->report.samplers>=g->vk.properties.limits.maxSamplerAllocationCount)return NULL;
+    OotGpuSamplerInfo i=*input;
+    if(i.min_filter>1 || i.mag_filter>1 || i.mipmap_mode>1 || i.address_u>3 || i.address_v>3 || i.address_w>3 ||
+       i.compare_enable>1 || i.compare_op>7 || i.border_color>2 || i.reserved ||
+       !isfinite(i.min_lod) || !isfinite(i.max_lod) || !isfinite(i.lod_bias) || !isfinite(i.max_anisotropy) ||
+       i.min_lod>i.max_lod || fabsf(i.lod_bias)>g->vk.properties.limits.maxSamplerLodBias || i.max_anisotropy<1 ||
+       i.max_anisotropy>g->vk.properties.limits.maxSamplerAnisotropy ||
+       (i.max_anisotropy>1 && !g->report.sampler_anisotropy))return NULL;
+    OotGpuSampler *s=calloc(1,sizeof(*s));if(!s)return NULL;
+    VkSamplerCreateInfo c={0};c.sType=VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;c.minFilter=(VkFilter)i.min_filter;
+    c.magFilter=(VkFilter)i.mag_filter;c.mipmapMode=(VkSamplerMipmapMode)i.mipmap_mode;
+    c.addressModeU=(VkSamplerAddressMode)i.address_u;c.addressModeV=(VkSamplerAddressMode)i.address_v;c.addressModeW=(VkSamplerAddressMode)i.address_w;
+    c.mipLodBias=i.lod_bias;c.minLod=i.min_lod;c.maxLod=i.max_lod;c.anisotropyEnable=i.max_anisotropy>1;
+    c.maxAnisotropy=i.max_anisotropy;c.compareEnable=i.compare_enable;c.compareOp=(VkCompareOp)i.compare_op;
+    c.borderColor=(VkBorderColor)(i.border_color*2);
+    VkSampler created=VK_NULL_HANDLE;
+    if(g->CreateSampler(g->vk.device,&c,NULL,&created)!=VK_SUCCESS || !created){free(s);return NULL;}
+    s->sampler=created;s->info=i;s->next=g->samplers;g->samplers=s;++g->sampler_identities;++g->report.samplers;return s;
+}
+int oot_gpu_sampler_destroy(OotGpu *g,OotGpuSampler *s)
+{
+    if(!gpu_live(g) || !gpu_sampler(g,s) || s->references)return 0;
+    g->DestroySampler(g->vk.device,s->sampler,NULL);s->sampler=VK_NULL_HANDLE;--g->report.samplers;return 1;
+}
+int oot_gpu_sampler_retain(OotGpu *g,OotGpuSampler *s)
+{if(!gpu_live(g) || !gpu_sampler(g,s) || s->references==UINT64_MAX)return 0;++s->references;return 1;}
+int oot_gpu_sampler_release(OotGpu *g,OotGpuSampler *s)
+{if(!gpu_live(g) || !gpu_sampler(g,s) || !s->references)return 0;--s->references;return 1;}
+int oot_gpu_sampler_info(const OotGpu *g,const OotGpuSampler *s,OotGpuSamplerInfo *out)
+{if(!gpu_live(g) || !gpu_sampler(g,s) || !gpu_texture_output(g,out,sizeof(*out)))return 0;*out=s->info;return 1;}
+
+int oot_gpu_sampler_references(const OotGpu *g,const OotGpuSampler *s,uint64_t *out)
+{if(!gpu_live(g) || !gpu_sampler(g,s) || !gpu_texture_output(g,out,sizeof(*out)))return 0;*out=s->references;return 1;}

@@ -4,6 +4,15 @@ from pathlib import Path
 from input_formats import require
 
 def validate_nvn_config(c):
+    if c.get('name')=='nvn-resources':require(c.get('nvn_resources_experiment')is True,'resource milestone requires original execution')
+    require(type(c.get('nvn_resources_experiment',False))is bool and
+        (not c.get('nvn_resources_experiment')or c.get('nvn_layout_experiment')is True),'NVN resources require the retained layout lane')
+    if c.get('nvn_resources_experiment'):
+        require(isinstance(c.get('nvn_resources_seed_report'),str)and c['nvn_resources_seed_report']and
+            isinstance(c.get('nvn_resources_expected_guard'),str)and c['nvn_resources_expected_guard'].startswith('nvn'),
+            'NVN resources require their exact original continuation boundary and selection seed')
+        require(type(c.get('nvn_resources_min_post_entry'))is int and
+            c['nvn_resources_min_post_entry']>c.get('nvn_layout_min_post_entry',0),'NVN resources require measured continuation')
     if c.get('name')=='nvn-textures':require(c.get('nvn_layout_experiment')is True,'texture milestone requires its separate original layout lane')
     require(type(c.get('nvn_layout_experiment',False))is bool and
         (not c.get('nvn_layout_experiment')or c.get('nvn_experiment')is True),'NVN layout requires the retained NVN lane')
@@ -26,13 +35,14 @@ def validate_nvn_config(c):
         require(type(c.get('nvn_layout_min_post_entry'))is int and c['nvn_layout_min_post_entry']>c['nvn_min_post_entry'],
             'NVN layout requires the measured original continuation')
 
-def run_nvn_lanes(run,c,env,layout=False):
+def run_nvn_lanes(run,c,env,layout=False,resources=False):
     from run_milestone import ROOT,read_json,application_evidence
     from link_exefs import build_destination
     from build_startup import execute,validated_romfs_input
     from startup_sources import cached_sources
     from nvn_progress import verify_nvn_progress_trace
-    label='nvn-layout'if layout else'nvn';prefix='nvn_layout'if layout else'nvn'
+    require(not resources or layout,'resource lane requires its layout opt-in')
+    label='nvn-resources'if resources else'nvn-layout'if layout else'nvn';prefix=label.replace('-','_')
     seed=read_json(build_destination(ROOT/c[prefix+'_seed_report']));prior=seed['iterations'][-1]
     require(seed.get('nvn_runtime')is True and seed.get('host_linked')is True,'NVN seed is not a source-selection diagnostic')
     old_seed=read_json(build_destination(Path(prior['bundle'])/'manifest.json'))
@@ -46,6 +56,7 @@ def run_nvn_lanes(run,c,env,layout=False):
         'graphics_runtime','display_runtime','objects_runtime','events_runtime','refresh_runtime','display_objects',
         'display_refresh','nvn_runtime','nvn','game_frame_proven','romfs','native_handler_stop','application_stop_arguments')
     if layout:keys+=('nvn_layout_runtime',)
+    if resources:keys+=('nvn_resources_runtime','nvn_resources')
     for mode in('cmake','gcc'):
         folder=run.output/(label+'-'+mode);cache=folder/'native-cache'
         args=[sys.executable,'-B','tools/build_startup.py',ROOT/c['prepared'],'--output',folder,'--compiler',mode,
@@ -53,6 +64,7 @@ def run_nvn_lanes(run,c,env,layout=False):
             '--refresh','--nvn','--fast-functions','--execute','--entropy-file',entropy,'--native-cache',cache,'--romfs-index',romfs,
             '--expand-targets','64','--limit','1000000000','--quantum','10000']
         if layout:args+=['--nvn-layout']
+        if resources:args+=['--nvn-resources']
         for pc in prior['additional_entries']:args+=['--extra-entry',str(pc)]
         for pc in prior['application_entries']:args+=['--app-entry',str(pc)]
         run.command(label+'-experiment-'+mode,args,env)
@@ -74,19 +86,28 @@ def run_nvn_lanes(run,c,env,layout=False):
         full=execute(Path(last['executable']),full_dir,1000000000,10000,'full',entropy,False,romfs_index=romfs)
         (full_dir/'report.json').write_text(json.dumps(full,indent=2)+'\n')
         require(all(e.get(k)==full.get(k)for k in keys),'NVN full/compact or accelerated/single-step evidence differs')
-        old_folder=run.output/('refresh-'+mode);old=read_json(old_folder/'run.json')['iterations'][-1]
-        old_full=read_json(old_folder/'progress-full/report.json');old_bundle=read_json(Path(old['bundle'])/'manifest.json')
-        require(run.manifest['stages']['refresh-experiment-'+mode].get('verified')is True and
-            old_full['trace_sha256']==old['execution']['trace_sha256'],'NVN preceding full refresh lane is unverified')
-        proof=verify_nvn_progress_trace(Path(old_full['trace_file']),old_full,old_bundle,Path(full['trace_file']),full,bundle)
-        if layout:
-            from nvn_layout_progress import verify_nvn_layout_progress_trace
-            preceding=run.output/('nvn-'+mode);prior_run=read_json(preceding/'run.json')['iterations'][-1]
+        if resources:
+            from nvn_resources_progress import verify_nvn_resources_progress_trace
+            preceding=run.output/('nvn-layout-'+mode);prior_run=read_json(preceding/'run.json')['iterations'][-1]
             prior_full=read_json(preceding/'progress-full/report.json');prior_bundle=read_json(Path(prior_run['bundle'])/'manifest.json')
-            require(run.manifest['stages']['nvn-experiment-'+mode].get('verified')is True and
-                prior_full['trace_sha256']==prior_run['execution']['trace_sha256'],'NVN layout preceding full NVN lane is unverified')
-            proof['layout_progress']=verify_nvn_layout_progress_trace(Path(prior_full['trace_file']),prior_full,prior_bundle,
+            require(run.manifest['stages']['nvn-layout-experiment-'+mode].get('verified')is True and
+                prior_full['trace_sha256']==prior_run['execution']['trace_sha256'],'NVN resource preceding full layout lane is unverified')
+            proof=verify_nvn_resources_progress_trace(Path(prior_full['trace_file']),prior_full,prior_bundle,
                 Path(full['trace_file']),full,bundle)
+        else:
+            old_folder=run.output/('refresh-'+mode);old=read_json(old_folder/'run.json')['iterations'][-1]
+            old_full=read_json(old_folder/'progress-full/report.json');old_bundle=read_json(Path(old['bundle'])/'manifest.json')
+            require(run.manifest['stages']['refresh-experiment-'+mode].get('verified')is True and
+                old_full['trace_sha256']==old['execution']['trace_sha256'],'NVN preceding full refresh lane is unverified')
+            proof=verify_nvn_progress_trace(Path(old_full['trace_file']),old_full,old_bundle,Path(full['trace_file']),full,bundle)
+            if layout:
+                from nvn_layout_progress import verify_nvn_layout_progress_trace
+                preceding=run.output/('nvn-'+mode);prior_run=read_json(preceding/'run.json')['iterations'][-1]
+                prior_full=read_json(preceding/'progress-full/report.json');prior_bundle=read_json(Path(prior_run['bundle'])/'manifest.json')
+                require(run.manifest['stages']['nvn-experiment-'+mode].get('verified')is True and
+                    prior_full['trace_sha256']==prior_run['execution']['trace_sha256'],'NVN layout preceding full NVN lane is unverified')
+                proof['layout_progress']=verify_nvn_layout_progress_trace(Path(prior_full['trace_file']),prior_full,prior_bundle,
+                    Path(full['trace_file']),full,bundle)
         (full_dir/'nvn-progress.json').write_text(json.dumps(proof,indent=2)+'\n');run.publish_proof(folder,'progress-full',full_dir)
         experiments[mode]=e;proofs[mode]=proof
     require(all(experiments['cmake'].get(k)==experiments['gcc'].get(k)for k in keys),'NVN compiler prefix/state agreement failed')
