@@ -17,7 +17,9 @@ class ShaderDependencyTests(unittest.TestCase):
             with zipfile.ZipFile(archive,'w')as z:
                 for p,raw in files.items():z.writestr('pinned/'+p,raw)
                 z.writestr('pinned/renderer.cpp',b'do not import')
-            with patch.object(compiler,'ROOT',root),patch.object(compiler.urllib.request,'urlopen',side_effect=AssertionError('unexpected network')):
+            # Canonicalize both sides, including Windows runner short-name temp
+            # roots. An equivalent unresolved root must not defeat containment.
+            with patch.object(compiler,'ROOT',root/'unused'/'..'),patch.object(compiler.urllib.request,'urlopen',side_effect=AssertionError('unexpected network')):
                 result=compiler.fetch(destination,path);self.assertEqual(len(result['files']),2)
                 self.assertEqual((destination/'LICENSE').read_bytes(),files['LICENSE']);self.assertFalse((destination/'renderer.cpp').exists())
                 (destination/'compiler/header.h').write_bytes(b'tampered')

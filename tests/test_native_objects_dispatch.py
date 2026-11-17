@@ -11,11 +11,11 @@ from lifter_validation_types import State
 from object_cache import SharedCompiler
 ROOT=boot.ROOT
 
-def objects_package(events=False,refresh=False,nvn=False):
+def objects_package(events=False,refresh=False,nvn=False,layout=False):
     real_make=boot.make_boot;real_emit=boot.emit_startup;extra=[];declaration={};table_records=[]
     def make(raw,*args,**kwargs):
         sdk=raw.modules[2];main=raw.modules[1];base=sdk.base
-        declaration.update(version=1,flags=int(events)|(2 if refresh else 0)|(4 if nvn else 0),width=1920,height=1080,display=base+0x1500,display_size=64,
+        declaration.update(version=1,flags=int(events)|(2 if refresh else 0)|(4 if nvn else 0)|(8 if layout else 0),width=1920,height=1080,display=base+0x1500,display_size=64,
             layer=base+0x1600,layer_size=128,native_window=base+0x1618,
             vptr_address=[base+x for x in(0x1500,0x1600,0x1610,0x1618,0x1620)],
             vptr_value=[base+0x1410+n*24 for n in range(5)],anchor=base+0xe40,anchor_size=4,
@@ -49,6 +49,10 @@ def objects_package(events=False,refresh=False,nvn=False):
             for query in(0,1):
                 append(mov64(0,base+0x1a80));append(mov64(1,query));append(mov64(2,base+0x1b00));call(0xee0)
                 append(mov64(16,base+0x1b00));words.append(0xb940021a+query) # W26/W27: independent loaded ABI versions.
+            if layout:
+                for n,query in enumerate((15,16)):
+                    append(mov64(0,base+0x1a80));append(mov64(1,query));append(mov64(2,base+0x1b00));call(0xee0)
+                    append(mov64(16,base+0x1b00));words.append(0xb940021a+n)
             for at in(0xef0,0xf10):
                 append(mov64(0,base+0x1a80));append(mov64(1,1));call(at)
             append(mov64(0,base+0x1a80));call(0xf00);words.append(0xaa0003fc) # X28: origin.
@@ -109,8 +113,10 @@ class NativeObjectsDispatchTests(unittest.TestCase):
         self.check_dispatch(True,True)
     def test_nvn_lookup_indirect_call_owned_device_finalization_and_quanta(self):
         self.check_dispatch(True,True,True)
-    def check_dispatch(self,events,refresh=False,nvn=False):
-        blob,sources,_,declaration=objects_package(events,refresh,nvn)
+    def test_nvn_fixed_descriptor_layout_full_dispatch_and_quanta(self):
+        self.check_dispatch(True,True,True,True)
+    def check_dispatch(self,events,refresh=False,nvn=False,layout=False):
+        blob,sources,_,declaration=objects_package(events,refresh,nvn,layout)
         observer=boot.SNAPSHOT_SOURCE.replace('oot_startup_dispatch_create_application','oot_startup_dispatch_create_objects')
         observer=observer.replace('if(!context || !keys)goto done;',
             'if(!context || !keys)goto done;\n'
@@ -158,12 +164,12 @@ class NativeObjectsDispatchTests(unittest.TestCase):
         for quantum in(1,2,1000):
             history=(VectorState*1024)();count=c_uint();final=State();values=(c_uint64*22)()
             self.assertEqual(run(os.fsencode(path),quantum,1000,0,history,byref(count),byref(final)),1)
-            counts(values);self.assertEqual(tuple(values),((10 if events else 9)+(4 if refresh else 0)+(9 if nvn else 0),
-                (6 if events else 5)+(4 if refresh else 0)+(9 if nvn else 0),1,1,1,1,1,0,0,0,0,0,
+            counts(values);self.assertEqual(tuple(values),((10 if events else 9)+(4 if refresh else 0)+(9 if nvn else 0)+(2 if layout else 0),
+                (6 if events else 5)+(4 if refresh else 0)+(9 if nvn else 0)+(2 if layout else 0),1,1,1,1,1,0,0,0,0,0,
                 *([1,1,2,1,1,0]if events else[0]*6),*([2,2,3,1]if refresh else[0]*4)))
             if nvn:
                 self.assertEqual(final.x[24],1);self.assertEqual(final.x[25],declaration['display']-0x1500+0xec0)
-                self.assertEqual((final.x[26],final.x[27]),(231,40))
+                self.assertEqual((final.x[26],final.x[27]),(32,32)if layout else(231,40))
                 self.assertEqual((final.x[28],final.x[23]),(1,1))
             if events:self.assertEqual(final.x[20],0xfa01)
             self.assertEqual(final.x[17],declaration['native_window'])

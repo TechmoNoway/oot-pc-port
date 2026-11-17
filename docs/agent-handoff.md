@@ -2,6 +2,103 @@
 
 ## Active ordered implementation
 
+The previous NVN bootstrap is now committed/pushed on dev as
+`f3637bab5613087a46fb689f9ca3c81883ee9fd0`. Its 69-stage local run passed on
+both compilers. GitHub run 43945308783 failed one synthetic dependency test:
+an unresolved short-name Windows temp root differed from its resolved child.
+The current fetcher canonicalizes both containment roots, still rejects escaping
+paths and final symlinks, and the synthetic unresolved-root regression passes.
+Do not claim that earlier commit's CI passed; validate the fix with the next run.
+
+The newly validated checkpoint adds production host RGBA8/BGRA8 images/views and
+device-local memory, explicit checked staging transfers, private descriptor pools,
+nonreused image/pool identities and retained descriptor references. Both physical
+compiler probes complete 16 texture roundtrips plus 32 buffer copies. The private
+`--nvn-layout` source audit derives six fixed serialized ABI constants through
+both original integer helpers/case tables and retains eight exact original
+memory-pool builder functions. Object flags 15 are separate from unchanged 7.
+No guest pool/texture/shader/draw API has been enabled by these layout queries.
+
+`build/research/nvn-layout-pilot-v3-cmake/` reaches guarded
+`nvnMemoryPoolInitialize` at 326218 post-entry instructions, with 1472 lookups,
+one device initialization, eight integer queries and two mode updates. Its 3782
+bindings retain all unsupported resource consumers. The earlier v1 diagnostic
+failed before execution on the then-missing declaration flag; v2 reached the
+builder-default guard before original builders were retained. Keep those attempts.
+`build/research/nvn-layout-preflight-v2/` proves the complete preceding NVN hash,
+original property caller and all four builder setters in a full single-step trace,
+hash `c9543e23f95451f6e124cbdba95563aa09b2fe9089f8c8c8cbdb7702e1b67d5d`.
+The first preflight lacked a copied package and failed before diagnostic execution;
+the fresh v2 preserves that failure and copies the immutable package correctly.
+
+The full configuration is `config/milestones/nvn-textures.json`, with local inputs
+at `build/milestones/nvn-texture-v1/local-config-v1.json`. It must retain every
+preceding lane and add the fixed-layout source audit and both full compiler
+continuation proofs. Verify GitHub Windows Checks after pushing and before delivery.
+The 72-stage full run PASSED with every stage verified at
+`build/milestones/nvn-texture-v1/validation-v1/`, with log `validation-v1.log`.
+Its source fingerprint is
+`694ffe37d4d9cfb9772089e283aee5944befc8b1e8a292995bb047bffb7f0c24`.
+It passed 789 Python tests without skips, eight CTest groups and 283401 common
+native/reference comparisons per compiler. Both full layout traces match the
+preflight hash above and reach the same pool-init guard. Supplemental complete
+builder-body/return proofs are recorded separately in each layout lane. The
+first launch failed before creating a run because the new native directory had
+not been configured; `precondition-configure.log` preserves that error. A fresh
+MSVC x64 CMake configuration was completed before starting the recorded run.
+During the frozen run, sealed artifact sharing completed through
+`build/dedup_nvn_sealed_v3.py --apply`: 5089 more exact identical artifacts,
+approximately 10.77 GB reclaimed, active validation excluded and source unchanged.
+Receipt: `build/nvn-sealed-dedup-applied-v3.json`. Native link creation first failed
+under sandbox access; the successful authorized elevated retry is logged in
+`build/nvn-sealed-dedup-v3-elevated.log`. Observed free space was about 56.1 GB.
+Private next-pool research and a deferred diagnostic builder capture script are
+under `build/research/nvn-memory-pool-next/`; no new provider was enabled there.
+After native-evidence passed/verified, `capture_builder_v1.py` completed:
+`builder-capture-v1/capture-report.json` binds a 56-byte original builder capture
+to the unchanged full trace hash above. Observed flags are 0x22, storage/size are
+page aligned, size is 1191936 bytes, and the supported auxiliary bytes are zero.
+The actual values stay private; this diagnostic still stops before pool init.
+The separate private `build/research/renderer-next/texture_present.c` prototype
+passes eight synthetic texture-to-swapchain presents with exact readbacks on
+MSVC/GCC; see `build/texture-present-draft-cmake-v2.log` and
+`build/texture-present-draft-gcc-v1.log`. It uses the hidden parent surface,
+not the game's visible Layer, and is not part of the frozen full validation or
+production API. Preserve its source and `presentation-next-notes-v1.md`; real
+surface lifetime/recreation and game command integration remain required.
+Private shader asset/dictionary probes are under
+`build/research/nvn-memory-pool-next/shader-*-v1.json`. Seven indexed shader assets
+use original zstd dictionary ID 1 from the verified `Pack/ZsDic.pack.zs` bank;
+the independent bounded inspector reads assets in memory and imports no parser
+implementation. Actual source-hashed SceneMaterial BNSH VS/FS candidates translate
+under a declared offline environment at `build/research/scene-shader-tool-v1/`;
+no runtime cbuf/texture answers or draw-state capture were fabricated.
+IMPORTANT: the pinned backend emits SPIR-V capability 25 ImageGatherExtended
+unconditionally, but the production VkDevice enables no optional features.
+Do not bind those modules to that baseline device, or treat earlier EXIT-only
+driver/compute probes as feature-conformance evidence. See docs/shader-tool.md.
+`build/research/renderer-next/scene_shader_pipeline.c` plus the explicitly
+feature-aware private `research_graphics_gather.c` successfully create a graphics
+pipeline from these two candidates on MSVC/GCC; logs are
+`build/scene-shader-pipeline-{cmake,gcc}-v1.log`. This prototype queries/enables
+shaderImageGatherExtended before device creation, unlike production, submits no
+commands, changes no production source and proves no game frame/conformance.
+Preparation profiling is at `build/research/prepare-profile-v1/`; cProfile shows
+17 selection passes and 87 PLT scans, not native compilation, dominate preparation.
+The unexecuted profiling bundle's 318 generated C/package intermediates (372 MB)
+were pruned after timing; statistics/manifests and next-notes.md remain. Do not
+reuse that pruned profiling bundle as an executable, selection seed or baseline.
+Additional lossless compression of the closed 69-stage NVN run and completed
+layout diagnostics preserved hashes/sizes/mtimes on 1581 files and reclaimed
+6.416 GB. Receipt: `build/ntfs-closed-nvn-compression-v2.json`; the active texture
+run, original/prepared/transfer inputs and global object cache were excluded.
+Completed-test pruning after native-evidence removed 2956 regenerable compiler
+intermediates (59.8 MB), preserving DLLs/source/reports and all 29025 archived
+members; see `build/nvn-texture-test-prune-applied-v1.json`.
+The next renderer runtime work is guest-backed memory-pool ownership; the first
+genuine game frame is still incomplete. Preserve private renderer prototypes and
+all original/prepared/transfer inputs; continue controlling actual allocated space.
+
 The user selected independently implemented NVN/Vulkan ownership plus an
 external shader compiler tool. Both boot-to-NVN and the first genuine game frame
 remain the requested milestones. Current uncommitted work adds application-only

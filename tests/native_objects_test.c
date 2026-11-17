@@ -145,6 +145,21 @@ int main(int argc,char **argv)
     assert(!memcmp(&nr_before,&objects->nvn_report,sizeof(nr_before)));
     assert(oot_memory_store(memory,object_test_nvn.table,8,first_proc));
     uint64_t query_out=out+0x20;
+    const unsigned layout_values[]={32,32,256,256,4,8};
+    for(unsigned n=0;n<6;++n){
+        uint64_t old=read_value(memory,query_out,8);nr_before=objects->nvn_report;
+        object_call3(objects,OOT_NVN_DEVICE_GET_INTEGER,nvn_device,UINT64_C(0xff00000000)+15+n,query_out,
+            d->flags&OOT_OBJECT_NVN_LAYOUT?0:1);
+        assert(read_value(memory,query_out,8)==(d->flags&OOT_OBJECT_NVN_LAYOUT?((old&UINT64_C(0xffffffff00000000))|layout_values[n]):old));
+        if(!(d->flags&OOT_OBJECT_NVN_LAYOUT))assert(!memcmp(&nr_before,&objects->nvn_report,sizeof(nr_before)));
+        else{
+            nr_before=objects->nvn_report;old=read_value(memory,query_out,8);
+            object_call3(objects,OOT_NVN_DEVICE_GET_INTEGER,nvn_device,15+n,d->display,2);
+            object_call3(objects,OOT_NVN_DEVICE_GET_INTEGER,nvn_device,15+n,(UINT64_C(1)<<39)-2,2);
+            object_call3(objects,OOT_NVN_DEVICE_GET_INTEGER,0,15+n,query_out,1);
+            assert(!memcmp(&nr_before,&objects->nvn_report,sizeof(nr_before)) && read_value(memory,query_out,8)==old);
+        }
+    }
     for(unsigned query=0;query<2;++query){
         assert(oot_memory_store(memory,query_out,8,UINT64_C(0xaabbccdd12345678)));
         object_call3(objects,OOT_NVN_DEVICE_GET_INTEGER,nvn_device,UINT64_C(0xff00000000)+query,query_out,0);

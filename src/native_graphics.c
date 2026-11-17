@@ -16,6 +16,7 @@
 
 struct OotGraphics {
     uint32_t references;
+    DWORD owner_thread;
     HMODULE module;
     PFN_vkGetInstanceProcAddr get_instance;
     PFN_vkDestroyInstance destroy_instance;
@@ -85,8 +86,9 @@ int oot_graphics_acquire_vulkan(OotGraphics *g,OotGraphicsVulkan *out)
     OotGraphicsVulkan next={0};PFN_vkGetPhysicalDeviceProperties properties=NULL;
     PFN_vkGetPhysicalDeviceMemoryProperties memory=NULL;
     if(!g || !out || !disjoint(g,sizeof(*g),out,sizeof(*out)) || !live(g) ||
-       g->references==UINT32_MAX || (g->window && g->window_thread!=GetCurrentThreadId()) ||
+       g->references==UINT32_MAX || g->owner_thread!=GetCurrentThreadId() || (g->window && g->window_thread!=GetCurrentThreadId()) ||
        !PROC(g,vkGetDeviceProcAddr,next.get_device) || !PROC(g,vkGetPhysicalDeviceProperties,properties) ||
+       !PROC(g,vkGetPhysicalDeviceImageFormatProperties,next.image_format) ||
        !PROC(g,vkGetPhysicalDeviceMemoryProperties,memory))return 0;
     properties(g->physical,&next.properties);memory(g->physical,&next.memory);
     if(!next.memory.memoryTypeCount || next.memory.memoryTypeCount>VK_MAX_MEMORY_TYPES)return 0;
@@ -184,7 +186,7 @@ static int initialize_display(OotGraphics *g,const void *owner)
 OotGraphics *oot_graphics_create(void)
 {
     OotGraphics *g=calloc(1,sizeof(*g));
-    if(g){g->references=1;g->report.version=1;g->display_report.version=1;}return g;
+    if(g){g->references=1;g->owner_thread=GetCurrentThreadId();g->report.version=1;g->display_report.version=1;}return g;
 }
 void oot_graphics_destroy(OotGraphics *g)
 { if(g && !--g->references){release_resources(g);memset(g,0,sizeof(*g));free(g);} }

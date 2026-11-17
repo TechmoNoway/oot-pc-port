@@ -13,6 +13,7 @@ typedef struct OotGraphicsVulkan {
     VkQueue queue;
     uint32_t family;
     PFN_vkGetDeviceProcAddr get_device;
+    PFN_vkGetPhysicalDeviceImageFormatProperties image_format;
     VkPhysicalDeviceProperties properties;
     VkPhysicalDeviceMemoryProperties memory;
 } OotGraphicsVulkan;

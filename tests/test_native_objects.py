@@ -48,10 +48,12 @@ class NativeObjectsTests(unittest.TestCase):
         self.check_objects(True)
     def test_nvn_private_device_identity_lookup_faults_and_finalization(self):
         self.check_objects(True,True)
-    def check_objects(self,refresh,nvn=False):
+    def test_nvn_fixed_layout_queries_and_legacy_property_guard(self):
+        self.check_objects(True,True,True)
+    def check_objects(self,refresh,nvn=False,layout=False):
         parent=ROOT/'build/object-tests';parent.mkdir(parents=True,exist_ok=True)
         folder=Path(tempfile.mkdtemp(dir=parent));blob,declaration=synthetic_objects(nvn)
-        if refresh:declaration=declaration.replace('.flags=OOT_OBJECT_VSYNC,','.flags=OOT_OBJECT_VSYNC|OOT_OBJECT_REFRESH'+('|OOT_OBJECT_NVN'if nvn else'')+',')
+        if refresh:declaration=declaration.replace('.flags=OOT_OBJECT_VSYNC,','.flags=OOT_OBJECT_VSYNC|OOT_OBJECT_REFRESH'+('|OOT_OBJECT_NVN'if nvn else'')+('|OOT_OBJECT_NVN_LAYOUT'if layout else'')+',')
         image=folder/'synthetic.ootmem';image.write_bytes(blob)
         header=folder/'declaration.h';header.write_text(declaration)
         compiler=SharedCompiler(os.environ.get('OOT_LIFTER_COMPILER','cmake'),log=folder/'build.log')

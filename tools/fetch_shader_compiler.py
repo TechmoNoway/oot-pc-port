@@ -5,8 +5,11 @@ from input_formats import require
 ROOT=Path(__file__).resolve().parents[1]
 
 def fetch(destination,lock_path=ROOT/'config/dependencies/shader-compiler.json'):
-    destination=Path(destination).resolve()
-    require(destination.is_relative_to(ROOT/'toolchain')and not destination.is_symlink(),'shader dependency must stay under toolchain/')
+    root=ROOT.resolve();toolchain=(root/'toolchain').resolve();requested=Path(destination)
+    require(not requested.is_symlink(),'shader dependency destination must not be a symlink')
+    destination=requested.resolve()
+    require(toolchain.is_relative_to(root)and destination.is_relative_to(toolchain),
+        'shader dependency must stay under toolchain/')
     lock=json.loads(Path(lock_path).read_text());commit=lock['commit']
     require(lock['repository']in('https://github.com/t0masz407/Hookshot','https://github.com/KhronosGroup/SPIRV-Headers')and len(commit)==40 and
         all(c in'0123456789abcdef'for c in commit),'invalid pinned shader source')

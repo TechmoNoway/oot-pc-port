@@ -189,8 +189,10 @@ def application_evidence(report,bundle,baseline,stages,minimum_post_entry,expect
     require(bundle.get('package',{}).get('image_phase')=='host-offline-linked' and
         bundle['host_boot'].get('original_rtld_execution_allowed') is False,'application lost its separate linked boot provenance')
     if expected_word is None and expected_svc is None:
-        rows=[f for f in bundle.get('native_audit',{}).get('functions',[]) if expected_symbol in
-            f.get('nvn_procedures'if expected_native is not None else'names',[])]
+        audit=bundle.get('native_audit',{})
+        rows=[f for f in audit.get('functions',[]) if expected_symbol in
+            (f.get('nvn_procedures',[])if expected_native is not None else
+             f.get('names',[])+(f.get('nvn_procedures',[])if audit.get('nvn_runtime')is True else[]))]
         require(len(rows)==1 and rows[0]['handler_id']==(expected_native or 31)and int(e['pc'],16)==rows[0]['entry'] and
             e['word']==rows[0]['entry_word'],'application stopped at a different original export')
     policy=e.get('application_services',{})
@@ -873,6 +875,9 @@ def execute(config, output, native_only=False, resume=False):
         stages.insert(stages.index('comparison'),'nvn-audit')
         stages.insert(stages.index('comparison'),'renderer-foundation')
         for mode in ('cmake','gcc'):stages.insert(stages.index('summary'),'nvn-experiment-'+mode)
+    if not native_only and config.get('nvn_layout_experiment'):
+        stages.insert(stages.index('comparison'),'nvn-layout-audit')
+        for mode in ('cmake','gcc'):stages.insert(stages.index('summary'),'nvn-layout-experiment-'+mode)
     from milestone_checkpoint import execution_binding
     binding=execution_binding(ROOT,config,native_only)
     run = MilestoneRun(output, config["name"], stages,binding=binding,resume=resume)
@@ -1006,6 +1011,15 @@ def execute(config, output, native_only=False, resume=False):
                     report=extend_nvn_audit(linker,read_json(run.output/'refresh-audit.json'),pristine)
                     (run.output/'nvn-audit.json').write_text(json.dumps(report,indent=2)+'\n')
                 run.action('nvn-audit',nvn_source_audit)
+                if config.get('nvn_layout_experiment'):
+                    def nvn_layout_source_audit():
+                        from link_exefs import load_prepared
+                        from module_linker import Linker
+                        from nvn_layout_audit import extend_nvn_layout_audit
+                        linker=Linker(load_prepared(prepared));require(linker.apply()['link_complete'],'NVN layout offline link incomplete')
+                        report=extend_nvn_layout_audit(linker,read_json(run.output/'nvn-audit.json'))
+                        (run.output/'nvn-layout-audit.json').write_text(json.dumps(report,indent=2)+'\n')
+                    run.action('nvn-layout-audit',nvn_layout_source_audit)
                 run.command('renderer-foundation',py+['tools/probe_renderer_foundation.py','--tool',ROOT/config['renderer_shader_tool'],
                     '--identity',ROOT/config['renderer_shader_identity'],'--output',run.output/'renderer-foundation'],env)
                 renderer=read_json(run.output/'renderer-foundation/report.json')
@@ -1331,6 +1345,7 @@ def execute(config, output, native_only=False, resume=False):
             if config.get('nvn_experiment'):
                 from nvn_milestone import run_nvn_lanes
                 summary.update(run_nvn_lanes(run,config,env))
+                if config.get('nvn_layout_experiment'):summary.update(run_nvn_lanes(run,config,env,layout=True))
         def publish_summary():
             (run.output/"summary.json").write_text(json.dumps(summary, indent=2)+"\n", encoding="utf-8")
             lines = ["# Milestone validation", "", f"Milestone: {config['name']}", "", f"Python tests: {summary['python_tests']}; CTest groups: {summary['ctest_groups']}; native comparisons per compiler: {summary['native_trials_per_compiler']}."]

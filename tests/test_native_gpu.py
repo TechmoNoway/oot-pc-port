@@ -14,5 +14,6 @@ class NativeGpuTests(unittest.TestCase):
         result=owned_run([str(exe)],ROOT,os.environ.copy(),30)
         self.assertEqual(result.returncode,0,result.stdout+result.stderr)
         self.assertIn('GPU buffer transfers, barriers, fences and failure ownership passed',result.stdout)
+        self.assertIn('GPU textures and descriptor lifetime checks passed',result.stdout)
 
 if __name__=='__main__':unittest.main()

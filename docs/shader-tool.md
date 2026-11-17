@@ -40,3 +40,18 @@ structure only, not semantic validity or compatibility with an enabled Vulkan
 pipeline. Graphics runtime state, full descriptor binding, shader conformance,
 game shader capture and actual draw/compute/presentation integration remain
 required. A synthetic translated shader is not a rendered game frame.
+
+The pinned backend currently emits `ImageGatherExtended` even for trivial
+programs. Vulkan requires the corresponding `shaderImageGatherExtended` feature
+to be enabled before a module declares that capability. The production parent
+currently enables no optional device features, so its renderer must reject such
+modules until a separate supported feature declaration is queried and enabled.
+Physical support and a successful driver return alone are insufficient.
+See the [Vulkan feature requirements](https://docs.vulkan.org/spec/latest/chapters/features.html).
+
+Private research translated two source-hashed packaged SceneMaterial stage
+candidates under a declared offline environment, with no constant/texture query
+answers supplied. A separate prototype explicitly queried/enabled the required
+feature and created their graphics pipeline on both compilers. No draw commands
+were submitted. These results are not original draw-state capture, a production
+pipeline, shader conformance or a game frame.

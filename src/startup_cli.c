@@ -297,6 +297,7 @@ int oot_startup_cli(int argc, char **argv)
     if(program->flags&OOT_STARTUP_OBJECTS){
         OotObjectsReport objects={0};printf(",\"objects_runtime\":true");
         if(oot_startup_compiled_objects()->flags&OOT_OBJECT_VSYNC)printf(",\"events_runtime\":true");
+        if(oot_startup_compiled_objects()->flags&OOT_OBJECT_NVN_LAYOUT)printf(",\"nvn_layout_runtime\":true");
         if(oot_startup_compiled_objects()->flags&OOT_OBJECT_NVN){
             OotNvnReport nr={0};printf(",\"nvn_runtime\":true,\"game_frame_proven\":false");
             if(oot_startup_context_nvn_report(context,&nr))printf(",\"nvn\":{\"device_ready\":%s,\"device_identity\":%" PRIu64 ",\"lookups\":%" PRIu64 ",\"initializations\":%" PRIu64 ",\"finalizations\":%" PRIu64 ",\"integer_queries\":%" PRIu64

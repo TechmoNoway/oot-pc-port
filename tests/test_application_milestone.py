@@ -48,6 +48,20 @@ class ApplicationMilestoneTests(unittest.TestCase):
                        (None,1,1),(None,True,None),(None,None,True),(None,None,-1),(None,None,65536)):
             with self.subTest(values=values),self.assertRaises(InputError):application_endpoint(*values)
 
+    def test_nvn_procedure_guard_requires_explicit_table_domain_and_exact_body_entry(self):
+        report,bundle,old=evidence();e=report['iterations'][-1]['execution']
+        bundle['native_audit'].update(nvn_runtime=True,functions=[dict(nvn_procedures=['nvnMemoryPoolInitialize'],
+            names=[],entry=0x2000,entry_word=e['word'],handler_id=31)])
+        def check(b):return application_evidence(report,b,old,7,100,'nvnMemoryPoolInitialize')
+        check(bundle)
+        for change in('domain','entry','word','handler'):
+            bad=deepcopy(bundle)
+            if change=='domain':bad['native_audit']['nvn_runtime']=False
+            if change=='entry':bad['native_audit']['functions'][0]['entry']+=4
+            if change=='word':bad['native_audit']['functions'][0]['entry_word']^=1
+            if change=='handler':bad['native_audit']['functions'][0]['handler_id']=461
+            with self.subTest(change=change),self.assertRaises(InputError):check(bad)
+
     def test_svc_endpoint_requires_exact_original_word_source_and_no_native_guard(self):
         report,bundle,old=evidence();e=report['iterations'][-1]['execution']
         word=0xd4000001 | 0x1234 << 5

@@ -1,4 +1,5 @@
 #include "native_objects.h"
+#include "nvn_layout.h"
 #include "native_vblank.h"
 #include <bcrypt.h>
 #include <stdlib.h>
@@ -73,9 +74,10 @@ OotObjects *oot_objects_create(OotRuntimeImage *image,OotGuestMemory *memory,Oot
 {
     OotObjects *objects;
     if(!image || !memory || !memory->valid || !graphics || !d || d->version!=OOT_OBJECT_DECLARATION_VERSION ||
-       d->flags&~(OOT_OBJECT_VSYNC|OOT_OBJECT_REFRESH|OOT_OBJECT_NVN) ||
+       d->flags&~(OOT_OBJECT_VSYNC|OOT_OBJECT_REFRESH|OOT_OBJECT_NVN|OOT_OBJECT_NVN_LAYOUT) ||
        ((d->flags&OOT_OBJECT_REFRESH) && !(d->flags&OOT_OBJECT_VSYNC)) ||
        ((d->flags&OOT_OBJECT_NVN) && (d->flags&3)!=3) ||
+       ((d->flags&OOT_OBJECT_NVN_LAYOUT) && !(d->flags&OOT_OBJECT_NVN)) ||
        d->reserved || !d->width || d->width>3840 || !d->height || d->height>2160 ||
        !objects_span(d->display,d->display_size) || !objects_span(d->layer,d->layer_size) ||
        (d->display|d->layer)&7 || !objects_separate(d->display,d->display_size,d->layer,d->layer_size) ||
@@ -212,11 +214,15 @@ int oot_objects_call(OotObjects *objects,uint32_t id,OotArm64State *state)
             /* Exact original SDK ABI version queries. Hardware capability and
              * resource-limit queries require their own enabled Vulkan proof. */
             uint32_t query=(uint32_t)state->x[1];uint8_t bytes[4];
-            if(!nr.device || nr.device!=state->x[0] || (query>1 && query!=42 && query!=90))return 1;
+            uint32_t layout[]={OOT_NVN_TEXTURE_DESCRIPTOR_SIZE,OOT_NVN_SAMPLER_DESCRIPTOR_SIZE,
+                OOT_NVN_RESERVED_TEXTURE_DESCRIPTORS,OOT_NVN_RESERVED_SAMPLER_DESCRIPTORS,
+                OOT_NVN_COMMAND_ALIGNMENT,OOT_NVN_CONTROL_ALIGNMENT};
+            int fixed_layout=(objects->declaration.flags&OOT_OBJECT_NVN_LAYOUT) && query>=15 && query<=20;
+            if(!nr.device || nr.device!=state->x[0] || (query>1 && query!=42 && query!=90 && !fixed_layout))return 1;
             if(nr.integer_queries==UINT64_MAX || !objects_output(objects,state->x[2],4))return 2;
             /* Explicit negative ASTC/debug capabilities: no ASTC feature,
              * software decoder or NVN debug layer is enabled. */
-            objects_put32(bytes,query==0?231:query==1?40:0);
+            objects_put32(bytes,fixed_layout?layout[query-15]:query==0?231:query==1?40:0);
             if(!oot_memory_store_record(objects->memory,state->x[2],bytes,4))return 2;
             ++nr.integer_queries;
         } else if(id>=OOT_NVN_DEVICE_SET_ORIGIN && id<=OOT_NVN_DEVICE_GET_DEPTH){

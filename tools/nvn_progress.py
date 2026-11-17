@@ -8,8 +8,11 @@ def verify_nvn_progress_trace(old_trace,before,old_bundle,trace,execution,bundle
     verify_full_trace(old_trace,before);verify_full_trace(trace,execution)
     identities=module_identities(bundle);require(module_identities(old_bundle)==identities,'NVN source identities changed')
     audit=bundle.get('native_audit',{});domain=audit.get('nvn',{});loader=domain.get('loader',{})
+    if audit.get('display_objects',{}).get('declaration',{}).get('flags')==15:
+        require(audit.get('nvn_layout_runtime')is True and audit.get('nvn_layout',{}).get('resource_apis_implemented')is False,
+            'NVN fixed-layout profile lacks its separate audit')
     require(audit.get('nvn_runtime')is True and domain.get('consumer_closure')is True and
-        audit.get('display_objects',{}).get('declaration',{}).get('flags')==7 and
+        audit.get('display_objects',{}).get('declaration',{}).get('flags')in(7,15)and
         old_bundle.get('native_audit',{}).get('display_objects',{}).get('declaration',{}).get('flags')==3 and
         len(domain.get('procedures',[]))==735,'NVN audit/table/opt-in closure differs')
     old=[f for f in old_bundle['native_audit']['functions']if f['entry']==loader.get('entry')]

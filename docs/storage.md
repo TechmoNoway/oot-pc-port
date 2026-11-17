@@ -14,6 +14,17 @@ The second inventory measured approximately 59.12 GB of allocated distinct data
 (55.06 GiB), versus 244.14 GB of logical pathname sizes. This is a live-build
 snapshot; new validation output continues to consume space.
 
+A later pass over the sealed 69-stage NVN run shared another 5,089 verified
+identical artifacts, reclaiming approximately 10.77 GB. Its receipt is
+`nvn-sealed-dedup-applied-v3.json`; the active 72-stage texture run was excluded.
+Observed drive free space afterward was approximately 56.1 GB while tests ran.
+
+Another closed-artifact compression pass saved approximately 6.416 GB across
+1,581 files, with bytes, hashes and modification times preserved. Closed synthetic
+test intermediates reclaimed a further 59.8 MB. The active texture validation was
+excluded from both operations; these incremental savings are not a fresh total
+measurement of the checkout.
+
 Check free space before and after large validation runs, aiming to retain at
 least 30 GiB before starting another full run. Keep original/prepared game
 inputs, the teammate transfer, required baseline paths and useful compiler caches.
@@ -31,6 +42,9 @@ Private inventory and maintenance receipts live under ignored `build/`:
 - `storage-inventory-20261116-v1.json`: logical sizes and distinct NTFS file IDs.
 - `storage-inventory-20261116-v2.json`: post-maintenance allocated distinct bytes.
 - `nvn-sealed-dedup-applied-v2.json`: immutable byte-identical artifact sharing.
+- `nvn-sealed-dedup-applied-v3.json`: additional sealed NVN artifact sharing.
+- `ntfs-closed-nvn-compression-v2.json`: later verified closed-artifact compression.
+- `nvn-texture-test-prune-applied-v1.json`: closed synthetic-test intermediates.
 - `ntfs-compression-pilot-v1.json`: verified compression experiment.
 - `ntfs-closed-artifacts-compression-v1.json`: completed bulk compression receipt.
 - `nvn-storage-prune-v2.log`: completed-test intermediate pruning.

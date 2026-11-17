@@ -26,7 +26,9 @@ def probe(tool,identity,output):
         require(result.returncode==0,'physical GPU transfer probe failed');observation=json.loads(result.stdout)
         require(observation.get('status')=='passed'and observation.get('synthetic_data_only')is True and
             observation.get('game_frame_proven')is False and
-            (observation.get('copies'),observation.get('uploads'),observation.get('downloads'))==(32,16,16),
+            (observation.get('copies'),observation.get('uploads'),observation.get('downloads'))==(32,32,32)and
+            (observation.get('texture_uploads'),observation.get('texture_downloads'),observation.get('descriptor_updates'),
+             observation.get('live_textures'))==(16,16,4,0),
             'physical GPU transfer result differs')
         compilers[mode]=dict(executable_sha256=hashlib.sha256(exe.read_bytes()).hexdigest(),observation=observation)
     require(compilers['cmake']['observation']==compilers['gcc']['observation'],'physical GPU compiler observations differ')
